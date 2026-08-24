@@ -1,5 +1,11 @@
 import Phaser from 'phaser';
-import { BaseGameplayScene, DESIGN_HEIGHT, DESIGN_WIDTH } from '@ucgames/core';
+import {
+  BaseGameplayScene,
+  DESIGN_HEIGHT,
+  DESIGN_WIDTH,
+  centerPlayfield,
+  viewRect,
+} from '@ucgames/core';
 import { COLORS, TUNING } from '../config/tuning.ts';
 import { Field, WORLD_HEIGHT, WORLD_WIDTH } from '../sim/Field.ts';
 import type { Route } from '../sim/Route.ts';
@@ -20,7 +26,7 @@ import {
   dayIntroduction,
   evaluateDay,
 } from '../game/DayCycle.ts';
-import { deriveStats } from '../game/Upgrades.ts';
+import { deriveStats, hiveGrowth } from '../game/Upgrades.ts';
 import { modifiersFor, PROVISIONS } from '../game/Provisions.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import { computeOffline, formatAway } from '../game/Offline.ts';
@@ -95,6 +101,8 @@ export class GameScene extends BaseGameplayScene {
   private pressY = 0;
 
   private externallyPaused = false;
+  /** What the last day boundary actually banked, so `+15s` can undo exactly it. */
+  private lastBanked = 0;
 
   // --- first-run teaching ----------------------------------------------
   private hintGfx!: Phaser.GameObjects.Graphics;
@@ -111,6 +119,11 @@ export class GameScene extends BaseGameplayScene {
 
   protected build(): void {
     this.cameras.main.setBackgroundColor(COLORS.background);
+    // The canvas matches the device's shape, so it is usually wider (or taller)
+    // than the 1280x720 playfield. Scrolling the camera centres the playfield
+    // inside it, which means everything below stays authored against 1280x720
+    // and none of it has to know the canvas grew.
+    centerPlayfield(this);
 
     // Start from a fresh save so the field can be built immediately; the real
     // one is read a microtask later in bootstrap().
@@ -136,6 +149,7 @@ export class GameScene extends BaseGameplayScene {
     this.hud = new Hud(this, DEPTH.hud);
     this.sfx = new Sfx(this);
 
+    this.fieldRenderer.setViewRect(viewRect(this));
     this.hud.layout(this.safeArea);
     this.bindInput();
 
@@ -171,6 +185,10 @@ export class GameScene extends BaseGameplayScene {
   }
 
   protected override layout(): void {
+    // Re-centre first: a rotate changes the canvas shape, and the HUD anchors
+    // to the new edges rather than to the playfield's.
+    centerPlayfield(this);
+    this.fieldRenderer?.setViewRect(viewRect(this));
     this.hud?.layout(this.safeArea);
   }
 
@@ -196,6 +214,7 @@ export class GameScene extends BaseGameplayScene {
 
     this.field.setStats(deriveStats(this.save.levels));
     this.field.beginDay(this.day, features, patchCount, 1, modifiers);
+    this.fieldRenderer.setGrowth(hiveGrowth(this.save.levels));
 
     this.secondsLeft = dayLength(this.day) + extraSeconds + modifiers.extraDaySeconds;
     this.beeRenderer.resize(this.field.bees.length);
@@ -229,9 +248,15 @@ export class GameScene extends BaseGameplayScene {
     this.sfx.play('dayEnd', 0.45);
     this.cameras.main.flash(220, 60, 50, 30);
 
-    const result = evaluateDay(this.day, this.field.honey, this.save.bestDayHoney);
+    const result = evaluateDay(
+      this.day,
+      this.field.honey,
+      this.save.bestDayHoney,
+      deriveStats(this.save.levels).upkeep,
+    );
 
-    this.save.honey += Math.floor(result.honey);
+    this.save.honey += result.banked;
+    this.lastBanked = result.banked;
     this.save.bestDayHoney = Math.max(this.save.bestDayHoney, Math.floor(result.honey));
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     this.save.lastPlayedAt = Date.now();
@@ -275,8 +300,10 @@ export class GameScene extends BaseGameplayScene {
     this.scene.stop('Night');
     this.scene.resume();
 
-    // Roll back the day-end bookkeeping, since the day is continuing.
-    this.save.honey -= Math.floor(this.field.honey);
+    // Roll back the day-end bookkeeping, since the day is continuing. Banked,
+    // not gross: upkeep was already deducted, and subtracting the gross here
+    // would quietly charge the player the hive's bill twice.
+    this.save.honey -= this.lastBanked;
     this.save.day = this.day;
     this.persist();
 

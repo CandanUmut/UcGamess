@@ -1,16 +1,15 @@
 import Phaser from 'phaser';
+import { computeGameSize, DESIGN_HEIGHT, DESIGN_WIDTH } from './canvasSize.ts';
 
-/**
- * The design resolution every game is authored against.
- *
- * 1280x720 is 16:9, which is what portals embed. Authoring at a single fixed
- * size and letting the scale manager fit it means a scene laid out on a desktop
- * is automatically correct on a phone — no per-device layout code, and no
- * chance of UI drifting off-screen on an aspect ratio nobody tested.
- */
-export const DESIGN_WIDTH = 1280;
-export const DESIGN_HEIGHT = 720;
-export const DESIGN_ASPECT = DESIGN_WIDTH / DESIGN_HEIGHT;
+export {
+  DESIGN_WIDTH,
+  DESIGN_HEIGHT,
+  DESIGN_ASPECT,
+  MIN_CANVAS_ASPECT,
+  MAX_CANVAS_ASPECT,
+  computeGameSize,
+  type CanvasSize,
+} from './canvasSize.ts';
 
 export interface SafeAreaInsets {
   top: number;
@@ -91,25 +90,87 @@ export function safeAreaRect(scene: Phaser.Scene): Phaser.Geom.Rectangle {
 /**
  * The scale config every game uses.
  *
- * FIT + CENTER_BOTH letterboxes rather than cropping or stretching. That is the
- * deliberate choice: cropping hides UI on unusual aspect ratios and stretching
- * looks broken, and both are the kind of thing a portal reviewer rejects on
- * sight. Letterbox bars are boring and always correct.
+ * Still FIT + CENTER_BOTH — cropping hides UI and stretching looks broken, and
+ * both are the kind of thing a portal reviewer rejects on sight. The difference
+ * is that the game size now matches the device's shape, so FIT has almost
+ * nothing left to letterbox.
  */
 export function buildScaleConfig(
   parent: string | HTMLElement,
 ): Phaser.Types.Core.ScaleConfig {
+  const size = computeGameSize(window.innerWidth, window.innerHeight);
   return {
     parent,
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: DESIGN_WIDTH,
-    height: DESIGN_HEIGHT,
+    width: size.width,
+    height: size.height,
     // Rounding display size to whole pixels avoids sub-pixel text shimmer on
     // low-DPI screens and is cheaper on weak mobile GPUs.
     autoRound: true,
     expandParent: true,
   };
+}
+
+/**
+ * Keeps the canvas matched to the viewport across rotates and resizes.
+ *
+ * Phaser's ScaleManager re-fits the canvas on its own, but it cannot know the
+ * game size should change shape too — so without this, rotating a phone or
+ * Safari hiding its toolbar reintroduces exactly the bars this removes.
+ *
+ * The guard is load-bearing: `setGameSize` emits RESIZE, so reacting to RESIZE
+ * by calling it again recurses until the stack gives out.
+ */
+export function trackViewportSize(game: Phaser.Game): void {
+  let applying = false;
+
+  const apply = (): void => {
+    if (applying) return;
+    const next = computeGameSize(window.innerWidth, window.innerHeight);
+    const current = game.scale.gameSize;
+    if (current.width === next.width && current.height === next.height) return;
+
+    applying = true;
+    try {
+      game.scale.setGameSize(next.width, next.height);
+    } finally {
+      applying = false;
+    }
+  };
+
+  game.scale.on(Phaser.Scale.Events.RESIZE, apply);
+  window.addEventListener('orientationchange', apply);
+  apply();
+}
+
+/**
+ * The part of design space actually on screen, in design units.
+ *
+ * The playfield is `0,0 -> DESIGN_WIDTH,DESIGN_HEIGHT`; this rectangle is at
+ * least that and usually larger, extending symmetrically outside it. Use it to
+ * cover the whole canvas — a full-screen backdrop sized to the playfield leaves
+ * the extra area unpainted.
+ */
+export function viewRect(scene: Phaser.Scene): Phaser.Geom.Rectangle {
+  const { width, height } = scene.scale.gameSize;
+  return new Phaser.Geom.Rectangle(
+    (DESIGN_WIDTH - width) / 2,
+    (DESIGN_HEIGHT - height) / 2,
+    width,
+    height,
+  );
+}
+
+/**
+ * Centres the fixed playfield inside a canvas that may be larger than it.
+ *
+ * Scrolling the camera rather than moving every object means scenes stay
+ * authored against 1280x720 and nothing else has to know the canvas grew.
+ */
+export function centerPlayfield(scene: Phaser.Scene): void {
+  const { width, height } = scene.scale.gameSize;
+  scene.cameras.main.setScroll((DESIGN_WIDTH - width) / 2, (DESIGN_HEIGHT - height) / 2);
 }
 
 /**

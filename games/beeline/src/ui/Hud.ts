@@ -59,6 +59,13 @@ export class Hud {
 
   constructor(scene: Phaser.Scene, depth: number) {
     this.root = scene.add.container(0, 0).setDepth(depth);
+    // Pinned to the camera, not to the world. The playfield is a fixed
+    // 1280x720 centred in a canvas that matches the device, so a HUD living in
+    // world space would sit inside the playfield's edges and leave the real
+    // screen edges empty — which is the letterboxing this was meant to remove,
+    // just repainted. At scroll factor zero, `layout` positions everything in
+    // canvas coordinates and the HUD reaches the actual corners of the display.
+    this.root.setScrollFactor(0);
 
     this.dayText = scene.add
       .text(0, 0, 'Day 1', { fontFamily: FONT, fontSize: '26px', color: COLORS.text })

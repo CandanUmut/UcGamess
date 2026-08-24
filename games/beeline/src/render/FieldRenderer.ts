@@ -3,6 +3,10 @@ import { COLORS, TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
 import type { Patch } from '../sim/Patch.ts';
 import type { Bramble } from '../sim/Bramble.ts';
+import {
+  WORLD_HEIGHT as PLAYFIELD_HEIGHT,
+  WORLD_WIDTH as PLAYFIELD_WIDTH,
+} from '../sim/Field.ts';
 import { TEX } from './textures.ts';
 
 const PATCH_TINT: Record<string, number> = {
@@ -24,6 +28,16 @@ export class FieldRenderer {
    * ends at a thicket reads as stopped by it.
    */
   private readonly brambleGfx: Phaser.GameObjects.Graphics;
+  /**
+   * The area outside the 1280x720 playfield, on devices whose canvas is a
+   * different shape.
+   *
+   * Painted a shade off the field with a hairline at the boundary, so the edge
+   * of the board is legible rather than the field appearing to run off into
+   * darkness. Without it the extra space reads as more unexplored ground, which
+   * is exactly the wrong signal on a game about exploring.
+   */
+  private readonly surroundGfx: Phaser.GameObjects.Graphics;
   private readonly scene: Phaser.Scene;
   private readonly depth: number;
   /** One label per patch, reused. Pollen left is a number worth reading now. */
@@ -40,6 +54,55 @@ export class FieldRenderer {
       .setScale(1.6);
     this.waspGfx = scene.add.graphics().setDepth(depth + 3);
     this.brambleGfx = scene.add.graphics().setDepth(depth + 4);
+    this.surroundGfx = scene.add.graphics().setDepth(depth + 60);
+  }
+
+  /**
+   * Paints the surround for a canvas larger than the playfield.
+   *
+   * Redrawn only on layout rather than per frame — the canvas shape changes on
+   * a rotate and at no other time.
+   */
+  setViewRect(view: Phaser.Geom.Rectangle): void {
+    const g = this.surroundGfx;
+    g.clear();
+
+    const left = view.x;
+    const top = view.y;
+    const right = view.right;
+    const bottom = view.bottom;
+
+    // Four bands around the playfield. Drawn as bands rather than as one big
+    // rectangle with a hole because Graphics has no even-odd fill, and a mask
+    // would cost a render texture for something this simple.
+    g.fillStyle(0x000000, 0.55);
+    if (left < 0) g.fillRect(left, top, -left, bottom - top);
+    if (right > PLAYFIELD_WIDTH) {
+      g.fillRect(PLAYFIELD_WIDTH, top, right - PLAYFIELD_WIDTH, bottom - top);
+    }
+    if (top < 0) g.fillRect(0, top, PLAYFIELD_WIDTH, -top);
+    if (bottom > PLAYFIELD_HEIGHT) {
+      g.fillRect(0, PLAYFIELD_HEIGHT, PLAYFIELD_WIDTH, bottom - PLAYFIELD_HEIGHT);
+    }
+
+    if (left < 0 || top < 0 || right > PLAYFIELD_WIDTH || bottom > PLAYFIELD_HEIGHT) {
+      g.lineStyle(2, COLORS.hive, 0.16);
+      g.strokeRect(0, 0, PLAYFIELD_WIDTH, PLAYFIELD_HEIGHT);
+    }
+  }
+
+  /**
+   * How grown the hive looks, 0..1.
+   *
+   * Set from the player's total investment. The hive is the thing the whole run
+   * is about and it never changed appearance no matter how much was poured into
+   * it, so there was nothing on screen that said "this is bigger than it was" —
+   * which is most of what "growing a hive" means to a player.
+   */
+  private growth = 0;
+
+  setGrowth(value: number): void {
+    this.growth = Math.min(1, Math.max(0, value));
   }
 
   draw(field: Field, alpha: number, drawingFromHive: boolean): void {
@@ -59,7 +122,17 @@ export class FieldRenderer {
     g.strokeCircle(field.hiveX, field.hiveY, TUNING.hive.drawRadius);
 
     const pulse = 1 + Math.sin(field.time * 2) * 0.04;
-    this.hiveGlow.setScale(1.6 * pulse);
+    this.hiveGlow.setScale(1.6 * pulse * (1 + this.growth * 0.55));
+
+    // Comb rings, one per band of investment. A hive that has had everything
+    // spent on it is visibly a different object from the one the run started
+    // with, without needing a single new asset.
+    const rings = Math.floor(this.growth * 4 + 0.001);
+    for (let i = 1; i <= rings; i += 1) {
+      const radius = 26 + i * 13;
+      g.lineStyle(2, COLORS.hive, 0.5 - i * 0.07);
+      g.strokeCircle(field.hiveX, field.hiveY, radius);
+    }
 
     this.drawWasps(field, alpha);
   }
@@ -236,6 +309,7 @@ export class FieldRenderer {
     this.hiveGlow.destroy();
     this.waspGfx.destroy();
     this.brambleGfx.destroy();
+    this.surroundGfx.destroy();
     for (const label of this.labels) label.destroy();
     this.labels = [];
   }

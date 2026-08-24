@@ -62,10 +62,16 @@ export function coerceSave(raw: unknown): BeelineSave {
   const storedLevels = data.levels;
   if (typeof storedLevels === 'object' && storedLevels !== null) {
     const source = storedLevels as Record<string, unknown>;
+
+    // Comb first, and on its own: it raises every other cap, so clamping the
+    // others against a comb level we have not read yet would silently demote a
+    // legitimately-bought level back down on load.
+    levels.comb = clampInt(source['comb'], 0, maxLevel('comb'));
     for (const id of UPGRADE_ORDER) {
+      if (id === 'comb') continue;
       // Clamp rather than trust: a level above the cap would index past the
       // cost table and produce NaN prices.
-      levels[id] = clampInt(source[id], 0, maxLevel(id));
+      levels[id] = clampInt(source[id], 0, maxLevel(id, levels.comb));
     }
   }
 
