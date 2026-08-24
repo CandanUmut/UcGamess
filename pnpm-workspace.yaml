@@ -1,0 +1,30 @@
+packages:
+  - 'packages/*'
+  - 'games/*'
+
+# Single source of truth for dependency versions across the whole monorepo.
+# Packages reference these with "catalog:" instead of a literal version, so a
+# bump happens in exactly one place. Every version here was verified against
+# the npm registry on 2026-08-23.
+catalog:
+  phaser: 4.2.1
+  typescript: 6.0.3
+  vite: 8.2.2
+  vitest: 4.1.11
+  terser: 5.50.0
+  eslint: 10.9.0
+  '@eslint/js': 10.0.1
+  typescript-eslint: 8.67.0
+  prettier: 3.9.6
+  eslint-config-prettier: 10.1.8
+  globals: 17.11.0
+  '@playwright/test': 1.62.1
+  'rollup-plugin-visualizer': 7.1.1
+  '@commitlint/cli': 21.2.2
+  '@commitlint/config-conventional': 21.2.2
+  husky: 9.1.7
+
+# pnpm 10+ blocks postinstall scripts unless a package is allowlisted here.
+# Keep this list as short as possible and justify every entry.
+onlyBuiltDependencies:
+  - esbuild

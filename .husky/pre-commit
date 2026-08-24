@@ -1,0 +1,4 @@
+# Lint the whole repo. It takes a few seconds and is never wrong about which
+# files changed, which a staged-file filter frequently is. If this ever gets
+# slow enough to be annoying, drop it — CI runs the same check.
+pnpm exec eslint .

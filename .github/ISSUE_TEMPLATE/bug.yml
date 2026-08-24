@@ -1,0 +1,79 @@
+name: Bug
+description: Something is broken
+title: '[bug] '
+labels: ['bug']
+body:
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Which game, or "tooling" / "core" / "portal"
+      placeholder: game-template
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what should happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      description: |
+        Safari and mobile browsers differ from Chrome on WebGL context loss,
+        audio autoplay and touch events. Which one matters.
+      options:
+        - Chrome (desktop)
+        - Safari (desktop)
+        - Firefox (desktop)
+        - Safari (iOS)
+        - Chrome (Android)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device and refresh rate
+      description: |
+        Refresh rate matters — games that break at 120/144 Hz are a known
+        rejection cause, so a high-refresh display is a meaningful detail.
+      placeholder: 'MacBook Pro M2, 120 Hz'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: portal
+    attributes:
+      label: Which build
+      options:
+        - local (pnpm dev)
+        - preview build (GitHub Pages)
+        - crazygames
+        - poki
+        - gamedistribution
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Paste any errors. Portals reject on console errors, so these are never noise.
+      render: shell

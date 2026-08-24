@@ -1,0 +1,25 @@
+{
+  "name": "@ucgames/devtools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Build-time quality gates: size budget, asset license validation, build reporting.",
+  "exports": {
+    "./size-budget": "./src/size-budget.ts",
+    "./check-licenses": "./src/check-licenses.ts"
+  },
+  "bin": {
+    "ucgames-size-budget": "./src/size-budget.ts",
+    "ucgames-check-licenses": "./src/check-licenses.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@ucgames/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

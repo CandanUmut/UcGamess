@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+.vite/
+
+# Build reports
+stats.html
+size-report.json
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets — never commit portal keys. See docs/workflow.md for the
+# GitHub Actions secret names to use instead.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Private business material. This repo is public so GitHub Pages can serve
+# playtest builds, which means anything committed here is indexable forever —
+# git history keeps it even after a delete. The market research document
+# contains personal tax position, payment routing and income projections, so it
+# stays on local disk only. See docs/reference/README.md.
+UcGames_document.md
+/preview-site/

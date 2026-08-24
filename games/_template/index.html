@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      viewport-fit=cover is what makes env(safe-area-inset-*) report real
+      values, which packages/core's safe-area helper depends on. Without it,
+      HUD elements land under the notch on iPhones.
+      user-scalable=no stops a double-tap in a fast game from zooming the page.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#101018" />
+    <title>UC Games Template</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #101018;
+        /* Kills the grey tap-highlight flash on mobile Safari and Chrome. */
+        -webkit-tap-highlight-color: transparent;
+        /* Stops pull-to-refresh and rubber-banding from fighting the game. */
+        overscroll-behavior: none;
+        touch-action: none;
+        font-family:
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+      }
+
+      #game {
+        width: 100%;
+        height: 100%;
+      }
+
+      #game canvas {
+        display: block;
+      }
+
+      /*
+        Shown before Phaser boots. A blank screen during load reads as a broken
+        game to a portal reviewer — this guarantees something is on screen from
+        the very first paint, before any JavaScript has run.
+      */
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #8a8aa0;
+        font-size: 16px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      #boot.hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="boot">Loading</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

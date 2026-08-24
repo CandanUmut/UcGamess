@@ -1,0 +1,34 @@
+{
+  "name": "@ucgames/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared TypeScript, ESLint, Prettier and Vite configuration for every UC Games package and game.",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.game.json": "./tsconfig.game.json",
+    "./eslint": "./eslint.config.js",
+    "./prettier": "./prettier.config.js",
+    "./vite": "./src/vite.base.ts",
+    "./plugins/compression": "./src/plugins/compression.ts"
+  },
+  "files": [
+    "src",
+    "eslint.config.js",
+    "prettier.config.js",
+    "tsconfig.base.json",
+    "tsconfig.game.json"
+  ],
+  "dependencies": {
+    "@eslint/js": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "globals": "catalog:",
+    "rollup-plugin-visualizer": "catalog:",
+    "terser": "catalog:",
+    "typescript-eslint": "catalog:"
+  },
+  "peerDependencies": {
+    "eslint": "catalog:",
+    "vite": "catalog:"
+  }
+}

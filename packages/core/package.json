@@ -1,0 +1,29 @@
+{
+  "name": "@ucgames/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared game runtime: fixed-timestep loop, responsive scaler, input, audio, save, scene bases, metrics.",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ucgames/portal": "workspace:*"
+  },
+  "peerDependencies": {
+    "phaser": "catalog:"
+  },
+  "devDependencies": {
+    "@ucgames/config": "workspace:*",
+    "phaser": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

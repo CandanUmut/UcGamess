@@ -1,0 +1,82 @@
+name: Game idea
+description: Propose a game concept
+title: '[idea] '
+labels: ['game-idea']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: we ship roughly one game per quarter at 10 hours a week.
+        An idea competes against the roadmap, it does not add to it.
+
+        Read `docs/design-rules.md` first — most ideas fail on the one-mechanic
+        rule or the "playable in 5 seconds" rule, and it is cheaper to find that
+        out now.
+
+  - type: textarea
+    id: mechanic
+    attributes:
+      label: The one core mechanic
+      description: One sentence. If it takes two, the scope is already too big.
+      placeholder: 'Fling a ball at a stack of blocks and knock the crown off the top.'
+    validations:
+      required: true
+
+  - type: textarea
+    id: hook
+    attributes:
+      label: First 30 seconds
+      description: What teaches the player, without a tutorial wall? What makes them want a second round?
+    validations:
+      required: true
+
+  - type: textarea
+    id: original
+    attributes:
+      label: Why this is not a clone
+      description: |
+        Both CrazyGames and Poki reject clones, reskins and asset flips outright.
+        Taking a mechanic and adding an original twist is fine; shipping something
+        confusable with an existing game by name or iconography is not.
+        Name the closest existing game and say what is genuinely different.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: genre
+    attributes:
+      label: Genre
+      options:
+        - Physics / skill
+        - Puzzle / merge
+        - Idle / incremental
+        - Runner / arcade
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: estimate
+    attributes:
+      label: Rough build estimate (hours)
+      placeholder: '120-180'
+    validations:
+      required: true
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: How it clears the portal thresholds
+      description: |
+        Average session over 3 minutes, at least 25% of sessions over 3 minutes,
+        conversion-to-play above 70%. What about this design produces those?
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Biggest risk
+      description: What is most likely to make this fail, and how would we find out early?
+    validations:
+      required: true

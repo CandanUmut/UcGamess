@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keeps pnpm's store outside the workspace so actions/cache can hold it.
+  PNPM_HOME: ~/.pnpm
+
+jobs:
+  quality:
+    name: Typecheck, lint, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Unit tests
+        run: pnpm test
+
+  build:
+    name: Build (${{ matrix.portal }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every portal we can actually ship to gets built on every PR. A build
+        # that only breaks under PORTAL=poki is exactly the kind of thing that
+        # otherwise gets discovered the week of submission.
+        portal: [local, crazygames, poki]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build all games
+        run: node scripts/build.ts --portal ${{ matrix.portal }}
+
+      # The size budget runs inside each game's build script and exits non-zero
+      # over 8 MB, so this job already fails on an oversized bundle. This step
+      # surfaces the number in the log for every portal.
+      - name: Size report
+        run: |
+          for dir in games/*/dist; do
+            [ -d "$dir" ] || continue
+            echo "::group::${dir}"
+            node packages/devtools/src/size-budget.ts --dir "$dir"
+            echo "::endgroup::"
+          done
+
+      - name: Upload builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: builds-${{ matrix.portal }}
+          path: games/*/dist
+          retention-days: 14
+
+  licenses:
+    name: Asset licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check every shipped asset has a license entry
+        run: pnpm check-licenses
+
+  smoke:
+    name: Browser smoke test
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Chromium plus WebKit: Safari breaks on WebGL context, audio autoplay
+      # and touch handling differently from Chrome, and that difference is a
+      # documented portal rejection cause. This is the only place we test it.
+      - name: Install browsers
+        run: pnpm exec playwright install --with-deps chromium webkit
+
+      - name: Build game under test
+        run: pnpm --filter @ucgames/game-template build
+
+      - name: Smoke test
+        run: pnpm exec playwright test
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14

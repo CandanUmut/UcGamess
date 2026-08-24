@@ -1,0 +1,22 @@
+{
+  "name": "@ucgames/portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The one place in the repo allowed to touch a portal SDK. Games code against PortalAdapter and never import an SDK directly.",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@ucgames/config": "workspace:*",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

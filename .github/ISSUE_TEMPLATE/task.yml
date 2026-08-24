@@ -1,0 +1,62 @@
+name: Task
+description: A unit of work — for a human or an AI agent
+title: '[task] '
+labels: ['task']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tasks are picked up by two humans and several AI agents working in
+        parallel. Write it so someone with no context can start: an agent that
+        has to guess at scope produces work that has to be thrown away.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What is true when this is done? Describe the end state, not the steps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Where the code goes
+      description: |
+        Which package or game. Remember the boundaries: portal SDKs only inside
+        `packages/portal`; shared runtime in `packages/core`; anything a single
+        game needs stays in that game.
+      placeholder: 'packages/core/src/audio — new method on AudioManager'
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      value: |
+        - [ ] Implemented
+        - [ ] Unit test or smoke test covers it
+        - [ ] CI green
+        - [ ] Tested in Safari and on a real phone (if player-facing)
+    validations:
+      required: true
+
+  - type: textarea
+    id: outofscope
+    attributes:
+      label: Explicitly out of scope
+      description: |
+        The most useful field on this form. Scope creep is the main way a
+        10-hour week disappears.
+
+  - type: dropdown
+    id: assignee_kind
+    attributes:
+      label: Suited to
+      options:
+        - Either human or agent
+        - Human only (needs judgement, playtesting, or a device)
+        - Agent-friendly (well-specified, verifiable by tests)
+    validations:
+      required: true

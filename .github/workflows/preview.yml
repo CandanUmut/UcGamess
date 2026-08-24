@@ -1,0 +1,63 @@
+name: Preview
+
+# Publishes a playable build of every game to GitHub Pages so a teammate or a
+# playtester can open a link instead of cloning the repo. This is the loop that
+# makes remote playtesting cheap — and playtest feedback is the only reliable
+# signal on whether a mechanic is fun before a portal measures it for us.
+#
+# Uses the local (development) portal adapter deliberately: preview builds
+# simulate ads rather than requesting real ones, so playtesting never pollutes a
+# portal's metrics or serves an ad outside their player experience.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build preview site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build every game
+        run: node scripts/build.ts --portal local
+
+      - name: Assemble site
+        run: node scripts/assemble-preview.ts
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: preview-site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

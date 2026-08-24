@@ -1,0 +1,17 @@
+/** @type {import("prettier").Config} */
+export default {
+  semi: true,
+  singleQuote: true,
+  trailingComma: 'all',
+  printWidth: 90,
+  tabWidth: 2,
+  useTabs: false,
+  arrowParens: 'always',
+  endOfLine: 'lf',
+  overrides: [
+    {
+      files: ['*.md'],
+      options: { proseWrap: 'preserve' },
+    },
+  ],
+};

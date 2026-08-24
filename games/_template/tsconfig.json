@@ -1,0 +1,4 @@
+{
+  "extends": "@ucgames/config/tsconfig.game.json",
+  "include": ["src/**/*.ts", "vite.config.ts", "../../types/globals.d.ts"]
+}
