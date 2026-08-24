@@ -278,12 +278,46 @@ describe('paths mature', () => {
 
   it('retreats more slowly the more it has been worked', () => {
     const fresh = workedRoute(0);
-    const beaten = workedRoute(500);
-    expect(beaten.decaySpeed).toBeLessThan(fresh.decaySpeed);
-    expect(beaten.decaySpeed / fresh.decaySpeed).toBeCloseTo(
-      1 - TUNING.route.strengthDecayResist,
+    // Just under the standing threshold, where decay is slowed but not stopped.
+    const worn = new Route([0, 0, 400, 0], 12);
+    worn.strength = TUNING.route.standingStrength - 0.05;
+
+    expect(worn.decaySpeed).toBeLessThan(fresh.decaySpeed);
+    expect(worn.decaySpeed / fresh.decaySpeed).toBeCloseTo(
+      1 - worn.strength * TUNING.route.strengthDecayResist,
       5,
     );
+  });
+
+  it('stops retreating altogether once it stands', () => {
+    // The payoff the strength dial was pointing at: a road the swarm has truly
+    // committed to no longer needs the player's hands, which is what frees them
+    // to spend the rest of the day on the frontier.
+    const standing = workedRoute(500);
+    expect(standing.isStanding).toBe(true);
+    expect(standing.decaySpeed).toBe(0);
+
+    const before = standing.liveLength;
+    standing.holdRemaining = 0;
+    for (let i = 0; i < 60 * 30; i += 1) {
+      standing.reinforce();
+      standing.step(1 / 60);
+    }
+    expect(standing.liveLength).toBe(before);
+  });
+
+  it('starts retreating again the moment the traffic stops', () => {
+    // Standing is not immunity. Strength still decays without deliveries, so a
+    // road left behind for a flower that ran dry drops back under the threshold
+    // and dies like anything else — no timer, no separate state machine.
+    const abandoned = workedRoute(500);
+    abandoned.holdRemaining = 0;
+    expect(abandoned.isStanding).toBe(true);
+
+    for (let i = 0; i < 60 * 20; i += 1) abandoned.step(1 / 60);
+
+    expect(abandoned.isStanding).toBe(false);
+    expect(abandoned.liveLength).toBeLessThan(400);
   });
 
   it('carries bees faster and takes less of the wind', () => {

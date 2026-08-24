@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { BaseScene, DESIGN_HEIGHT, DESIGN_WIDTH } from '@ucgames/core';
+import { BaseScene, DESIGN_WIDTH, centerPlayfield, viewRect } from '@ucgames/core';
 import { COLORS, TUNING } from '../config/tuning.ts';
 import {
   dayQuota,
@@ -83,15 +83,17 @@ export class NightScene extends BaseScene {
   protected build(): void {
     const { result, save } = this.nightData;
 
+    // Same trick as the gameplay scene: centre the 1280x720 layout inside a
+    // canvas that matches the device, so every position below stays authored
+    // against the design size.
+    centerPlayfield(this);
+
+    // The backdrop covers the *canvas*, not the playfield. Sized to the design
+    // rect it would leave the extra area unpainted and the paused board would
+    // show through around the edges of the night screen.
+    const view = viewRect(this);
     this.add
-      .rectangle(
-        DESIGN_WIDTH / 2,
-        DESIGN_HEIGHT / 2,
-        DESIGN_WIDTH,
-        DESIGN_HEIGHT,
-        0x08070a,
-        0.93,
-      )
+      .rectangle(view.centerX, view.centerY, view.width, view.height, 0x08070a, 0.93)
       .setOrigin(0.5);
 
     const met = result.outcome === 'met';
@@ -144,12 +146,31 @@ export class NightScene extends BaseScene {
         .setOrigin(0.5);
     }
 
+    // The hive's bill, shown as a line item rather than folded silently into
+    // the total. A cost the player cannot see is a cost they cannot manage, and
+    // managing it is the entire point of it existing.
+    if (result.upkeep > 0) {
+      this.add
+        .text(
+          DESIGN_WIDTH / 2,
+          158,
+          `${Math.floor(result.honey)} gathered  −  ${result.upkeep} to keep the hive  =  ${result.banked}`,
+          { fontFamily: FONT, fontSize: '18px', color: '#ffb454' },
+        )
+        .setOrigin(0.5);
+    }
+
     this.honeyText = this.add
-      .text(DESIGN_WIDTH / 2, 168, `${Math.floor(save.honey)} honey to spend`, {
-        fontFamily: FONT,
-        fontSize: '25px',
-        color: COLORS.text,
-      })
+      .text(
+        DESIGN_WIDTH / 2,
+        result.upkeep > 0 ? 186 : 174,
+        `${Math.floor(save.honey)} honey to spend`,
+        {
+          fontFamily: FONT,
+          fontSize: '25px',
+          color: COLORS.text,
+        },
+      )
       .setOrigin(0.5);
 
     this.buildUpgrades();
@@ -169,7 +190,7 @@ export class NightScene extends BaseScene {
       const column = index % columns;
       const row = Math.floor(index / columns);
       const x = startX + column * (cardWidth + gapX);
-      const y = 246 + row * (74 + gapY);
+      const y = 264 + row * (74 + gapY);
 
       this.upgradeButtons.push(
         new Button(this, {
@@ -178,7 +199,7 @@ export class NightScene extends BaseScene {
           width: cardWidth,
           label: UPGRADES[id].name,
           sublabel: this.upgradeSublabel(id),
-          tint: id === 'routePersistence' ? 0xffd966 : 0x60a5fa,
+          tint: cardTint(id),
           enabled: this.canAfford(id),
           onClick: () => this.buy(id),
         }),
@@ -186,7 +207,7 @@ export class NightScene extends BaseScene {
     });
 
     this.add
-      .text(DESIGN_WIDTH / 2, 194, 'Permanent — spend honey', {
+      .text(DESIGN_WIDTH / 2, 214, 'The hive — cheaper to keep, and room to grow', {
         fontFamily: FONT,
         fontSize: '17px',
         color: COLORS.dim,
@@ -212,7 +233,7 @@ export class NightScene extends BaseScene {
     const parts = forecastFor(day);
 
     this.add
-      .text(DESIGN_WIDTH / 2, 404, `Tomorrow · Day ${day} · quota ${dayQuota(day)}`, {
+      .text(DESIGN_WIDTH / 2, 400, `Tomorrow · Day ${day} · quota ${dayQuota(day)}`, {
         fontFamily: FONT,
         fontSize: '20px',
         color: COLORS.text,
@@ -223,7 +244,7 @@ export class NightScene extends BaseScene {
     const trailer = ahead ? `      ·      day ${ahead.day}: ${ahead.what}` : '';
 
     this.add
-      .text(DESIGN_WIDTH / 2, 432, parts.join('  ·  ') + trailer, {
+      .text(DESIGN_WIDTH / 2, 428, parts.join('  ·  ') + trailer, {
         fontFamily: FONT,
         fontSize: '17px',
         color: COLORS.dim,
@@ -332,27 +353,28 @@ export class NightScene extends BaseScene {
   }
 
   private upgradeSublabel(id: UpgradeId): string {
-    const level = this.nightData.save.levels[id];
-    const cost = upgradeCost(id, level);
+    const { levels } = this.nightData.save;
+    const level = levels[id];
+    const cost = upgradeCost(id, level, levels.comb);
     const effect = UPGRADES[id].format(level);
     if (cost === null) return `${effect} · maxed`;
     return `${effect} → ${UPGRADES[id].format(level + 1)}   ·   ${cost}`;
   }
 
   private canAfford(id: UpgradeId): boolean {
-    const level = this.nightData.save.levels[id];
-    const cost = upgradeCost(id, level);
-    return cost !== null && this.nightData.save.honey >= cost;
+    const { levels, honey } = this.nightData.save;
+    const cost = upgradeCost(id, levels[id], levels.comb);
+    return cost !== null && honey >= cost;
   }
 
   private buy(id: UpgradeId): void {
     const { save, sfx } = this.nightData;
     const level = save.levels[id];
-    const cost = upgradeCost(id, level);
+    const cost = upgradeCost(id, level, save.levels.comb);
     if (cost === null || save.honey < cost) return;
 
     save.honey -= cost;
-    save.levels[id] = Math.min(level + 1, maxLevel(id));
+    save.levels[id] = Math.min(level + 1, maxLevel(id, save.levels.comb));
     sfx.play('upgrade', 0.4);
 
     this.nightData.onChanged();
@@ -469,4 +491,17 @@ export class NightScene extends BaseScene {
 
     this.nightData.onNextDay();
   }
+}
+
+/**
+ * Card colour by role.
+ *
+ * Route Persistence is the flagship and Deeper Comb is the spine — the one that
+ * buys no output at all — so both read apart from the four that simply make the
+ * swarm bigger or faster.
+ */
+function cardTint(id: UpgradeId): number {
+  if (id === 'routePersistence') return 0xffd966;
+  if (id === 'comb') return 0xf4a261;
+  return 0x60a5fa;
 }

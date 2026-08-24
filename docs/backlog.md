@@ -343,6 +343,73 @@ distance ramp, which is load-bearing.
 
 ---
 
+## Considered while fixing the screen and adding hive management (2026-08-24)
+
+The brief: the game did not fill a landscape phone, and the hive never felt like
+something being grown. Built: an adaptive canvas, standing roads, hive upkeep,
+Deeper Comb (see `games/beeline/DESIGN.md` §20). These were weighed and left out.
+
+### A playfield that grows with the screen
+
+The obvious way to use the space a wide phone offers: let the board itself get
+wider rather than adding background around it.
+
+**Why cut:** this game balances on distance — yield, pool value and the whole
+near-versus-far decision are all derived from it. A wider board on a wider
+device means longer possible routes and higher yields against a fixed quota, so
+players on different hardware would be playing measurably different difficulties.
+The extra space is background and HUD, never play area.
+
+**Build when:** never, while quotas are shared across devices.
+
+### Auto-refreshing worker (the "comb-keeper")
+
+A purchase that automatically tops up your weakest established route.
+
+**Why cut:** it was on the table and not chosen, and on reflection it is the one
+automation that erodes the core verb rather than freeing it. Standing roads
+achieve the same relief by _rewarding_ the drawing rather than replacing it.
+
+**Build when:** if playtests show refreshing is still the dominant chore even
+with roads standing. Gate it to maintain-only, never create.
+
+### Drone scouts that reveal fog on their own
+
+Also on the table, also not chosen.
+
+**Why deferred:** with standing roads freeing the player's hands, exploring is
+now the thing they have hands _for_. Automating it would remove the activity the
+automation was meant to make room for.
+
+**Build when:** if the mid-game turns out to have dead time rather than too much
+to do.
+
+### Upkeep that can put the player in debt
+
+A harder version: the bill comes out of savings, and a hive that cannot be fed
+loses bees.
+
+**Why cut:** a death spiral on a portal game is a quit. The current rule — the
+bill never exceeds the day's honey — means over-expanding costs progress, not a
+hole to climb out of, and the signal is just as clear.
+
+**Build when:** if upkeep proves too soft to be a real decision. Try raising
+`upkeepPerBee` first.
+
+### A honeycomb of permanent cross-run perks
+
+Proposed as the meta-progression and superseded by the answer that the hive
+should be a _management_ layer instead.
+
+**Why deferred:** Deeper Comb plus upkeep already give the night screen a real
+allocation question, and a second progression track competing with the upgrade
+tree would be padding. Upgrades already carry across runs.
+
+**Build when:** if runs start feeling disconnected from each other — the signal
+is players quitting after a failed run rather than starting another.
+
+---
+
 ## How to add to this list
 
 Anything you were tempted to build but did not. Include what would change your

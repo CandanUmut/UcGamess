@@ -1,12 +1,13 @@
 import { TUNING } from '../config/tuning.ts';
 
 export type UpgradeId =
-  'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore';
+  'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'comb';
 
 export const UPGRADE_ORDER: readonly UpgradeId[] = [
   'routePersistence',
   'swarmSize',
   'beeSpeed',
+  'comb',
   'bloom',
   'honeyStore',
 ];
@@ -62,7 +63,23 @@ export const UPGRADES: Record<UpgradeId, UpgradeInfo> = {
     format: (level) =>
       `${TUNING.offline.baseCapHoney + level * upgradeStep('honeyStore')} max`,
   },
+  comb: {
+    id: 'comb',
+    name: 'Deeper Comb',
+    blurb: 'A cheaper hive to keep, and room to grow further',
+    // Upkeep only. The card sublabel renders "effect → next effect · cost" on
+    // one unwrapped line in a 340-unit card, and spelling out both of this
+    // upgrade's effects ran the text clean over the card beside it. The raised
+    // caps are said once under the section heading instead of twice on every
+    // redraw of this card.
+    format: (level) => `−${Math.round(upkeepRelief(level) * 100)}% keep`,
+  },
 };
+
+/** How much of the daily bill Deeper Comb waives at a given level. */
+export function upkeepRelief(level: number): number {
+  return Math.min(0.85, level * TUNING.hive.upkeepReliefPerComb);
+}
 
 function upgradeStep(id: UpgradeId): number {
   return TUNING.upgrades[id].perLevel;
@@ -77,18 +94,47 @@ export function emptyLevels(): UpgradeLevels {
     routePersistence: 0,
     bloom: 0,
     honeyStore: 0,
+    comb: 0,
   };
 }
 
+/**
+ * How far along the hive is, 0..1, across everything bought.
+ *
+ * Used only for how the hive looks. Measured against the caps at the player's
+ * current comb depth, so deepening the comb does not make the hive appear to
+ * shrink back — it raises the ceiling, and the hive should read as bigger for
+ * it, not smaller.
+ */
+export function hiveGrowth(levels: UpgradeLevels): number {
+  let bought = 0;
+  let available = 0;
+  for (const id of UPGRADE_ORDER) {
+    bought += levels[id];
+    available += maxLevel(id, levels.comb);
+  }
+  return available > 0 ? Math.min(1, bought / available) : 0;
+}
+
 /** `cost(level) = round(base × growth^level)`. Returns null when maxed. */
-export function upgradeCost(id: UpgradeId, level: number): number | null {
+export function upgradeCost(id: UpgradeId, level: number, combLevel = 0): number | null {
   const tuning = TUNING.upgrades[id];
-  if (level >= tuning.levels) return null;
+  if (level >= maxLevel(id, combLevel)) return null;
   return Math.round(tuning.base * Math.pow(tuning.growth, level));
 }
 
-export function maxLevel(id: UpgradeId): number {
-  return TUNING.upgrades[id].levels;
+/**
+ * The level cap for an upgrade, given how deep the comb is.
+ *
+ * Deeper Comb raises the ceiling on everything else, which is what gives the
+ * night screen a spine: at some point the only way forward is to stop buying
+ * output and invest in the hive that can hold it. Comb's own cap never moves,
+ * or the ladder would have no top.
+ */
+export function maxLevel(id: UpgradeId, combLevel = 0): number {
+  const base = TUNING.upgrades[id].levels;
+  if (id === 'comb') return base;
+  return base + combLevel * TUNING.upgrades.comb.perLevel;
 }
 
 /**
@@ -100,6 +146,8 @@ export function maxLevel(id: UpgradeId): number {
  */
 export interface DerivedStats {
   beeCount: number;
+  /** Honey the hive charges per day for the swarm above its starting size. */
+  upkeep: number;
   beeSpeed: number;
   routeHoldSeconds: number;
   patchCount: number;
@@ -107,10 +155,25 @@ export interface DerivedStats {
   offlineWindowHours: number;
 }
 
+/**
+ * The hive's daily bill for a swarm of this size.
+ *
+ * Only bees beyond the starting swarm are charged. The hive you were given is
+ * free; the hive you built has to be fed — which is what makes Brood Chamber a
+ * decision rather than the obvious purchase, and what puts the difficulty back
+ * that standing roads take away.
+ */
+export function upkeepFor(beeCount: number, combLevel: number): number {
+  const extra = Math.max(0, beeCount - TUNING.bee.baseCount);
+  return Math.round(extra * TUNING.hive.upkeepPerBee * (1 - upkeepRelief(combLevel)));
+}
+
 export function deriveStats(levels: UpgradeLevels): DerivedStats {
   const u = TUNING.upgrades;
+  const beeCount = TUNING.bee.baseCount + levels.swarmSize * u.swarmSize.perLevel;
   return {
-    beeCount: TUNING.bee.baseCount + levels.swarmSize * u.swarmSize.perLevel,
+    beeCount,
+    upkeep: upkeepFor(beeCount, levels.comb),
     beeSpeed: TUNING.bee.baseSpeed + levels.beeSpeed * u.beeSpeed.perLevel,
     routeHoldSeconds:
       TUNING.route.holdSeconds + levels.routePersistence * u.routePersistence.perLevel,

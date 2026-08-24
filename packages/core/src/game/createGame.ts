@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { initPortal, type PortalAdapter } from '@ucgames/portal';
 import { createGameContext, type GameContext } from '../context.ts';
-import { buildScaleConfig, DESIGN_HEIGHT, DESIGN_WIDTH } from '../scale/viewport.ts';
+import { buildScaleConfig, trackViewportSize } from '../scale/viewport.ts';
 
 export interface CreateGameOptions {
   /** DOM element (or id) that hosts the canvas. */
@@ -42,8 +42,7 @@ export async function createGame(options: CreateGameOptions): Promise<BootedGame
     type: Phaser.AUTO,
     parent: options.parent,
     backgroundColor: options.backgroundColor ?? '#101018',
-    width: DESIGN_WIDTH,
-    height: DESIGN_HEIGHT,
+    // Size comes from the scale config, which matches the device's shape.
     scale: buildScaleConfig(options.parent),
 
     // We run our own accumulator (see FixedTimestep), so Phaser's loop is left
@@ -76,6 +75,9 @@ export async function createGame(options: CreateGameOptions): Promise<BootedGame
   };
 
   const game = new Phaser.Game(config);
+  // Keeps the canvas matched to the viewport across rotates and browser-chrome
+  // changes; without it, rotating a phone puts the letterbox bars back.
+  trackViewportSize(game);
   const context = createGameContext(game, portal, options.saveKeys ?? []);
 
   // Persist before the tab goes away. `pagehide` fires reliably on iOS Safari

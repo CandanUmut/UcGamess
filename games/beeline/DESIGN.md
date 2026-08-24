@@ -1064,7 +1064,154 @@ dark, a scouted line finds a flower worth 2220 against near ones worth 574 and
 
 ---
 
-## 19. Success criteria
+## 20. The screen, and a hive worth managing
+
+Two reports from a real phone: the game did not fill the screen in landscape,
+and the hive never felt like something being grown.
+
+### The screen was wasting a third of the display
+
+Reported as "lots of empty space on the sides" in landscape. §14 recorded this
+as correct 16:9 letterboxing and measured 82% of width — that measurement
+assumed Safari's chrome was hidden.
+
+With the tab bar and toolbar showing, a landscape iPhone is roughly **2.8:1**,
+not the 2.17:1 the raw screen suggests. Measured across real viewport shapes:
+
+| Viewport                        | Aspect   | Screen used, before |
+| ------------------------------- | -------- | ------------------- |
+| Desktop 1920x1080               | 1.78     | 100%                |
+| iPhone, no browser bars         | 2.17     | 82%                 |
+| **iPhone, Safari bars showing** | **2.82** | **63%**             |
+| iPad landscape                  | 1.54     | 87%                 |
+
+**The canvas now takes the device's aspect** (clamped to 1.2–3.2) instead of
+being locked to 16:9, and the **playfield stays a fixed 1280x720 centred inside
+it**. Every viewport above now measures 100%.
+
+Three things made this the right shape of fix rather than the obvious one:
+
+- **Zooming a larger world out to fit was rejected.** At 1.5x a flower's reach
+  ring lands near 17 CSS pixels on a phone, well under what a thumb reliably
+  hits, and the design rules treat that as a rejection cause.
+- **The playfield must not change size with the device.** This game balances on
+  distance — yield, pool value and the whole near-versus-far decision are
+  derived from it — so a bigger board on a wider phone would be a different
+  game, not a better view of the same one. The extra space is background and
+  HUD, never play area.
+- **The HUD moved to the canvas edges** (`setScrollFactor(0)`), so on a wide
+  screen it sits in the margin instead of over the board.
+
+The camera is scrolled to centre the playfield rather than every object being
+moved, so scenes stay authored against 1280x720 and nothing else had to know the
+canvas grew. Pointer input is unaffected — `worldX/worldY` already account for
+camera scroll, verified to within 1px on 2.82:1, 1.54:1 and 16:9.
+
+Two details worth keeping:
+
+- `trackViewportSize` re-derives the canvas on rotate. Its recursion guard is
+  load-bearing: `setGameSize` emits RESIZE, so reacting to RESIZE by calling it
+  again blows the stack.
+- The geometry lives in a **Phaser-free** `canvasSize.ts`, so it unit tests in
+  plain node — the same split the games use between simulation and renderer.
+  The first version lived next to Phaser and could not be tested at all.
+
+### Standing roads
+
+The automation the brief asked for, and it is the payoff the strength system was
+always pointing at: **a road worked hard enough stops decaying entirely.**
+
+It needed no new state and no timer. Decay speed already scaled with strength;
+past the threshold it is simply zero. And it is not immunity — strength still
+decays without traffic, so a road abandoned for a flower that ran dry drops back
+under the threshold and dies like anything else.
+
+What it changes is the shape of a day: **build your arteries early, then spend
+your hands on the frontier.** Tuned so roughly one or two roads can stand at
+once and never all of them — if every route could stand there would be no
+decision left, and if none could the dial would have no destination. Measured at
+100-160 seconds of standing road per day by the mid-game.
+
+A standing road gets the one binary readout in a system of gradients: a hard
+bright edge. "This one no longer needs you" is a binary fact and the player has
+to see it at a glance to decide where their hands go next.
+
+### The hive charges rent
+
+Standing roads remove work, so the difficulty had to move somewhere. It moved
+into economics, which is where the brief wanted it: _"think about the hive as a
+management style we should be improving"_.
+
+**Every bee beyond the starting swarm costs honey per day.** The hive you were
+given is free; the hive you built has to be fed. That single line turns Brood
+Chamber from an auto-buy into a decision — six more bees is more throughput
+every day _and_ a bill every day.
+
+Two rules keep it a decision rather than a punishment:
+
+- **It is charged against the day's honey, never against the quota.** Quota asks
+  "did you work hard enough today"; upkeep asks "can you afford the hive you
+  have built". If upkeep counted against quota, buying bees would make the day
+  itself harder to pass, which is the opposite of what buying bees is for.
+- **It can never exceed what the day earned.** Over-expanding costs progress,
+  not a debt to climb out of.
+
+It is shown as a line item — `2004 gathered − 240 to keep the hive = 1764` —
+because a cost the player cannot see is a cost they cannot manage.
+
+### Deeper Comb
+
+A sixth upgrade, and deliberately **the only one that buys no output at all**:
+it cuts the standing bill and raises the level cap on everything else.
+
+That is what gives the night screen a spine. Five cards that all make the swarm
+bigger or faster is a shopping list; a sixth that trades immediate output for
+the ceiling to afford more output later is an allocation question, which is what
+a management game is made of. At some point the only way forward is to stop
+buying output and invest in the hive that can hold it.
+
+The hive also visibly grows — glow and comb rings scale with total investment.
+It was the thing the whole run is about and it never changed appearance no
+matter how much was poured into it.
+
+### Measured
+
+Re-tuned against a simulated player who keeps three earning routes, scouts with
+one, **refreshes from the tip** (keeping strength) and spends what the run earns:
+
+| Day | Honey | Quota | Ratio | Upkeep | Standing |
+| --- | ----- | ----- | ----- | ------ | -------- |
+| 1   | 257   | 60    | 4.28  | 0      | 0s       |
+| 3   | 364   | 300   | 1.21  | 53     | 12s      |
+| 5   | 781   | 600   | 1.30  | 158    | 53s      |
+| 7   | 1006  | 880   | 1.14  | 228    | 47s      |
+| 9   | 1739  | 1220  | 1.43  | 269    | 125s     |
+| 11  | 1924  | 1650  | 1.17  | 307    | 134s     |
+| 12  | 2008  | 1900  | 1.06  | 250    | 163s     |
+
+Days one and two remain unmissable. **Every day from three on is now genuinely
+in doubt** even for the model — which is the "harder" the brief asked for, and
+the difficulty is economic rather than manual.
+
+One note on the model, because it changed the answer twice: an earlier version
+refreshed by feeding `extendWith` a path from the _hive_ rather than from the
+route's tip, which builds a zigzag out and back and halved the measured honey.
+The bug was in the probe, not the game, but it would have driven a bad tuning.
+
+### Still unverified
+
+Everything §10, §14, §16 and §18 flagged. This pass was verified in headless
+Chromium at 2.82:1, 2.17:1, 2.08:1, 1.54:1 and 16:9: every one uses 100% of the
+viewport, input lands within 1px of the intended world point on all of them, a
+road reaches standing and holds its length, the hive's bill appears as a line
+item, and all six upgrade cards lay out without collision — with zero console
+errors.
+
+---
+
+---
+
+## 21. Success criteria
 
 Not submission-ready until all of these hold:
 

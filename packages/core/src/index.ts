@@ -13,9 +13,15 @@ export {
   DESIGN_HEIGHT,
   DESIGN_ASPECT,
   buildScaleConfig,
+  computeGameSize,
+  trackViewportSize,
+  viewRect,
+  centerPlayfield,
   readSafeAreaInsets,
   safeAreaRect,
   isPortrait,
+  MIN_CANVAS_ASPECT,
+  MAX_CANVAS_ASPECT,
   type SafeAreaInsets,
 } from './scale/viewport.ts';
 
