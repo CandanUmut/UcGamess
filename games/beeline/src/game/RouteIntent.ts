@@ -1,5 +1,6 @@
 import { TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
+import { buildPolyline, truncateCoords } from '../sim/polyline.ts';
 
 export type IntentKind = 'extend' | 'fresh';
 
@@ -16,11 +17,18 @@ export interface CommitResult {
   kind: IntentKind | 'rejected';
   /** Length the player actually had to draw. Workers are charged on this. */
   drawnLength: number;
-  /** What drawing it from scratch would have cost. */
+  /**
+   * What the gesture covered before thorns took any of it.
+   *
+   * Equal to `drawnLength` whenever nothing was cut, so the gap between the two
+   * is exactly what the thorns cost the player.
+   */
   fullLength: number;
   connected: boolean;
   /** The route that was created or changed, 0 if none. */
   routeId: number;
+  /** Where thorns cut the drag short, if they did. */
+  cutAt: { x: number; y: number } | null;
 }
 
 /**
@@ -77,6 +85,13 @@ export function applyAimAssist(
   const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius);
   if (!patch) return { coords: out, connected: false };
 
+  // Never snap through thorns. Assist exists to make a drag mean what it looks
+  // like it means; hopping the line over a thicket the player can plainly see
+  // would do the opposite — and the route would only be cut back there anyway.
+  if (field.pathBlocked(endX, endY, patch.x, patch.y)) {
+    return { coords: out, connected: false };
+  }
+
   // Only extend to the flower's centre if we are not already inside it, so a
   // careful player's line is left exactly as they drew it.
   if (Math.hypot(patch.x - endX, patch.y - endY) > TUNING.patch.reachRadius * 0.5) {
@@ -85,14 +100,68 @@ export function applyAimAssist(
   return { coords: out, connected: true };
 }
 
+/**
+ * Trims a freshly drawn path at the first thorns it enters.
+ *
+ * The route is not refused and no error is shown — the line simply stops where
+ * the thicket starts. That is the entire teaching mechanism for thorns: the
+ * player sees their line end at the obstacle, sees the bees reach a tip that
+ * touches no flower and come home empty, and draws around it next time. There
+ * is nothing to read.
+ */
+function clipAtThorns(
+  field: Field,
+  coords: readonly number[],
+): { coords: number[]; cutAt: { x: number; y: number } | null } {
+  const poly = buildPolyline(coords);
+  const hit = field.blockedDistance(poly, poly.length);
+  if (!Number.isFinite(hit)) return { coords: [...coords], cutAt: null };
+
+  const clipped = truncateCoords(poly, hit);
+  const x = clipped[clipped.length - 2] ?? 0;
+  const y = clipped[clipped.length - 1] ?? 0;
+  return { coords: clipped, cutAt: { x, y } };
+}
+
 /** Applies a completed drag to the field. */
 export function commitDrag(
   field: Field,
   intent: DragIntent,
   rawCoords: readonly number[],
 ): CommitResult {
-  const { coords, connected } = applyAimAssist(field, rawCoords);
+  const assisted = applyAimAssist(field, rawCoords);
+  const clip = clipAtThorns(field, assisted.coords);
+  const coords = clip.coords;
+  const cutAt = clip.cutAt;
+
+  // Workers are charged on what survived, not on what the finger covered. The
+  // player got a shorter route than they drew, so they pay for a shorter route
+  // — being billed in full for a line the thorns ate would be the one genuinely
+  // unfair reading of this mechanic.
   const drawnLength = pathLength(coords);
+  // What the gesture covered before thorns took any of it. Equal to
+  // `drawnLength` whenever nothing was cut.
+  const gestureLength = pathLength(assisted.coords);
+
+  // A cut left nothing usable. Report it so the snip is still shown; silently
+  // doing nothing is what makes a touchscreen game feel broken.
+  if (coords.length < 4) {
+    return {
+      kind: 'rejected',
+      drawnLength: 0,
+      fullLength: gestureLength,
+      connected: false,
+      routeId: 0,
+      cutAt,
+    };
+  }
+
+  // Aim assist may have snapped onto a flower that the clip then cut away from.
+  const endX = coords[coords.length - 2] ?? 0;
+  const endY = coords[coords.length - 1] ?? 0;
+  const connected =
+    assisted.connected &&
+    field.nearestPatchTo(endX, endY, TUNING.patch.reachRadius) !== null;
 
   if (intent.kind === 'extend') {
     const route = field.routeById(intent.routeId);
@@ -106,14 +175,13 @@ export function commitDrag(
         fullLength: Math.max(before, route.poly.length),
         connected,
         routeId: route.id,
+        cutAt,
       };
     }
     // The route died mid-drag. Fall through and treat it as a fresh draw
     // rather than discarding the player's gesture.
   }
 
-  const endX = coords[coords.length - 2] ?? 0;
-  const endY = coords[coords.length - 1] ?? 0;
   const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius);
 
   // Drawing again at a flower that already has a route tops that route up
@@ -125,9 +193,10 @@ export function commitDrag(
     return {
       kind: 'fresh',
       drawnLength,
-      fullLength: drawnLength,
+      fullLength: gestureLength,
       connected,
       routeId: existing.id,
+      cutAt,
     };
   }
 
@@ -135,9 +204,10 @@ export function commitDrag(
   return {
     kind: route ? 'fresh' : 'rejected',
     drawnLength,
-    fullLength: drawnLength,
+    fullLength: gestureLength,
     connected: route ? connected : false,
     routeId: route ? route.id : 0,
+    cutAt,
   };
 }
 

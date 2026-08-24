@@ -187,6 +187,79 @@ rewarded video is the revenue model, not cosmetics.
 
 ---
 
+## Considered while adding thorns and provisions to Beeline (2026-08-24)
+
+The brief was "more challenge, better upgrades, and whatever else is missing —
+but do not over-engineer it". Three things were built (see
+`games/beeline/DESIGN.md` §15). These were weighed and left out.
+
+### A second obstacle type — shade or cold pockets that slow bees
+
+Zones that do not block a route but make bees crossing them fly at ~55% speed.
+It is a genuinely good idea: it turns the thorn decision from binary
+(blocked / not blocked) into a judgement call — short and slow, or long and
+fast.
+
+**Why deferred:** thorns are one new element and the escalation rule is one at a
+time. A soft-cost zone introduced in the same pass would arrive before the hard
+blocker has been understood, and it costs a per-bee zone test in the hot path
+for a benefit nobody has measured yet.
+
+**Build when:** playtests show thorns being solved once and then ignored — the
+signal is players drawing the same arc every day without looking.
+
+### More than three thickets on a day
+
+The board caps out at three. Between the hive draw ring and a flower's reach
+ring there is only `distance − 195 − 2 × grown radius` of usable line, and on a
+fixed 1280×720 field with a central hive only two or three flowers are ever far
+enough out to host one.
+
+**Why deferred:** the honest ceiling is geometric. Raising it means smaller
+thickets (which stop reading as terrain), a bigger field (this is not a
+scrolling world), or dropping the clearance guarantees that keep every flower
+reachable — and that last one is the difference between a puzzle and a dead
+flower.
+
+**Build when:** never, at this canvas size. If the field ever scrolls, revisit.
+
+### Stackable provisions, or carrying more than one
+
+**Why cut:** quantities, a screen to manage them, and balance against every
+combination — and the night screen becomes bookkeeping. One slot makes the
+purchase a read of the forecast, which is a decision worth having. The single
+slot is the design, not a limitation of it.
+
+**Build when:** if playtests show players ignoring the shelf entirely, the fix
+to try first is better forecast copy, not more slots.
+
+### A streak or combo reward for refreshing before a route stops paying
+
+Rewarding the habit the game wants — catching a route early — with bonus honey
+or extra hold time.
+
+**Why cut:** it pays the player for doing the thing the retreat economy already
+pays them for, and the obvious implementations reward spamming refreshes rather
+than timing them. Two rewards for one behaviour is how a clean economy gets
+muddy.
+
+**Build when:** if skilled play turns out to be indistinguishable from average
+play in the metrics.
+
+### Rewarded "swarm boost" at day start
+
+`TUNING.ads.rewardedSwarmBoostFromDay` and `rewardedSwarmBoostMultiplier` exist
+and nothing reads them. It is specced in DESIGN.md §7 and was never wired up.
+
+**Why deferred:** not part of this brief, and the night screen already has its
+one rewarded offer per boundary — a second one at day start needs a decision
+about which takes priority, which is a design question rather than a wiring job.
+
+**Build when:** the next pass on ad placement. Either implement it or delete the
+two tuning keys, because a constant nothing reads is a lie about the design.
+
+---
+
 ## How to add to this list
 
 Anything you were tempted to build but did not. Include what would change your

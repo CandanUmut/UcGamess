@@ -3,9 +3,11 @@ import { Bee } from './Bee.ts';
 import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp } from './Wasp.ts';
-import { coordsLength, type SamplePoint } from './polyline.ts';
+import { Bramble, blockedDistanceAlong, segmentBlocked } from './Bramble.ts';
+import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
 import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
-import type { DayFeatures } from '../game/DayCycle.ts';
+import { brambleRadiusForDay, type DayFeatures } from '../game/DayCycle.ts';
+import { noModifiers, type DayModifiers } from '../game/Provisions.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -27,11 +29,14 @@ export interface FieldEvents {
   scattered: Array<{ x: number; y: number }>;
   /** Workers committed to a newly drawn route this step. */
   dispatched: number;
+  /** Where a route was severed by thorns, so the cut is visible and audible. */
+  cut: Array<{ x: number; y: number }>;
 }
 
 const NO_FEATURES: DayFeatures = {
   wind: false,
   wasps: 0,
+  brambles: 0,
   richPatches: false,
   nightBloom: false,
 };
@@ -53,6 +58,7 @@ export class Field {
   patches: Patch[] = [];
   bees: Bee[] = [];
   wasps: Wasp[] = [];
+  brambles: Bramble[] = [];
 
   honey = 0;
   /** Debug affordance: freeze route decay to feel the contrast. */
@@ -60,11 +66,19 @@ export class Field {
 
   stats: DerivedStats = deriveStats(emptyLevels());
   features: DayFeatures = NO_FEATURES;
+  /** What the provision carried into today changes. Neutral when none was. */
+  modifiers: DayModifiers = noModifiers();
 
   /** Multiplier on effective swarm size, for the rewarded swarm boost. */
   swarmBoost = 1;
 
-  events: FieldEvents = { collected: [], deposited: 0, scattered: [], dispatched: 0 };
+  events: FieldEvents = {
+    collected: [],
+    deposited: 0,
+    scattered: [],
+    dispatched: 0,
+    cut: [],
+  };
 
   private elapsed = 0;
   private windAngle = Math.random() * Math.PI * 2;
@@ -82,7 +96,7 @@ export class Field {
   }
 
   get routeHoldSeconds(): number {
-    return this.stats.routeHoldSeconds;
+    return this.stats.routeHoldSeconds + this.modifiers.extraHoldSeconds;
   }
 
   // ---------------------------------------------------------------- setup
@@ -105,8 +119,15 @@ export class Field {
    * is what makes the loop feel like a series of fresh attempts rather than one
    * long session with interruptions.
    */
-  beginDay(day: number, features: DayFeatures, patchCount: number, boost: number): void {
+  beginDay(
+    day: number,
+    features: DayFeatures,
+    patchCount: number,
+    boost: number,
+    modifiers: DayModifiers = noModifiers(),
+  ): void {
     this.features = features;
+    this.modifiers = modifiers;
     this.swarmBoost = boost;
     this.honey = 0;
     this.elapsed = 0;
@@ -115,14 +136,21 @@ export class Field {
     this.clearRoutes();
     this.patches = [];
     this.wasps = [];
+    this.brambles = [];
 
-    this.patchPool = TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay;
+    this.patchPool = Math.round(
+      (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
+    );
 
     for (let i = 0; i < patchCount; i += 1) {
       const kind: PatchKind =
         features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
       this.spawnPatch(kind);
     }
+
+    // Thorns go down after the flowers, because every thicket is placed
+    // relative to a flower it is meant to complicate.
+    this.spawnBrambles(day, features.brambles);
 
     this.windStrength = features.wind
       ? Math.min(
@@ -240,6 +268,183 @@ export class Field {
       }
     }
     return best;
+  }
+
+  // ---------------------------------------------------------------- brambles
+
+  /**
+   * Places thorn thickets across the field.
+   *
+   * Placement is the whole design here, not decoration. A thicket dropped at
+   * random is usually somewhere nobody was going to fly, so it changes nothing
+   * and reads as scenery. Each one is instead placed **on the line between the
+   * hive and a flower**, pushed sideways by up to two thirds of its own radius,
+   * so it blocks the lazy straight line without walling the flower off. Every
+   * flower ends up asking a routing question, and the answer is always a curve
+   * that exists.
+   *
+   * Three clearances are enforced and none of them is optional:
+   *
+   *  - away from the hive draw ring, so a route can always be started;
+   *  - away from every flower's reach ring, so a route can always be finished;
+   *  - away from other thickets, so two never fuse into a wall.
+   *
+   * A spot that cannot satisfy all three is simply skipped. Fewer thorns is a
+   * fine outcome; an unplayable field is not.
+   */
+  private spawnBrambles(day: number, count: number): void {
+    if (count <= 0) return;
+
+    const radius = brambleRadiusForDay(day) * this.modifiers.brambleScale;
+    if (radius <= 1) return;
+
+    const growth = this.modifiers.brambleGrows ? TUNING.bramble.growthPerSecond : 0;
+
+    // Furthest flowers first. A thicket needs a corridor of roughly the hive
+    // ring plus the flower ring plus twice its own grown radius to sit between
+    // them, and only the long routes have that much room — which is exactly
+    // where thorns belong. Distance is already the risk axis of this game, and
+    // this sharpens it rather than adding a second one. The short flower stays
+    // clean, so there is always a safe option to fall back to.
+    const targets = this.patches
+      .filter((p) => p.alive)
+      .sort(
+        (a, b) =>
+          Math.hypot(b.x - this.hiveX, b.y - this.hiveY) -
+          Math.hypot(a.x - this.hiveX, a.y - this.hiveY),
+      );
+    if (targets.length === 0) return;
+
+    const grown = radius * TUNING.bramble.growthFactor;
+    const { hiveClearance, patchClearance, minLineFraction, maxLineFraction } =
+      TUNING.bramble;
+
+    // The band of the line a thicket can legally sit on, worked out rather than
+    // guessed at. It has to clear the hive draw ring at one end and the
+    // flower's reach ring at the other, both at its grown size, which leaves
+    // only `span - 195 - 2 × grown` of usable line. Sampling a fixed 0.34-0.7
+    // of the line and hoping found the legal band about one try in ten, so most
+    // slots quietly went unfilled and the field came out nearly bare.
+    const minFromHive = TUNING.hive.drawRadius + grown + hiveClearance;
+    const minFromPatch =
+      TUNING.patch.reachRadius * TUNING.bramble.patchRingFraction +
+      grown +
+      patchClearance;
+
+    for (let slot = 0; slot < count; slot += 1) {
+      let placed = false;
+
+      // Walk the whole flower list for each slot rather than giving up on the
+      // one flower this slot was offered. A short line genuinely has no room,
+      // and abandoning the slot there is how the field ends up bare.
+      for (let step = 0; step < targets.length && !placed; step += 1) {
+        const patch = targets[(slot + step) % targets.length];
+        if (!patch) continue;
+
+        const dx = patch.x - this.hiveX;
+        const dy = patch.y - this.hiveY;
+        const span = Math.hypot(dx, dy) || 1;
+
+        const lo = Math.max(minLineFraction, minFromHive / span);
+        const hi = Math.min(maxLineFraction, 1 - minFromPatch / span);
+        if (lo >= hi) continue; // this flower is simply too near the hive
+
+        const nx = -dy / span;
+        const ny = dx / span;
+
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const along = lo + Math.random() * (hi - lo);
+          // The sideways nudge only ever increases distance from both rings, so
+          // it can loosen the placement but never break it.
+          const offset = (Math.random() * 2 - 1) * radius * 0.6;
+          const x = this.hiveX + dx * along + nx * offset;
+          const y = this.hiveY + dy * along + ny * offset;
+
+          if (!this.brambleSpotIsClear(x, y, radius)) continue;
+
+          this.brambles.push(new Bramble(x, y, radius, growth));
+          placed = true;
+          break;
+        }
+      }
+
+      // No flower line had room. Fall back to anywhere legal on the field:
+      // thorns are terrain, and a thicket that does not sit on a particular
+      // line still shapes the curves the player can draw around it. Without
+      // this the late field tops out at about two thickets no matter what the
+      // schedule asks for, because only the two longest routes have the span to
+      // host one.
+      if (!placed) this.placeFreeBramble(radius, growth);
+    }
+  }
+
+  private placeFreeBramble(radius: number, growth: number): void {
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 210 + Math.random() * 300;
+      const x = this.hiveX + Math.cos(angle) * distance;
+      const y = this.hiveY + Math.sin(angle) * distance * 0.72;
+
+      if (!this.brambleSpotIsClear(x, y, radius)) continue;
+
+      this.brambles.push(new Bramble(x, y, radius, growth));
+      return;
+    }
+  }
+
+  private brambleSpotIsClear(x: number, y: number, radius: number): boolean {
+    const { hiveClearance, patchClearance, siblingClearance } = TUNING.bramble;
+    // A thicket grows, so every clearance is checked against the size it will
+    // reach, not the size it starts at. Otherwise the field is legal at dawn
+    // and illegal by mid-afternoon.
+    const grown = radius * TUNING.bramble.growthFactor;
+
+    if (
+      Math.hypot(x - this.hiveX, y - this.hiveY) <
+      TUNING.hive.drawRadius + grown + hiveClearance
+    ) {
+      return false;
+    }
+
+    // Stay inside the canvas, or half a thicket sits off-screen and the gap it
+    // leaves is one the player cannot see to aim at.
+    if (x < grown || x > 1280 - grown || y < 110 + grown || y > 720 - grown) return false;
+
+    for (const other of this.patches) {
+      if (!other.alive) continue;
+      const gap =
+        TUNING.patch.reachRadius * TUNING.bramble.patchRingFraction +
+        grown +
+        patchClearance;
+      if (Math.hypot(other.x - x, other.y - y) < gap) return false;
+    }
+
+    for (const other of this.brambles) {
+      if (
+        Math.hypot(other.x - x, other.y - y) <
+        other.maxRadius + grown + siblingClearance
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Where a path first meets thorns, measured from the start of the path.
+   *
+   * `Infinity` when it is clear. Everything that needs to know "can bees get
+   * along this line" — committing a drag, aim assist, and the per-step recheck
+   * that catches wind bending a route into a thicket — goes through here.
+   */
+  blockedDistance(poly: Polyline, limit: number): number {
+    return blockedDistanceAlong(poly, limit, this.brambles);
+  }
+
+  /** Whether a straight hop from a to b passes through thorns. */
+  pathBlocked(ax: number, ay: number, bx: number, by: number): boolean {
+    return segmentBlocked(ax, ay, bx, by, this.brambles);
   }
 
   // ---------------------------------------------------------------- routes
@@ -423,6 +628,7 @@ export class Field {
     this.elapsed += dt;
 
     for (const patch of this.patches) patch.step(dt);
+    for (const bramble of this.brambles) bramble.step(dt);
 
     if (this.windStrength > 0) this.stepWind(dt);
 
@@ -438,6 +644,13 @@ export class Field {
         this.killRoute(route);
         continue;
       }
+
+      this.clipRouteAtThorns(route);
+      if (route.dead) {
+        this.killRoute(route);
+        continue;
+      }
+
       if (!route.target || !route.target.alive) this.retarget(route);
     }
 
@@ -470,6 +683,29 @@ export class Field {
       }
       route.rebuildLengths();
     }
+  }
+
+  /**
+   * Cuts a route back to where it now meets thorns.
+   *
+   * Checked every step rather than only on commit, because two things move
+   * under a route the player already drew: the wind bows it sideways, and
+   * thickets spread. A line that was clear at dawn can be in the brambles by
+   * mid-afternoon, and the honest answer is that it stops working there.
+   *
+   * That interaction was free — wind and growing thorns were built for their
+   * own reasons and produce it between them — and it is the best pressure in
+   * the game, because it makes a route something you maintain rather than
+   * something you place.
+   */
+  private clipRouteAtThorns(route: Route): void {
+    if (this.brambles.length === 0) return;
+
+    const hit = this.blockedDistance(route.poly, route.liveLength);
+    if (!Number.isFinite(hit) || hit >= route.liveLength) return;
+
+    this.events.cut.push({ x: route.tipX, y: route.tipY });
+    route.cutAt(hit);
   }
 
   get windVector(): { x: number; y: number; strength: number } {
@@ -528,7 +764,18 @@ export class Field {
         bee.state === 'building')
     ) {
       for (const wasp of this.wasps) {
-        if (!wasp.threatens(bee.x, bee.y, this.hiveX, this.hiveY)) continue;
+        if (
+          !wasp.threatens(
+            bee.x,
+            bee.y,
+            this.hiveX,
+            this.hiveY,
+            this.modifiers.waspIntercept,
+            this.modifiers.waspSafeRadius,
+          )
+        ) {
+          continue;
+        }
         this.events.scattered.push({ x: bee.x, y: bee.y });
         this.releaseBee(bee);
         bee.carrying = 0;
@@ -717,7 +964,13 @@ export class Field {
   /** Returns and clears this frame's events. */
   drainEvents(): FieldEvents {
     const out = this.events;
-    this.events = { collected: [], deposited: 0, scattered: [], dispatched: 0 };
+    this.events = {
+      collected: [],
+      deposited: 0,
+      scattered: [],
+      dispatched: 0,
+      cut: [],
+    };
     return out;
   }
 

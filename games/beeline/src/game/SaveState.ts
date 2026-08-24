@@ -1,5 +1,6 @@
 import type { SaveManager } from '@ucgames/core';
 import { emptyLevels, maxLevel, UPGRADE_ORDER, type UpgradeLevels } from './Upgrades.ts';
+import { isProvisionId, type ProvisionId } from './Provisions.ts';
 
 export const SAVE_KEY = 'beeline.save';
 export const SAVE_KEYS = [SAVE_KEY] as const;
@@ -18,6 +19,12 @@ export interface BeelineSave {
   bestRunDay: number;
   /** Epoch ms of the last day completed, for offline accrual. */
   lastPlayedAt: number;
+  /**
+   * The one-use provision bought last night and not yet spent.
+   *
+   * A single slot rather than an inventory, deliberately. See Provisions.ts.
+   */
+  provision: ProvisionId | null;
 }
 
 export function newSave(): BeelineSave {
@@ -29,6 +36,7 @@ export function newSave(): BeelineSave {
     bestDayHoney: 0,
     bestRunDay: 0,
     lastPlayedAt: Date.now(),
+    provision: null,
   };
 }
 
@@ -69,6 +77,9 @@ export function coerceSave(raw: unknown): BeelineSave {
     bestDayHoney: clampNumber(data.bestDayHoney, 0, Number.MAX_SAFE_INTEGER, 0),
     bestRunDay: clampInt(data.bestRunDay, 0, 9999),
     lastPlayedAt: clampNumber(data.lastPlayedAt, 0, Date.now(), Date.now()),
+    // An unknown id — a provision renamed or removed between versions — becomes
+    // "none" rather than crashing the lookup at dawn.
+    provision: isProvisionId(data.provision) ? data.provision : null,
   };
 }
 

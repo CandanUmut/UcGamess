@@ -134,6 +134,51 @@ export interface WaspTuning {
   scatterSeconds: number;
 }
 
+export interface BrambleTuning {
+  /** First day thorns appear at all. */
+  startDay: number;
+  /** Radius of a fresh thicket, before the per-day term. */
+  baseRadius: number;
+  radiusPerDay: number;
+  maxRadius: number;
+  /** Hard ceiling on how many can be on the field at once. */
+  maxCount: number;
+  /**
+   * How fast a thicket spreads, in px/s.
+   *
+   * Small on purpose: over a 90-second day this is about +30px, which is enough
+   * to close a gap the player was relying on without ever feeling like the
+   * field moved under them. It is the same shape of pressure as flowers running
+   * dry — the board gets harder as the day goes on, so a route that was right
+   * at dawn is not automatically right at dusk.
+   */
+  growthPerSecond: number;
+  /** How much larger a thicket can get than the size it was placed at. */
+  growthFactor: number;
+  /** Fraction along the hive→flower line where a thicket is placed. */
+  minLineFraction: number;
+  maxLineFraction: number;
+  /** Clearance kept from the hive ring, a flower's reach ring, and each other. */
+  hiveClearance: number;
+  patchClearance: number;
+  siblingClearance: number;
+  /**
+   * How much of a flower's reach ring must stay clear of thorns.
+   *
+   * Not all of it. A thicket may bite into the outer edge of a ring — the
+   * player simply approaches from the open side, which is the puzzle working as
+   * intended. Demanding the whole ring stay clear was the difference between a
+   * field with thorns on it and a field with almost none: at five flowers, a
+   * point far enough from every ring barely exists.
+   */
+  patchRingFraction: number;
+}
+
+export interface ProvisionTuning {
+  /** Price at day one. Grows by `costGrowth` per day. */
+  base: number;
+}
+
 export interface UpgradeTuning {
   base: number;
   growth: number;
@@ -149,6 +194,11 @@ export interface Tuning {
   day: DayTuning;
   wind: WindTuning;
   wasp: WaspTuning;
+  bramble: BrambleTuning;
+  provisions: Record<
+    'scoutBees' | 'pruningShears' | 'smokePot' | 'waxedTrails' | 'earlyRise',
+    ProvisionTuning
+  > & { costGrowth: number; costCapMultiplier: number };
   upgrades: Record<
     'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore',
     UpgradeTuning
@@ -194,7 +244,7 @@ export const TUNING: Tuning = {
   // produces for ~15s and dies at ~22s: about half the hand traffic, and the
   // grace window between "stopped paying" and "gone" grows from 3s to 7s.
   route: {
-    maxCount: 5,
+    maxCount: 3,
     holdSeconds: 12.0,
     decaySpeed: 26,
     minLength: 40,
@@ -231,8 +281,11 @@ export const TUNING: Tuning = {
     quotaGrowthAfterTable: 1.22,
   },
 
+  // Shifted a day later than the original schedule to make room for brambles on
+  // day 3. The rule the schedule exists to protect is one new element at a
+  // time with a quiet day after it, not any particular day number.
   wind: {
-    startDay: 4,
+    startDay: 5,
     baseStrength: 9,
     strengthPerDay: 1.6,
     maxStrength: 34,
@@ -240,12 +293,60 @@ export const TUNING: Tuning = {
   },
 
   wasp: {
-    startDay: 6,
-    secondWaspDay: 9,
+    startDay: 7,
+    secondWaspDay: 11,
     speed: 95,
     safeRadius: 160,
     interceptRadius: 34,
     scatterSeconds: 1.2,
+  },
+
+  /**
+   * Thorn thickets. See sim/Bramble.ts for why the game needed them.
+   *
+   * Sized against the field the flowers actually sit in: a thicket is roughly
+   * two and a half flower-reach-rings across, big enough that going around it
+   * is a real detour and small enough that the detour is one flick of a thumb
+   * rather than a scenic tour of the canvas.
+   */
+  bramble: {
+    startDay: 3,
+    // Sized against the corridor a thicket actually has to fit inside. Between
+    // the hive draw ring and a flower's reach ring there is only
+    // `distance - 110 - 85` of usable line, and both ends have to stay clear at
+    // the thicket's *grown* size. At 58px growing to 1.35x the corridor came out
+    // at 412-487px, wider than most flowers are far — and every placement was
+    // silently rejected, so the field shipped with no thorns on it at all.
+    baseRadius: 48,
+    radiusPerDay: 3,
+    maxRadius: 72,
+    maxCount: 5,
+    growthPerSecond: 0.35,
+    growthFactor: 1.22,
+    minLineFraction: 0.28,
+    maxLineFraction: 0.78,
+    hiveClearance: 10,
+    patchClearance: 12,
+    siblingClearance: 24,
+    patchRingFraction: 0.6,
+  },
+
+  /**
+   * One-use purchases, spent on the next day only.
+   *
+   * Priced at roughly half a first upgrade level so they are affordable most
+   * nights, and grown per day so they stay a real choice rather than becoming
+   * free background noise by day fifteen. The cap stops the curve outrunning
+   * the quota curve late.
+   */
+  provisions: {
+    costGrowth: 1.15,
+    costCapMultiplier: 9,
+    scoutBees: { base: 55 },
+    pruningShears: { base: 65 },
+    smokePot: { base: 70 },
+    waxedTrails: { base: 80 },
+    earlyRise: { base: 45 },
   },
 
   upgrades: {
@@ -291,6 +392,8 @@ export const COLORS = {
   beeLaden: 0xffa726,
   patch: 0x7fd1ae,
   patchDry: 0x4a5750,
+  bramble: 0x3a2f22,
+  brambleThorn: 0x6b5a3e,
   route: 0xffe08a,
   /** Text colours are CSS strings; Phaser text styles do not take hex numbers. */
   text: '#f4f4f8',
