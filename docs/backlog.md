@@ -119,6 +119,74 @@ profitable and can absorb the risk.
 
 ---
 
+## Cut from Beeline v1 (2026-08-24)
+
+These come from the game one scope freeze. They are cut from **v1 of Beeline**,
+not from the studio — several are reasonable for a later version or a different
+game. See `games/beeline/DESIGN.md` §9.
+
+The shared reason: Beeline's core verb is _drawing routes_. Everything below
+either adds a second verb, moves attention off the field, or adds surface area
+before the one mechanic has proven it holds a player for three minutes.
+
+### Multiple hives
+
+**Why cut:** splits attention across the field and doubles the route-management
+load. The interesting decision is already "which patches, with how much swarm" —
+a second hive makes that arithmetic without making it deeper.
+
+**Build when:** never for v1. Worth prototyping only if playtests show players
+mastering single-hive routing so completely that days stop being tense.
+
+### Map or world progression
+
+**Why cut:** the day cycle is already the progression structure, and it is the
+one that produces clean ad breaks and measurable sessions. A map competes with
+it and wins nothing.
+
+### Bee types or classes
+
+**Why cut:** this is the most tempting of the cuts and the one worth naming
+explicitly — it is the natural way to add depth without adding a verb. It is
+still wrong for v1, because it dilutes the single mechanic before that mechanic
+has earned it.
+
+**Build when:** Beeline clears the Player Fit Test and the limiting factor on
+retention is depth rather than hook. Then this is the first thing to try.
+
+### Story or characters
+
+**Why cut:** portal players start playing within seconds. Narrative is friction
+before the hook, and it is the opposite of "playable in five seconds".
+
+### Achievements, leaderboards, daily rewards
+
+**Why cut:** all three are retention scaffolding around a loop that has not yet
+proven it retains. Leaderboards additionally break the portal abstraction —
+CrazyGames has an API and Poki does not, so they would be the first feature to
+force portal-specific game code. See ADR 0002.
+
+**Build when:** the loop retains on its own, and then only via an optional
+`PortalAdapter` method with a no-op default.
+
+### Settings menu beyond mute
+
+**Why cut:** mute is the only setting a portal game genuinely needs. Everything
+else is a screen the player has to dismiss.
+
+### Localisation
+
+**Why cut:** Beeline is designed to be understood with almost no text. If it
+needs translating to be playable, the onboarding is wrong. `getLocale()` already
+exists on the adapter for when this changes.
+
+### Cosmetic unlocks
+
+**Why cut:** requires art volume we do not have, and monetises nothing —
+rewarded video is the revenue model, not cosmetics.
+
+---
+
 ## How to add to this list
 
 Anything you were tempted to build but did not. Include what would change your
