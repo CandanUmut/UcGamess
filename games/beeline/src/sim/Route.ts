@@ -128,6 +128,35 @@ export class Route {
     this.updateTip();
   }
 
+  /**
+   * Recomputes arc lengths after the points have been moved in place.
+   *
+   * Wind bends stored points every frame, which changes the true length of the
+   * path. Without this the cumulative table would describe the shape the player
+   * originally drew, and bees would bunch or stretch as the line bowed.
+   *
+   * `liveLength` is scaled by the same ratio, so bending a route neither
+   * revives nor kills it — the wind changes its *shape*, and decay alone
+   * governs its life.
+   */
+  rebuildLengths(): void {
+    const before = this.poly.length;
+    const fraction = before > 0 ? this.liveLength / before : 1;
+
+    const { pts, cum, count } = this.poly;
+    let total = 0;
+    for (let i = 1; i < count; i += 1) {
+      const dx = (pts[i * 2] ?? 0) - (pts[(i - 1) * 2] ?? 0);
+      const dy = (pts[i * 2 + 1] ?? 0) - (pts[(i - 1) * 2 + 1] ?? 0);
+      total += Math.hypot(dx, dy);
+      cum[i] = total;
+    }
+
+    this.poly.length = total;
+    this.liveLength = Math.min(total, fraction * total);
+    this.updateTip();
+  }
+
   /** Position and tangent at arc distance `s`, written into `out`. */
   sample(s: number, out: SamplePoint): SamplePoint {
     return sampleAt(this.poly, s, out);

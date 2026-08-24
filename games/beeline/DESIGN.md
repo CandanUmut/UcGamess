@@ -509,7 +509,101 @@ form on a "buy upgrade" or "next day" button would fire several times per press.
 
 ---
 
-## 11. Success criteria
+## 11. Playtest 1 and Stage 3
+
+First real playtest, on desktop and phone. Three findings, two of which changed
+the design.
+
+### The refresh gesture was undiscoverable — fixed
+
+> _"the ghost trail i don't know how to revive that i just draw new lines"_
+
+The player who **designed** the retreat mechanic could not find how to refresh a
+route, and fell back to drawing new lines from the hive every time. If it is not
+discoverable to them, it is not discoverable to anyone.
+
+The old rule was: begin a drag within 120px of a route's tip to extend it,
+otherwise you get a new route. That is a second gesture, and nothing on screen
+taught it.
+
+**There is no longer a gesture to discover.** Dragging toward a flower always
+works:
+
+| Where the drag starts   | What happens          | Cost                   |
+| ----------------------- | --------------------- | ---------------------- |
+| Near a route's live tip | Extends that route    | only the decayed piece |
+| Anywhere else           | Redraws from the hive | the full length        |
+
+Plus **aim assist**: a drag ending within 130px of a flower snaps onto it.
+Landing inside the reach ring by thumb is genuinely hard, and a route that stops
+a few pixels short looks connected but pays nothing — the most confusing
+possible failure.
+
+The economy that justifies decaying from the far end is intact. It is now
+something a player _notices_ rather than something they must be _taught_.
+
+### Decay was too fast — retuned
+
+> _"Too fast — felt like nagging"_
+
+At the old tuning, five routes demanded roughly twenty gestures per 45-second
+day. Hold time went 6s → 12s and retreat 45px/s → 26px/s:
+
+|                       | Before        | After             |
+| --------------------- | ------------- | ----------------- |
+| Produces for          | ~7.6s         | **~15s**          |
+| Grace before death    | ~3s           | **~7s**           |
+| Measured refresh cost | 85px of 267px | **93px of 266px** |
+
+About half the hand traffic, same 2.9× refresh discount.
+
+### The verb survives, but needed feedback
+
+> _"Fine but flat — needs feedback"_
+
+Not a rethink — the drawing works, nothing acknowledged doing it well. Added
+collection pops, deposit sparks, scatter puffs, a draw trail, a quota-bar punch,
+and **audio synthesised at boot** rather than shipped: six one-shots and a
+seamless hive loop generated into Phaser's audio cache, costing **zero bytes of
+download** and routing through the core AudioManager so ad ducking and mute work
+unchanged.
+
+---
+
+## 12. Bugs found while building Stage 3
+
+Recorded because each was invisible until something specific was tried.
+
+**The save was never loaded.** Beeline has no preload scene, and
+`SaveManager.load()` — the call that hydrates the cache from storage — lives in
+`BasePreloadScene`. Writes persisted; reads always returned the default. Within
+a single session everything looked perfect, and progress silently reset on every
+reload. Offline accrual could never have fired. `GameScene.bootstrap()` now
+awaits the load before starting day one.
+
+**The Honey Store upgrade did nothing.** Offline accrual had both a window
+(2h) and a cap (200) at 90/hour — so the window always ran out at 180 first and
+the cap was never reached. Buying the upgrade raised a ceiling nothing touched.
+The window is now fixed and generous, and the cap is the single number the
+upgrade moves. A test asserts the cap binds at every level.
+
+**Phaser's types are global, so a type-only import still typechecks.**
+`import type Phaser from 'phaser'` plus `Phaser.Input.Events.POINTER_UP` compiles
+cleanly — the types resolve against the ambient `declare namespace Phaser` — and
+then throws `Phaser is not defined` at runtime. TypeScript cannot catch this.
+**If you use `Phaser.` as a value, the import must be a value import**, and the
+linter will try to "fix" it back the moment the last value use is removed.
+
+**Container and Shape hit areas silently did not fire.** Night-screen buttons
+received nothing: the scene got `POINTER_DOWN` and `POINTER_UP`, six interactive
+objects were registered, the camera was identity and the pointer's world
+coordinates were correct — but `hitTestPointer` returned zero. Both a Container
+hit area and `Rectangle.setInteractive()` failed. A `Zone` works. All buttons
+now carry their input on a Zone.
+
+---
+
+## 13. Success criteria
 
 Not submission-ready until all of these hold:
 

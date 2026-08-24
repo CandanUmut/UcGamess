@@ -1,28 +1,42 @@
 import { createGame } from '@ucgames/core';
-import { PrototypeScene } from './scenes/PrototypeScene.ts';
+import { GameScene } from './scenes/GameScene.ts';
+import { NightScene } from './scenes/NightScene.ts';
 import { COLORS } from './config/tuning.ts';
+import { SAVE_KEYS } from './game/SaveState.ts';
 
 /**
- * Stage 2 boots straight into the prototype — no preload scene, no menu.
+ * Boots straight into the game — no preload scene, no menu.
  *
- * The prototype ships no external assets (textures are generated at boot, see
- * render/textures.ts), so there is nothing to preload and a loading screen
- * would only delay the one thing being tested. Stage 3 restores the full
- * Preload → Menu → Game → Night flow.
+ * Nothing is preloaded: sprites are generated at boot in render/textures.ts and
+ * audio is synthesised in audio/Sfx.ts, so there is nothing to fetch and a
+ * loading screen would only delay the first drag. That is the whole reason the
+ * game is interactive in well under a second, which is the single largest
+ * factor in conversion-to-play.
  */
 async function boot(): Promise<void> {
-  const { context } = await createGame({
+  const { game, context } = await createGame({
     parent: 'game',
     backgroundColor: COLORS.background,
-    saveKeys: [],
-    scenes: [PrototypeScene],
+    saveKeys: SAVE_KEYS,
+    scenes: [GameScene, NightScene],
   });
 
   // Nothing was preloaded, but the portal still has to be told the game is
-  // interactive or it will keep showing its own loading overlay.
+  // interactive or it keeps showing its own loading overlay.
   context.portal.loadingFinished();
 
   document.getElementById('boot')?.classList.add('hidden');
+
+  // Harness hook for the automated functional and performance checks. It runs
+  // against a production build, so this cannot be behind __UCGAMES_DEV__.
+  // Removed before submission.
+  game.events.once('ready', () => {
+    const scene = game.scene.getScene('Game') as GameScene | null;
+    if (scene) {
+      (window as unknown as Record<string, unknown>).__beeline = scene.debugHandle();
+    }
+    (window as unknown as Record<string, unknown>).__game = game;
+  });
 
   if (__UCGAMES_DEV__) {
     (window as unknown as Record<string, unknown>).ucgames = {
