@@ -26,6 +26,23 @@ export class Hud {
   private readonly timerText: Phaser.GameObjects.Text;
   private readonly banner: Phaser.GameObjects.Text;
 
+  /**
+   * Wind readout.
+   *
+   * Wasp threat radii are drawn on the field so danger is never invisible, but
+   * wind shipped with no indicator at all — the player could only react to
+   * routes bending, never plan around them. An arrow pointing where the wind
+   * pushes, sized by strength, makes it something to route around.
+   */
+  private readonly windArrow: Phaser.GameObjects.Graphics;
+  private readonly windLabel: Phaser.GameObjects.Text;
+  private windX = 0;
+  private windY = 0;
+  private windStrength = 0;
+
+  /** Swarm split between carrying and opening new routes. */
+  private readonly swarmText: Phaser.GameObjects.Text;
+
   private barWidth = 560;
   private lastHoney = 0;
   private metShown = false;
@@ -70,6 +87,15 @@ export class Hud {
       .setOrigin(0.5)
       .setAlpha(0);
 
+    this.windArrow = scene.add.graphics();
+    this.windLabel = scene.add
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '14px', color: COLORS.dim })
+      .setOrigin(0.5, 0);
+
+    this.swarmText = scene.add
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: COLORS.dim })
+      .setOrigin(0, 0.5);
+
     this.root.add([
       this.dayText,
       this.timerText,
@@ -78,8 +104,69 @@ export class Hud {
       this.quotaTick,
       this.honeyText,
       this.banner,
+      this.windArrow,
+      this.windLabel,
+      this.swarmText,
     ]);
   }
+
+  /** Wind direction and strength, in field units. Strength 0 hides it. */
+  setWind(x: number, y: number, strength: number): void {
+    this.windX = x;
+    this.windY = y;
+    this.windStrength = strength;
+    this.redrawWind();
+  }
+
+  private redrawWind(): void {
+    const g = this.windArrow;
+    g.clear();
+
+    const visible = this.windStrength > 0.01;
+    this.windLabel.setVisible(visible);
+    if (!visible) return;
+
+    const cx = this.windAnchorX;
+    const cy = this.windAnchorY;
+    // Length carries strength, so a glance gives both facts at once.
+    const len = 16 + Math.min(1, this.windStrength / 34) * 20;
+    const tipX = cx + this.windX * len;
+    const tipY = cy + this.windY * len;
+
+    g.lineStyle(3, 0x8fd0ff, 0.85);
+    g.beginPath();
+    g.moveTo(cx - this.windX * len, cy - this.windY * len);
+    g.lineTo(tipX, tipY);
+    g.strokePath();
+
+    // Arrowhead.
+    const nx = -this.windY;
+    const ny = this.windX;
+    g.fillStyle(0x8fd0ff, 0.95);
+    g.fillTriangle(
+      tipX + this.windX * 8,
+      tipY + this.windY * 8,
+      tipX - this.windX * 4 + nx * 6,
+      tipY - this.windY * 4 + ny * 6,
+      tipX - this.windX * 4 - nx * 6,
+      tipY - this.windY * 4 - ny * 6,
+    );
+
+    this.windLabel.setText('wind').setPosition(cx, cy + 24);
+  }
+
+  /** Bees carrying versus bees opening routes — what a draw just cost. */
+  setSwarm(foraging: number, building: number): void {
+    this.swarmText.setText(
+      building > 0
+        ? `${foraging} foraging · ${building} building`
+        : `${foraging} foraging`,
+    );
+    this.swarmText.setColor(building > 0 ? '#ffd966' : COLORS.dim);
+  }
+
+  private windAnchorX = 0;
+  private windAnchorY = 0;
 
   layout(safe: Phaser.Geom.Rectangle): void {
     const top = safe.y + 26;
@@ -94,6 +181,11 @@ export class Hud {
     this.quotaTick.setPosition(barX + this.barWidth, top);
     this.honeyText.setPosition(safe.centerX, top + 16);
     this.banner.setPosition(safe.centerX, safe.y + 140);
+
+    this.swarmText.setPosition(safe.x + 24, top + 34);
+    this.windAnchorX = safe.right - 62;
+    this.windAnchorY = top + 46;
+    this.redrawWind();
   }
 
   update(day: number, honey: number, quota: number, secondsLeft: number): void {

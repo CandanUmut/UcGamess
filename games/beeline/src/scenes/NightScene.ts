@@ -78,7 +78,7 @@ export class NightScene extends BaseScene {
       .text(
         DESIGN_WIDTH / 2,
         78,
-        met ? `Day ${result.day} complete` : `Day ${result.day}`,
+        met ? `Day ${result.day} complete` : 'The hive goes hungry',
         {
           fontFamily: FONT,
           fontSize: '38px',
@@ -94,12 +94,25 @@ export class NightScene extends BaseScene {
         122,
         met
           ? `${Math.floor(result.honey)} honey — quota ${result.quota} met`
-          : `${Math.floor(result.honey)} honey — ${result.quota} needed`,
+          : `${Math.floor(result.honey)} of ${result.quota} needed — run ended on day ${result.day}`,
         { fontFamily: FONT, fontSize: '21px', color: COLORS.dim },
       )
       .setOrigin(0.5);
 
-    if (result.isBest) {
+    if (!met) {
+      // What a failed run leaves behind, said plainly. A fail state that looks
+      // like it wiped everything is how players quit; this one never does.
+      this.add
+        .text(
+          DESIGN_WIDTH / 2,
+          150,
+          save.bestRunDay > 0
+            ? `Best run: day ${save.bestRunDay}  ·  your upgrades carry over`
+            : 'Your upgrades carry over',
+          { fontFamily: FONT, fontSize: '18px', color: '#ffd966' },
+        )
+        .setOrigin(0.5);
+    } else if (result.isBest) {
       this.add
         .text(DESIGN_WIDTH / 2, 150, 'Best day yet', {
           fontFamily: FONT,
@@ -233,6 +246,7 @@ export class NightScene extends BaseScene {
     }
 
     // Always present, never delayed, never dimmed. The non-ad path out.
+    const met = result.outcome === 'met';
     this.buttons.push(
       new Button(this, {
         x:
@@ -241,7 +255,7 @@ export class NightScene extends BaseScene {
             : DESIGN_WIDTH / 2,
         y,
         width: 350,
-        label: `Start day ${result.day + 1}`,
+        label: met ? `Start day ${result.day + 1}` : 'Start a new run',
         tint: 0x4ade80,
         onClick: () => void this.onNextDay(),
       }),

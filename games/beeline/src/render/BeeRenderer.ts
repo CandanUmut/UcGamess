@@ -28,6 +28,8 @@ export interface BeeRenderer {
 
 const BEE_SCALE = 0.62;
 const LADEN_SCALE = 0.82;
+/** Pale, so a wave of builders reads as distinct from foraging traffic. */
+const BUILDER_TINT = 0xbfe6ff;
 
 class BlitterBeeRenderer implements BeeRenderer {
   readonly mode: RendererMode = 'blitter';
@@ -62,7 +64,14 @@ class BlitterBeeRenderer implements BeeRenderer {
       // 16px texture to keep the dot centred on the simulated point.
       bob.x = bee.prevX + (bee.x - bee.prevX) * alpha - 8;
       bob.y = bee.prevY + (bee.y - bee.prevY) * alpha - 8;
-      bob.tint = bee.carrying > 0 ? COLORS.beeLaden : COLORS.bee;
+      // Builders are tinted apart so the cost of a draw is visible: a burst of
+      // pale bees streaming out means the swarm is opening a line, not earning.
+      bob.tint =
+        bee.state === 'building'
+          ? BUILDER_TINT
+          : bee.carrying > 0
+            ? COLORS.beeLaden
+            : COLORS.bee;
     }
   }
 
@@ -108,7 +117,9 @@ class SpriteBeeRenderer implements BeeRenderer {
       sprite.setPosition(x, y);
 
       const laden = bee.carrying > 0;
-      sprite.setTint(laden ? COLORS.beeLaden : COLORS.bee);
+      sprite.setTint(
+        bee.state === 'building' ? BUILDER_TINT : laden ? COLORS.beeLaden : COLORS.bee,
+      );
       sprite.setScale(laden ? LADEN_SCALE : BEE_SCALE);
 
       // Point along travel direction. Free here, unavailable on a Bob, and the

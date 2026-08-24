@@ -71,6 +71,71 @@
         text-transform: uppercase;
       }
 
+      /*
+        Portrait prompt.
+
+        Lives in the DOM rather than in Phaser on purpose: at 16:9 in portrait
+        the canvas is only a strip across the middle third of the screen, so
+        anything drawn inside the game would sit inside that same strip and
+        leave the empty area unexplained. Only a DOM overlay can cover it.
+      */
+      #rotate-gate {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: #12100c;
+        color: #ffd966;
+        text-align: center;
+        z-index: 10;
+      }
+
+      #rotate-gate.visible {
+        display: flex;
+      }
+
+      .rotate-icon {
+        width: 96px;
+        height: 96px;
+        animation: rotate-hint 2.4s ease-in-out infinite;
+      }
+
+      .rotate-title {
+        margin: 20px 0 6px;
+        font-size: 22px;
+        font-weight: 600;
+        color: #f4f4f8;
+      }
+
+      .rotate-sub {
+        margin: 0;
+        font-size: 15px;
+        color: #8a8aa0;
+      }
+
+      @keyframes rotate-hint {
+        0%,
+        30% {
+          transform: rotate(0deg);
+        }
+        55%,
+        85% {
+          transform: rotate(-90deg);
+        }
+        100% {
+          transform: rotate(0deg);
+        }
+      }
+
+      /* Respect users who have asked for less motion. */
+      @media (prefers-reduced-motion: reduce) {
+        .rotate-icon {
+          animation: none;
+          transform: rotate(-90deg);
+        }
+      }
+
       #boot.hidden {
         display: none;
       }
