@@ -14,11 +14,13 @@ export interface DragIntent {
 
 export interface CommitResult {
   kind: IntentKind | 'rejected';
-  /** Length the player actually had to draw. */
+  /** Length the player actually had to draw. Workers are charged on this. */
   drawnLength: number;
   /** What drawing it from scratch would have cost. */
   fullLength: number;
   connected: boolean;
+  /** The route that was created or changed, 0 if none. */
+  routeId: number;
 }
 
 /**
@@ -103,6 +105,7 @@ export function commitDrag(
         drawnLength,
         fullLength: Math.max(before, route.poly.length),
         connected,
+        routeId: route.id,
       };
     }
     // The route died mid-drag. Fall through and treat it as a fresh draw
@@ -119,7 +122,13 @@ export function commitDrag(
   if (existing) {
     existing.replaceWith(coords, field.routeHoldSeconds);
     field.retarget(existing);
-    return { kind: 'fresh', drawnLength, fullLength: drawnLength, connected };
+    return {
+      kind: 'fresh',
+      drawnLength,
+      fullLength: drawnLength,
+      connected,
+      routeId: existing.id,
+    };
   }
 
   const route = field.createRoute(coords);
@@ -128,6 +137,7 @@ export function commitDrag(
     drawnLength,
     fullLength: drawnLength,
     connected: route ? connected : false,
+    routeId: route ? route.id : 0,
   };
 }
 

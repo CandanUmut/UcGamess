@@ -3,6 +3,7 @@ import { GameScene } from './scenes/GameScene.ts';
 import { NightScene } from './scenes/NightScene.ts';
 import { COLORS } from './config/tuning.ts';
 import { SAVE_KEYS } from './game/SaveState.ts';
+import { installRotateGate } from './ui/rotateGate.ts';
 
 /**
  * Boots straight into the game — no preload scene, no menu.
@@ -36,6 +37,19 @@ async function boot(): Promise<void> {
       (window as unknown as Record<string, unknown>).__beeline = scene.debugHandle();
     }
     (window as unknown as Record<string, unknown>).__game = game;
+
+    // Installed here rather than immediately after createGame(): the gate
+    // applies its state on install, and if the Game scene does not exist yet
+    // that first pause is dropped and the countdown runs behind the prompt.
+    installRotateGate({
+      onBlock: () => scene?.setExternallyPaused(true),
+      onUnblock: () => {
+        scene?.setExternallyPaused(false);
+        // The viewport changed shape; make the scale manager re-measure rather
+        // than wait out its polling interval.
+        game.scale.refresh();
+      },
+    });
   });
 
   if (__UCGAMES_DEV__) {

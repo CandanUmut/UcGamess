@@ -25,6 +25,8 @@ export interface FieldEvents {
   deposited: number;
   /** Positions where bees were scattered by a wasp. */
   scattered: Array<{ x: number; y: number }>;
+  /** Workers committed to a newly drawn route this step. */
+  dispatched: number;
 }
 
 const NO_FEATURES: DayFeatures = {
@@ -62,12 +64,14 @@ export class Field {
   /** Multiplier on effective swarm size, for the rewarded swarm boost. */
   swarmBoost = 1;
 
-  events: FieldEvents = { collected: [], deposited: 0, scattered: [] };
+  events: FieldEvents = { collected: [], deposited: 0, scattered: [], dispatched: 0 };
 
   private elapsed = 0;
   private windAngle = Math.random() * Math.PI * 2;
   private windStrength = 0;
   private patchPool = TUNING.patch.basePool;
+  /** Current day, used to widen the field and size flower pools. */
+  private day = 1;
 
   constructor() {
     this.applyStats();
@@ -106,6 +110,7 @@ export class Field {
     this.swarmBoost = boost;
     this.honey = 0;
     this.elapsed = 0;
+    this.day = day;
 
     this.clearRoutes();
     this.patches = [];
@@ -161,9 +166,18 @@ export class Field {
   // ---------------------------------------------------------------- patches
 
   private randomPatchPosition(kind: PatchKind): { x: number; y: number } {
-    const minRadius =
-      kind === 'rich' ? TUNING.patch.richMinRadius : TUNING.patch.minRadius;
-    const maxRadius = TUNING.patch.maxRadius;
+    // The field widens as days pass. Distance is already expensive — constant
+    // retreat speed, more workers to draw — so spreading the flowers ramps
+    // difficulty using pressure that already exists rather than adding a new
+    // one. Bounded by the canvas: this is a fixed 16:9 view, not a scrolling
+    // world, so "larger map" means the flowers use more of it.
+    const spread = (this.day - 1) * TUNING.patch.radiusPerDay;
+    const minRadius = Math.min(
+      (kind === 'rich' ? TUNING.patch.richMinRadius : TUNING.patch.minRadius) +
+        spread * 0.5,
+      340,
+    );
+    const maxRadius = Math.min(TUNING.patch.maxRadius + spread, 560);
 
     // Bounds leave room for the reach ring, which is the thing the player aims
     // at — a patch whose ring runs off the edge is unaimable at exactly the
@@ -257,6 +271,32 @@ export class Field {
     return best;
   }
 
+  /**
+   * The live route passing nearest to (x, y), for press-and-hold erase.
+   *
+   * Tests the whole path rather than just the tip: the player is pointing at a
+   * line they can see, and asking them to find one specific end of it is the
+   * mistake that made the old refresh gesture undiscoverable.
+   */
+  routeNear(x: number, y: number, tolerance = 34): Route | null {
+    let best: Route | null = null;
+    let bestDist = tolerance;
+
+    for (const route of this.routes) {
+      if (route.dead) continue;
+      // Sampling every 14px is finer than the tolerance, so no gap is missed.
+      for (let s = 0; s <= route.liveLength; s += 14) {
+        route.sample(s, scratch);
+        const dist = Math.hypot(scratch.x - x, scratch.y - y);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = route;
+        }
+      }
+    }
+    return best;
+  }
+
   /** The live route already serving `patch`, if any. */
   routeTargeting(patch: Patch): Route | null {
     return this.routes.find((r) => !r.dead && r.target === patch) ?? null;
@@ -296,6 +336,69 @@ export class Field {
     route.target = this.nearestPatchTo(route.tipX, route.tipY);
   }
 
+  /**
+   * Commits workers to open a freshly drawn stretch of route.
+   *
+   * This is the price of drawing. `drawnLength` is what the player's gesture
+   * actually covered — the piece that was missing, not the whole route — so
+   * refreshing a stub costs a handful of bees and redrawing from the hive costs
+   * a crowd. The cost is paid in throughput: a worker flies the line once and
+   * comes back empty, so for a few seconds the swarm carries less.
+   *
+   * Never refuses. If the swarm is already stretched, fewer workers go and the
+   * route simply opens with less fanfare — a drag that silently does nothing is
+   * the worst thing a touchscreen game can do.
+   */
+  dispatchBuilders(route: Route, drawnLength: number): number {
+    const wanted = Math.ceil(drawnLength * TUNING.bee.workersPerPixel);
+    const ceiling = Math.floor(this.bees.length * TUNING.bee.maxWorkerFraction);
+    const budget = Math.max(0, Math.min(wanted, ceiling));
+    if (budget === 0) return 0;
+
+    let sent = 0;
+
+    /**
+     * Only bees that are at the hive or already heading back to it can be
+     * conscripted. Never one that is outbound or on a flower.
+     *
+     * Taking an in-flight forager was measured as a disaster: with a redraw
+     * every couple of seconds, bees 90% of the way to a flower were repeatedly
+     * reset to the start of the line and nobody ever arrived. Honey flatlined
+     * and day one — which must be unmissable — failed.
+     *
+     * The rule also gives the cost a nice shape on its own: drawing while the
+     * swarm is out in the field is cheap, and drawing just as a wave lands
+     * costs the most. It is never destructive, only an opportunity cost.
+     */
+    const conscriptable = (bee: Bee): boolean => {
+      if (bee.state === 'idle' || bee.state === 'queued') return true;
+      return bee.state === 'inbound' && bee.carrying === 0;
+    };
+
+    for (const bee of this.bees) {
+      if (sent >= budget) break;
+      if (!conscriptable(bee)) continue;
+
+      this.releaseBee(bee);
+      route.beeCount += 1;
+      bee.routeId = route.id;
+      bee.s = 0;
+      bee.carrying = 0;
+      bee.state = 'building';
+      sent += 1;
+    }
+
+    this.events.dispatched += sent;
+    return sent;
+  }
+
+  /** Bees currently opening a route rather than carrying nectar. */
+  countBuilders(): number {
+    let building = 0;
+    for (const bee of this.bees) if (bee.state === 'building') building += 1;
+    return building;
+  }
+
   killRoute(route: Route): void {
     route.dead = true;
     const index = this.routes.indexOf(route);
@@ -319,9 +422,7 @@ export class Field {
   step(dt: number): void {
     this.elapsed += dt;
 
-    for (const patch of this.patches) {
-      patch.step(dt, (kind) => this.randomPatchPosition(kind));
-    }
+    for (const patch of this.patches) patch.step(dt);
 
     if (this.windStrength > 0) this.stepWind(dt);
 
@@ -421,7 +522,10 @@ export class Field {
     // Wasps only threaten bees that are actually out in the field.
     if (
       this.wasps.length > 0 &&
-      (bee.state === 'outbound' || bee.state === 'inbound' || bee.state === 'collect')
+      (bee.state === 'outbound' ||
+        bee.state === 'inbound' ||
+        bee.state === 'collect' ||
+        bee.state === 'building')
     ) {
       for (const wasp of this.wasps) {
         if (!wasp.threatens(bee.x, bee.y, this.hiveX, this.hiveY)) continue;
@@ -495,6 +599,7 @@ export class Field {
         return;
       }
 
+      case 'building':
       case 'outbound':
       case 'inbound': {
         const route = this.routeById(bee.routeId);
@@ -504,7 +609,15 @@ export class Field {
           return;
         }
 
-        if (bee.state === 'outbound') {
+        if (bee.state === 'building') {
+          // Flies the new line once to open it, then comes home empty. The lost
+          // round trip is the cost of the draw.
+          bee.s += speed * dt;
+          if (bee.s >= route.liveLength) {
+            bee.s = route.liveLength;
+            bee.state = 'inbound';
+          }
+        } else if (bee.state === 'outbound') {
           bee.s += speed * dt;
           if (bee.s >= route.liveLength) {
             bee.s = route.liveLength;
@@ -604,7 +717,7 @@ export class Field {
   /** Returns and clears this frame's events. */
   drainEvents(): FieldEvents {
     const out = this.events;
-    this.events = { collected: [], deposited: 0, scattered: [] };
+    this.events = { collected: [], deposited: 0, scattered: [], dispatched: 0 };
     return out;
   }
 

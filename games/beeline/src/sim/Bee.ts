@@ -3,6 +3,11 @@ export type BeeState =
   | 'idle'
   /** Assigned, waiting its turn to leave the hive. Keeps the stream even. */
   | 'queued'
+  /**
+   * Flying a newly drawn route to open it. Carries nothing and collects
+   * nothing — this is what drawing costs.
+   */
+  | 'building'
   /** Flying outward along a route. */
   | 'outbound'
   /** Stopped at a patch, filling up. */

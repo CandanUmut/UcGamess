@@ -42,6 +42,23 @@ export interface BeeTuning {
    * roundTripTime / beesPerRoute is the value that fills a route evenly.
    */
   departIntervalSeconds: number;
+  /**
+   * Workers dispatched per pixel of route drawn.
+   *
+   * This is what drawing costs. A new line does not appear for free: workers
+   * peel off the swarm to fly it, and while they are out there they are not
+   * carrying nectar. Because the count scales with length, refreshing a short
+   * stub costs a handful of bees and redrawing a long route costs a crowd —
+   * which is what finally makes the retreat-from-the-tip economy matter in
+   * resources rather than only in thumb effort.
+   *
+   * Charging the swarm rather than inventing a currency keeps the cost inside
+   * the decision the game is already about: the swarm is finite, and every
+   * route you commit to is swarm you are not spending elsewhere.
+   */
+  workersPerPixel: number;
+  /** Never commit more than this fraction of the swarm to building at once. */
+  maxWorkerFraction: number;
 }
 
 export interface RouteTuning {
@@ -75,7 +92,16 @@ export interface PatchTuning {
   aimAssistRadius: number;
   basePool: number;
   poolPerDay: number;
-  rebloomSeconds: number;
+  /**
+   * How much the field spreads per day.
+   *
+   * Distance is already structurally expensive — retreat speed is constant in
+   * px/s, so a long route loses its flower just as fast but costs far more to
+   * rebuild, and now more workers to draw. Pushing flowers outward therefore
+   * ramps difficulty using pressure that already exists, rather than adding a
+   * new one.
+   */
+  radiusPerDay: number;
   richMinRadius: number;
   richYieldMultiplier: number;
   nightBloomMultiplier: number;
@@ -155,6 +181,11 @@ export const TUNING: Tuning = {
     steerLerp: 0.16,
     confusedSeconds: 0.4,
     departIntervalSeconds: 0.045,
+    // ~12 workers for a 400px route, ~3 for a 90px refresh. Tuned down hard
+    // from 0.08/0.55, which took over half a day-one swarm on a single draw and
+    // made day one unwinnable — the exact failure mode of taxing the core verb.
+    workersPerPixel: 0.03,
+    maxWorkerFraction: 0.35,
   },
 
   // Retuned after the first playtest, which reported the original pacing as
@@ -178,9 +209,13 @@ export const TUNING: Tuning = {
     maxRadius: 520,
     reachRadius: 85,
     aimAssistRadius: 130,
-    basePool: 200,
-    poolPerDay: 45,
-    rebloomSeconds: 3.5,
+    // Sized so one flower under the full swarm's attention runs dry in roughly
+    // 25-35 seconds at any point in the progression. Big enough that a day is
+    // never lost to an empty field, small enough that standing still is wrong.
+    // Scales with the day because the swarm's throughput does too.
+    basePool: 180,
+    poolPerDay: 70,
+    radiusPerDay: 20,
     richMinRadius: 400,
     richYieldMultiplier: 3,
     nightBloomMultiplier: 4,

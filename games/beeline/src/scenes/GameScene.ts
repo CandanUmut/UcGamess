@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { BaseGameplayScene, DESIGN_HEIGHT, DESIGN_WIDTH } from '@ucgames/core';
 import { COLORS, TUNING } from '../config/tuning.ts';
 import { Field } from '../sim/Field.ts';
-import { pushIfSpaced } from '../sim/polyline.ts';
+import type { Route } from '../sim/Route.ts';
+import { pushIfSpaced, type SamplePoint } from '../sim/polyline.ts';
 import { createGeneratedTextures } from '../render/textures.ts';
 import { createBeeRenderer, type BeeRenderer } from '../render/BeeRenderer.ts';
 import { RouteRenderer } from '../render/RouteRenderer.ts';
@@ -26,6 +27,13 @@ import type { NightData } from './NightScene.ts';
 
 const DEPTH = { patch: 10, hive: 20, route: 30, bee: 40, juice: 50, hud: 100 } as const;
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+/** How long a finger must rest on a route to erase it. */
+const ERASE_HOLD_SECONDS = 0.75;
+/** Movement beyond this cancels the hold and treats the gesture as a draw. */
+const ERASE_MOVE_TOLERANCE = 18;
+
+const eraseSample: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
 
 /**
  * The game.
@@ -60,6 +68,14 @@ export class GameScene extends BaseGameplayScene {
   private drawCoords: number[] = [];
   private intent: DragIntent | null = null;
   private previewGfx!: Phaser.GameObjects.Graphics;
+
+  // --- press-and-hold erase ---------------------------------------------
+  private eraseCandidate: Route | null = null;
+  private holdSeconds = 0;
+  private pressX = 0;
+  private pressY = 0;
+
+  private externallyPaused = false;
 
   // --- first-run teaching ----------------------------------------------
   private hintGfx!: Phaser.GameObjects.Graphics;
@@ -156,7 +172,10 @@ export class GameScene extends BaseGameplayScene {
 
     this.idleSeconds = 0;
     this.sfx.startHum();
-    this.startGameplay();
+    // Respect a pause that is already in force — the rotate gate can be up
+    // before the first day ever starts, and starting gameplay here anyway was
+    // measured to let the countdown run behind the prompt.
+    if (!this.externallyPaused) this.startGameplay();
   }
 
   private endDay(): void {
@@ -171,10 +190,19 @@ export class GameScene extends BaseGameplayScene {
 
     this.save.honey += Math.floor(result.honey);
     this.save.bestDayHoney = Math.max(this.save.bestDayHoney, Math.floor(result.honey));
+    this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     this.save.lastPlayedAt = Date.now();
-    // The day only advances when the quota was met. A missed day is replayed,
-    // so a bad run costs time rather than locking progression behind a wall.
-    if (result.outcome === 'met') this.save.day = this.day + 1;
+
+    // Missing the quota ends the run, but never the progress. Upgrades and
+    // unspent honey persist and the next run starts at day one — which is now
+    // easy, because the swarm is bigger than it was. That is what keeps a fail
+    // state from ending the session: "one more run" with a stronger hive,
+    // rather than "all of that for nothing".
+    if (result.outcome === 'met') {
+      this.save.day = this.day + 1;
+    } else {
+      this.save.day = 1;
+    }
     this.persist();
 
     this.hud.setVisible(false);
@@ -193,14 +221,20 @@ export class GameScene extends BaseGameplayScene {
     this.scene.pause();
   }
 
-  /** Rewarded "+15s": resume the same board rather than restarting it. */
+  /**
+   * Rewarded "+15s": resume the same board rather than restarting it.
+   *
+   * With a real fail state this is now a genuine rescue — it saves the run, not
+   * just the day — which is exactly the kind of rewarded offer that is worth
+   * watching an ad for and does not feel like a shakedown.
+   */
   private resumeWithExtraTime(): void {
     this.scene.stop('Night');
     this.scene.resume();
 
     // Roll back the day-end bookkeeping, since the day is continuing.
     this.save.honey -= Math.floor(this.field.honey);
-    if (this.save.day > this.day) this.save.day = this.day;
+    this.save.day = this.day;
     this.persist();
 
     this.phase = 'playing';
@@ -259,6 +293,16 @@ export class GameScene extends BaseGameplayScene {
   private bindInput(): void {
     this.input.on(Phaser.Input.Events.POINTER_DOWN, (p: Phaser.Input.Pointer) => {
       if (this.phase !== 'playing') return;
+
+      this.pressX = p.worldX;
+      this.pressY = p.worldY;
+      this.holdSeconds = 0;
+
+      // A press that lands on an existing route *might* be an erase. It only
+      // becomes one if the finger stays put; any real movement turns it back
+      // into a draw. That keeps one gesture from stealing the other.
+      this.eraseCandidate = this.field.routeNear(p.worldX, p.worldY);
+
       this.intent = resolveDragStart(this.field, p.worldX, p.worldY);
       this.drawing = true;
       this.hasDrawnEver = true;
@@ -268,6 +312,16 @@ export class GameScene extends BaseGameplayScene {
 
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
       if (!this.drawing) return;
+
+      // Moved far enough that this is unambiguously a drag, not a hold.
+      if (
+        this.eraseCandidate &&
+        Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY) > ERASE_MOVE_TOLERANCE
+      ) {
+        this.eraseCandidate = null;
+        this.holdSeconds = 0;
+      }
+
       if (pushIfSpaced(this.drawCoords, p.worldX, p.worldY, TUNING.route.pointSpacing)) {
         this.juice.trail(p.worldX, p.worldY);
       }
@@ -285,22 +339,71 @@ export class GameScene extends BaseGameplayScene {
 
     const coords = this.drawCoords;
     const intent = this.intent;
+    const wasErasing = this.eraseCandidate;
     this.drawCoords = [];
     this.intent = null;
+    this.eraseCandidate = null;
+    this.holdSeconds = 0;
+
+    // Released before the hold completed: neither an erase nor a meaningful
+    // drag. Do nothing rather than dropping a stub route where they tapped.
+    if (wasErasing) return;
 
     if (!intent || coords.length < 4) return;
 
     const result = commitDrag(this.field, intent, coords);
-    if (result.kind !== 'rejected' && result.connected) {
-      this.sfx.playVaried('collect', 0.18, 400);
+    if (result.kind === 'rejected') return;
+
+    // Drawing costs workers, charged on what the gesture actually covered.
+    const route = this.field.routeById(result.routeId);
+    if (route) this.field.dispatchBuilders(route, result.drawnLength);
+
+    if (result.connected) this.sfx.playVaried('collect', 0.18, 400);
+  }
+
+  /** Advances the press-and-hold that erases a route. */
+  private updateEraseHold(dt: number): void {
+    const route = this.eraseCandidate;
+    if (!route || route.dead) {
+      this.eraseCandidate = null;
+      return;
     }
+
+    this.holdSeconds += dt;
+    if (this.holdSeconds < ERASE_HOLD_SECONDS) return;
+
+    this.field.killRoute(route);
+    this.sfx.playVaried('deposit', 0.25, 300);
+    for (let i = 0; i < 6; i += 1) {
+      this.juice.scatter(route.tipX, route.tipY);
+    }
+
+    // Consume the whole gesture so releasing does not also draw something.
+    this.eraseCandidate = null;
+    this.drawing = false;
+    this.drawCoords = [];
+    this.intent = null;
+    this.holdSeconds = 0;
+    this.previewGfx.clear();
+  }
+
+  /**
+   * Pauses gameplay for a reason outside the game — currently the portrait
+   * rotate prompt. The day timer must not run while the player physically
+   * cannot play, or they lose a day to a message meant to help them.
+   */
+  setExternallyPaused(paused: boolean): void {
+    this.externallyPaused = paused;
+    if (paused) this.stopGameplay();
+    else if (this.phase === 'playing') this.startGameplay();
   }
 
   // --------------------------------------------------------------- update
 
   protected fixedUpdate(dt: number): void {
-    if (this.phase !== 'playing') return;
+    if (this.phase !== 'playing' || this.externallyPaused) return;
 
+    this.updateEraseHold(dt);
     this.field.step(dt);
 
     this.secondsLeft -= dt;
@@ -323,6 +426,42 @@ export class GameScene extends BaseGameplayScene {
     );
     this.drawPreview();
     this.drawHint();
+    this.drawEraseHold();
+  }
+
+  /** The filling ring that shows a hold is about to erase a route. */
+  private drawEraseHold(): void {
+    const route = this.eraseCandidate;
+    if (!route || this.holdSeconds <= 0) return;
+
+    const progress = Math.min(1, this.holdSeconds / ERASE_HOLD_SECONDS);
+    const g = this.previewGfx;
+    g.clear();
+
+    // Dim the route it will remove, so there is no doubt which one is going.
+    g.lineStyle(3, 0xff7043, 0.5 * progress);
+    g.beginPath();
+    for (let s = 0; s <= route.liveLength; s += 12) {
+      route.sample(s, eraseSample);
+      if (s === 0) g.moveTo(eraseSample.x, eraseSample.y);
+      else g.lineTo(eraseSample.x, eraseSample.y);
+    }
+    g.strokePath();
+
+    const radius = 26;
+    g.lineStyle(5, 0x000000, 0.35);
+    g.strokeCircle(this.pressX, this.pressY, radius);
+    g.lineStyle(5, 0xff7043, 0.95);
+    g.beginPath();
+    g.arc(
+      this.pressX,
+      this.pressY,
+      radius,
+      -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * progress,
+      false,
+    );
+    g.strokePath();
   }
 
   override update(time: number, delta: number): void {
@@ -334,6 +473,12 @@ export class GameScene extends BaseGameplayScene {
 
     if (this.phase === 'playing') {
       this.hud.update(this.day, this.field.honey, dayQuota(this.day), this.secondsLeft);
+
+      const wind = this.field.windVector;
+      this.hud.setWind(wind.x, wind.y, wind.strength);
+
+      const building = this.field.countBuilders();
+      this.hud.setSwarm(this.field.bees.length - building, building);
     }
   }
 
@@ -360,6 +505,8 @@ export class GameScene extends BaseGameplayScene {
   private drawPreview(): void {
     const g = this.previewGfx;
     g.clear();
+    // While a hold is pending, the erase ring owns this layer.
+    if (this.eraseCandidate) return;
     if (!this.drawing || this.drawCoords.length < 4) return;
 
     // Extending is drawn in the route's own colour and fresh draws slightly
@@ -412,7 +559,16 @@ export class GameScene extends BaseGameplayScene {
   debugHandle(): Record<string, unknown> {
     return {
       hive: { x: this.field.hiveX, y: this.field.hiveY },
-      patches: () => this.field.patches.map((p) => ({ x: p.x, y: p.y, alive: p.alive })),
+      patches: () =>
+        this.field.patches.map((p) => ({
+          x: Math.round(p.x),
+          y: Math.round(p.y),
+          alive: p.alive,
+          pool: Math.round(p.pool),
+          kind: p.kind,
+        })),
+      builders: () => this.field.countBuilders(),
+      wind: () => this.field.windVector,
       stats: () => this.field.getStats(),
       routes: () =>
         this.field.routes.map((r) => ({
