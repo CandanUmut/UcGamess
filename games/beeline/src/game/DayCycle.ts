@@ -24,12 +24,20 @@ export function dayQuota(day: number): number {
   );
 }
 
-/** How many patches are in bloom on a given day, before the Bloom upgrade. */
+/**
+ * How many flowers bloom on a given day, before the Bloom upgrade.
+ *
+ * Day one has two rather than one. Now that a drained flower stays dead for the
+ * day, the first one *will* run dry inside 45 seconds — and the lesson only
+ * lands if there is somewhere to move to. A single flower would teach
+ * "everything ran out and I could do nothing", which is the wrong first
+ * impression entirely.
+ */
 export function patchesForDay(day: number): number {
-  if (day <= 1) return 1; // Day one is a single, unmissable target.
-  if (day <= 3) return 2;
-  if (day <= 6) return 3;
-  return 4;
+  if (day <= 1) return 2;
+  if (day <= 3) return 3;
+  if (day <= 6) return 4;
+  return 5;
 }
 
 export interface DayFeatures {

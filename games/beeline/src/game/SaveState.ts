@@ -14,6 +14,8 @@ export interface BeelineSave {
   day: number;
   levels: UpgradeLevels;
   bestDayHoney: number;
+  /** Furthest day reached across all runs. The thing a run is played for. */
+  bestRunDay: number;
   /** Epoch ms of the last day completed, for offline accrual. */
   lastPlayedAt: number;
 }
@@ -25,6 +27,7 @@ export function newSave(): BeelineSave {
     day: 1,
     levels: emptyLevels(),
     bestDayHoney: 0,
+    bestRunDay: 0,
     lastPlayedAt: Date.now(),
   };
 }
@@ -64,6 +67,7 @@ export function coerceSave(raw: unknown): BeelineSave {
     day: clampInt(data.day, 1, 9999) || 1,
     levels,
     bestDayHoney: clampNumber(data.bestDayHoney, 0, Number.MAX_SAFE_INTEGER, 0),
+    bestRunDay: clampInt(data.bestRunDay, 0, 9999),
     lastPlayedAt: clampNumber(data.lastPlayedAt, 0, Date.now(), Date.now()),
   };
 }

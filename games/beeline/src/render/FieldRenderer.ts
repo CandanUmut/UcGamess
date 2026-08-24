@@ -15,8 +15,14 @@ export class FieldRenderer {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly hiveGlow: Phaser.GameObjects.Image;
   private readonly waspGfx: Phaser.GameObjects.Graphics;
+  private readonly scene: Phaser.Scene;
+  private readonly depth: number;
+  /** One label per patch, reused. Pollen left is a number worth reading now. */
+  private labels: Phaser.GameObjects.Text[] = [];
 
   constructor(scene: Phaser.Scene, field: Field, depth: number) {
+    this.scene = scene;
+    this.depth = depth;
     this.gfx = scene.add.graphics().setDepth(depth);
     this.hiveGlow = scene.add
       .image(field.hiveX, field.hiveY, TEX.glow)
@@ -31,6 +37,7 @@ export class FieldRenderer {
     g.clear();
 
     for (const patch of field.patches) this.drawPatch(g, patch, field.time);
+    this.drawLabels(field);
 
     // The area a new route can start from. Brightening it while the player is
     // mid-drag is the only chrome the playfield has.
@@ -80,6 +87,50 @@ export class FieldRenderer {
     }
   }
 
+  /**
+   * Remaining pollen, drawn on each flower.
+   *
+   * Only worth showing now that pollen actually runs out. The shrinking disc
+   * conveys roughly-how-much; the number answers "is it worth redrawing to
+   * this one", which is the decision the player is actually making once a
+   * flower can die for the day.
+   */
+  private drawLabels(field: Field): void {
+    while (this.labels.length < field.patches.length) {
+      const label = this.scene.add
+        .text(0, 0, '', {
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+          fontSize: '19px',
+          color: '#f4f4f8',
+          stroke: '#12100c',
+          strokeThickness: 4,
+        })
+        .setOrigin(0.5)
+        .setDepth(this.depth + 2);
+      this.labels.push(label);
+    }
+
+    for (let i = 0; i < this.labels.length; i += 1) {
+      const label = this.labels[i];
+      const patch = field.patches[i];
+      if (!label) continue;
+
+      if (!patch || !patch.alive || patch.bloomT < 0.5) {
+        label.setVisible(false);
+        continue;
+      }
+
+      label.setVisible(true);
+      // Clear of the route's tip handle, which lands near the flower's edge and
+      // was clipping the number.
+      label.setPosition(patch.x, patch.y - 62);
+      label.setText(String(Math.ceil(patch.pool)));
+      // Warns before it runs dry, so retargeting is a decision rather than a
+      // surprise.
+      label.setColor(patch.fullness < 0.25 ? '#ff8a65' : '#f4f4f8');
+    }
+  }
+
   private drawWasps(field: Field, alpha: number): void {
     const g = this.waspGfx;
     g.clear();
@@ -105,5 +156,7 @@ export class FieldRenderer {
     this.gfx.destroy();
     this.hiveGlow.destroy();
     this.waspGfx.destroy();
+    for (const label of this.labels) label.destroy();
+    this.labels = [];
   }
 }

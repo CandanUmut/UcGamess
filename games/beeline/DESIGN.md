@@ -55,25 +55,30 @@ does not stop paying the instant decay starts. Bees flying to a live end that no
 longer reaches a patch mill briefly, find nothing, and return empty — visibly,
 so the player can see exactly why honey stopped.
 
-**2. Patches deplete.** A worked patch drains its nectar pool, wilts, and a new
-one blooms elsewhere after a delay. Routes must be redrawn to new targets
-constantly.
+**2. Flowers run dry, and stay dry.** A worked patch drains its pollen, wilts,
+and does not come back until dawn. The field runs down over the day, so routes
+must be redrawn to new targets constantly and early choices compound. Remaining
+pollen is shown as a number on each flower, because once it can run out it is a
+figure worth reading.
 
-**3. The swarm is finite.** Bees split evenly across live routes. Four routes
-means each carries a quarter of the swarm. Choosing between one strong route and
-several weak ones is the central decision, and it is available from day two —
-never gated behind a purchase.
+**3. The swarm is finite, and drawing spends it.** Bees split evenly across live
+routes, so four routes means each carries a quarter of the swarm. On top of
+that, drawing dispatches workers proportional to the length drawn: they fly the
+new line once and return empty, so for a few seconds the hive carries less.
+Choosing between one strong route and several weak ones is the central decision,
+it is available from day two, and it is never gated behind a purchase.
 
 ### Route rules
 
 | Rule     | Behaviour                                                                                                                                                                           |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Origin   | A route must start within `hive.drawRadius` of the hive. A drag beginning elsewhere is ignored (no route is created, nothing is destroyed).                                         |
+| Origin   | Any drag works. Starting near a live route's tip extends it cheaply; starting anywhere else draws a fresh route anchored at the hive. A gesture is never ignored.                   |
 | Maximum  | Five simultaneous routes.                                                                                                                                                           |
 | Overflow | Drawing a sixth kills the **most-decayed** route and takes its slot, with a brief flash on what was dropped. Drawing always does something — a gesture is never refused mid-motion. |
-| Refresh  | A drag starting near a live route's current end extends that route instead of creating a new one. Threshold: `route.refreshSnapRadius`.                                             |
+| Refresh  | A drag starting within `route.refreshSnapRadius` of a live tip extends that route, costing only the piece that decayed — in gesture length and in workers.                          |
 | Redraw   | A drag from the hive to a patch that already has a route replaces it at full length.                                                                                                |
 | Death    | A route whose live length falls below `route.minLength` dies. Bees on it return to the hive and redistribute.                                                                       |
+| Erase    | Press and hold a route for 0.75s to remove it; a ring fills to show progress. Moving more than 18px turns the gesture back into a draw.                                             |
 
 ### Session shape
 
@@ -116,8 +121,9 @@ Rules enforced by this table:
 
 - **No tutorial screen, no text wall, no modal.** The hint line is the entire
   tutorial and it teaches by demonstrating.
-- Day one has one patch, no wind, no wasps, and a quota (60) reachable at
-  roughly a third of attentive play.
+- Day one has two flowers, no wind, no wasps, and a quota (60) reachable at
+  roughly a quarter of attentive play. Two rather than one because the first
+  will run dry inside 45 seconds, and the lesson needs somewhere to move to.
 - The hint line reappears only if the player has drawn nothing 8 seconds into
   day one — a stuck-player rescue, not a repeated instruction.
 
@@ -600,6 +606,102 @@ objects were registered, the camera was identity and the pointer's world
 coordinates were correct — but `hitTestPointer` returned zero. Both a Container
 hit area and `Rectangle.setInteractive()` failed. A `Zone` works. All buttons
 now carry their input on a Zone.
+
+---
+
+## 13. Playtest 2 — scarcity, cost, and a real fail state
+
+Seven changes, all from the second playtest. Two of them replaced ideas of mine
+that were worse.
+
+### Pollen is finite for the day
+
+Flowers used to rebloom at full pool a few seconds after draining, so pollen was
+effectively infinite and the "routes must be redrawn to new targets constantly"
+pressure this document claims **did not actually exist**. A drained flower now
+stays dead until dawn.
+
+That single change is what makes the rest worth having: remaining pollen becomes
+a number worth reading, early routing decisions compound, and the field visibly
+runs down as the day goes on. Day one now has two flowers rather than one — the
+first _will_ run dry inside 45 seconds, and the lesson only lands if there is
+somewhere to move to.
+
+Measured on day one: a flower drains 180 → 150 → 102 → 53 → 4 → **DRY**, the
+player moves, and the day still finishes at 247 against a quota of 60.
+
+### Drawing costs worker bees
+
+Free infinite drawing was a hole. The fix came from the team, not from me: I
+proposed a regenerating "wax" meter, and **worker bees are strictly better** —
+no new currency, no new meter, visible on screen, and it charges the decision
+the game is already about (the swarm is finite).
+
+Drawing dispatches workers proportional to the length actually drawn. They fly
+the new line once and return empty, so for a few seconds the swarm carries less.
+A ~90px refresh costs about 3 bees; a ~400px redraw costs about 12.
+
+Two things had to be fixed before it worked:
+
+- **The cost was far too steep.** At 0.08 workers/px and a 55% cap, one draw
+  took over half a day-one swarm. Honey flatlined and day one — which must be
+  unmissable — **failed at 35 against a quota of 60.** Now 0.03 and 35%.
+- **It was conscripting in-flight foragers.** Bees 90% of the way to a flower
+  were reset to the start of the line on every redraw, so under normal decay
+  pressure nobody ever arrived. Only bees at the hive, or already flying home
+  empty, can be taken now. That also gives the cost a good shape on its own:
+  drawing while the swarm is out is cheap, drawing as a wave lands costs most.
+
+### A real fail state, with meta-progression
+
+Missing the quota ends the run. Upgrades and unspent honey persist, the day
+resets to 1, and the furthest day reached is recorded.
+
+The alternative — a full wipe — was rejected on portal grounds: Poki gates
+acceptance on average session over three minutes, and losing an hour of upgrades
+to one bad day is how players quit permanently. "One more run with a stronger
+hive" raises session length; "all of that for nothing" ends it. The rewarded
++15s offer is now a genuine rescue of the run rather than a token.
+
+### The rest
+
+- **Numbers on flowers**, warning in orange below 25%.
+- **Wind indicator** — an arrow whose length carries strength. Wasp threat radii
+  were already drawn on the field; wind shipped invisible, so it could only be
+  reacted to, never planned around. That was inconsistent.
+- **Press and hold to erase** a route, with a filling ring. Held for 0.75s;
+  moving more than 18px turns the gesture back into a draw. A plain tap was
+  considered and rejected as too easy to trigger by accident on a phone.
+- **The field widens with the day**, bounded by the canvas. Distance is already
+  expensive — constant retreat speed, more workers per draw — so this ramps
+  difficulty with pressure that already exists.
+
+---
+
+## 14. Portrait was broken on phones
+
+Reported from a real device: _"the game is on the middle as a rectangle,
+basically the middle 1/3 of the screen, the rest is fully empty."_
+
+Fitting a 1280x720 design into a 390x844 portrait viewport produces a 390x219
+strip centred in a mostly empty screen. A portal reviewer opening the game on a
+phone would have seen exactly that.
+
+There is now a rotate prompt, and it is **DOM rather than a Phaser scene** —
+that is the whole trick. The canvas _is_ the strip, so anything drawn inside the
+game would sit in the same third of the screen and leave the empty area
+unexplained. Only a DOM overlay can cover it.
+
+Gameplay stops while it is up. The first attempt did not: `beginDay()` called
+`startGameplay()` unconditionally, so the countdown ran behind the prompt and
+the player lost a day to a message meant to help them. Verified frozen at 45s
+across three seconds in portrait, resuming on rotate.
+
+Landscape on a 2.16 phone fills 100% of height and 82% of width — correct 16:9
+letterboxing, not a bug.
+
+**Still true: no real phone or real Safari has run this build.** Headless WebKit
+passes, and headless WebKit is not Safari.
 
 ---
 

@@ -58,7 +58,10 @@ describe('escalation schedule', () => {
       richPatches: false,
       nightBloom: false,
     });
-    expect(patchesForDay(1)).toBe(1);
+    // Two, not one: now that a drained flower stays dead for the day, the
+    // first one runs dry inside 45s and the lesson only lands if there is
+    // somewhere to move to.
+    expect(patchesForDay(1)).toBe(2);
   });
 
   it('never introduces two new elements on the same day', () => {
