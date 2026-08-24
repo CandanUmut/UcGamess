@@ -1,8 +1,11 @@
 import { TUNING } from '../config/tuning.ts';
 import { Bee } from './Bee.ts';
-import { Patch } from './Patch.ts';
+import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
+import { Wasp } from './Wasp.ts';
 import { coordsLength, type SamplePoint } from './polyline.ts';
+import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
+import type { DayFeatures } from '../game/DayCycle.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -14,14 +17,31 @@ export interface FieldStats {
   collecting: number;
 }
 
+/** Things worth reacting to visually or audibly. Drained once per frame. */
+export interface FieldEvents {
+  /** Positions where nectar was picked up this step. */
+  collected: Array<{ x: number; y: number; amount: number }>;
+  /** How much honey was deposited at the hive this step. */
+  deposited: number;
+  /** Positions where bees were scattered by a wasp. */
+  scattered: Array<{ x: number; y: number }>;
+}
+
+const NO_FEATURES: DayFeatures = {
+  wind: false,
+  wasps: 0,
+  richPatches: false,
+  nightBloom: false,
+};
+
 /**
- * The whole simulation: hive, routes, patches, swarm.
+ * The whole simulation: hive, routes, patches, swarm, hazards.
  *
  * Deliberately free of any Phaser reference. Everything here is plain numbers
- * advanced by a fixed `dt`, which means it is unit-testable, and — more
- * importantly for this game — it behaves identically on a 60Hz laptop and a
- * 144Hz monitor. Physics breaking on high-refresh displays is a documented
- * portal rejection cause, so the split is not stylistic.
+ * advanced by a fixed `dt`, which makes it unit-testable and — more importantly
+ * for this game — identical at 60Hz and 144Hz. Physics breaking on high-refresh
+ * displays is a documented portal rejection cause, so the split is structural,
+ * not stylistic.
  */
 export class Field {
   readonly hiveX = TUNING.hive.x;
@@ -30,19 +50,92 @@ export class Field {
   routes: Route[] = [];
   patches: Patch[] = [];
   bees: Bee[] = [];
+  wasps: Wasp[] = [];
 
   honey = 0;
-  /** Set true to freeze route decay — a debug affordance for the feel test. */
+  /** Debug affordance: freeze route decay to feel the contrast. */
   decayEnabled = true;
 
-  /** Route persistence, in seconds of grace. Raised by the upgrade in Stage 3. */
-  holdSeconds = TUNING.route.holdSeconds;
+  stats: DerivedStats = deriveStats(emptyLevels());
+  features: DayFeatures = NO_FEATURES;
+
+  /** Multiplier on effective swarm size, for the rewarded swarm boost. */
+  swarmBoost = 1;
+
+  events: FieldEvents = { collected: [], deposited: 0, scattered: [] };
 
   private elapsed = 0;
+  private windAngle = Math.random() * Math.PI * 2;
+  private windStrength = 0;
+  private patchPool = TUNING.patch.basePool;
 
-  constructor(beeCount = TUNING.bee.baseCount, patchCount = TUNING.patch.baseCount) {
-    this.setBeeCount(beeCount);
-    for (let i = 0; i < patchCount; i += 1) this.spawnPatch();
+  constructor() {
+    this.applyStats();
+  }
+
+  get time(): number {
+    return this.elapsed;
+  }
+
+  get routeHoldSeconds(): number {
+    return this.stats.routeHoldSeconds;
+  }
+
+  // ---------------------------------------------------------------- setup
+
+  setStats(stats: DerivedStats): void {
+    this.stats = stats;
+    this.applyStats();
+  }
+
+  private applyStats(): void {
+    this.setBeeCount(Math.round(this.stats.beeCount * this.swarmBoost));
+  }
+
+  /**
+   * Rebuilds the field for a day: fresh patches, no routes, hazards per the
+   * escalation schedule.
+   *
+   * Routes are cleared deliberately. Starting each day with an empty field
+   * gives the drawing gesture a reason to happen at the top of every day, which
+   * is what makes the loop feel like a series of fresh attempts rather than one
+   * long session with interruptions.
+   */
+  beginDay(day: number, features: DayFeatures, patchCount: number, boost: number): void {
+    this.features = features;
+    this.swarmBoost = boost;
+    this.honey = 0;
+    this.elapsed = 0;
+
+    this.clearRoutes();
+    this.patches = [];
+    this.wasps = [];
+
+    this.patchPool = TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay;
+
+    for (let i = 0; i < patchCount; i += 1) {
+      const kind: PatchKind =
+        features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
+      this.spawnPatch(kind);
+    }
+
+    this.windStrength = features.wind
+      ? Math.min(
+          TUNING.wind.baseStrength +
+            (day - TUNING.wind.startDay) * TUNING.wind.strengthPerDay,
+          TUNING.wind.maxStrength,
+        )
+      : 0;
+
+    for (let i = 0; i < features.wasps; i += 1) {
+      const spot = this.randomPatchPosition('normal');
+      this.wasps.push(new Wasp(spot.x, spot.y));
+    }
+
+    this.applyStats();
+    for (const bee of this.bees) {
+      bee.reset(this.hiveX, this.hiveY, TUNING.bee.lateralSpread, TUNING.bee.speedJitter);
+    }
   }
 
   // ---------------------------------------------------------------- swarm
@@ -67,22 +160,46 @@ export class Field {
 
   // ---------------------------------------------------------------- patches
 
-  private randomPatchPosition(): { x: number; y: number } {
-    const { minRadius, maxRadius } = TUNING.patch;
-    // sqrt keeps the distribution even by area rather than clustering inward.
-    const t = Math.sqrt(Math.random());
-    const radius = minRadius + t * (maxRadius - minRadius);
-    const angle = Math.random() * Math.PI * 2;
+  private randomPatchPosition(kind: PatchKind): { x: number; y: number } {
+    const minRadius =
+      kind === 'rich' ? TUNING.patch.richMinRadius : TUNING.patch.minRadius;
+    const maxRadius = TUNING.patch.maxRadius;
 
+    // Bounds leave room for the reach ring, which is the thing the player aims
+    // at — a patch whose ring runs off the edge is unaimable at exactly the
+    // moment it matters. The top margin also clears the HUD.
+    const margin = TUNING.patch.reachRadius + 20;
+    const minX = margin;
+    const maxX = 1280 - margin;
+    const minY = 110 + margin;
+    const maxY = 720 - margin;
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      // sqrt keeps the distribution even by area rather than clustering inward.
+      const t = Math.sqrt(Math.random());
+      const radius = minRadius + t * (maxRadius - minRadius);
+      const angle = Math.random() * Math.PI * 2;
+      const x = clamp(this.hiveX + Math.cos(angle) * radius, minX, maxX);
+      const y = clamp(this.hiveY + Math.sin(angle) * radius * 0.72, minY, maxY);
+
+      // Reject spots that overlap an existing patch — overlapping bloom circles
+      // read as one confusing blob and make aiming ambiguous.
+      const tooClose = this.patches.some(
+        (p) => p.alive && Math.hypot(p.x - x, p.y - y) < 150,
+      );
+      if (!tooClose) return { x, y };
+    }
+
+    const angle = Math.random() * Math.PI * 2;
     return {
-      x: clamp(this.hiveX + Math.cos(angle) * radius, 70, 1210),
-      y: clamp(this.hiveY + Math.sin(angle) * radius * 0.72, 90, 650),
+      x: clamp(this.hiveX + Math.cos(angle) * minRadius, minX, maxX),
+      y: clamp(this.hiveY + Math.sin(angle) * minRadius * 0.72, minY, maxY),
     };
   }
 
-  spawnPatch(): Patch {
-    const spot = this.randomPatchPosition();
-    const patch = new Patch(spot.x, spot.y, TUNING.patch.basePool);
+  spawnPatch(kind: PatchKind = 'normal'): Patch {
+    const spot = this.randomPatchPosition(kind);
+    const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
     this.patches.push(patch);
     return patch;
   }
@@ -95,9 +212,10 @@ export class Field {
     }
   }
 
-  private nearestPatchTo(x: number, y: number): Patch | null {
+  /** Nearest living patch to a point, within `limit` if given. */
+  nearestPatchTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Patch | null {
     let best: Patch | null = null;
-    let bestDist = Number.POSITIVE_INFINITY;
+    let bestDist = limit;
 
     for (const patch of this.patches) {
       if (!patch.alive) continue;
@@ -117,14 +235,14 @@ export class Field {
   }
 
   /**
-   * The live route end nearest to (x, y), if one is within the snap radius.
+   * The route whose live tip is nearest to (x, y), within the snap radius.
    *
-   * This is what makes a drag a *refresh* rather than a new route. Checking the
-   * tip specifically — not the whole path — is deliberate: refreshing has to
-   * mean "continue from where it died back to", which is the only place the
-   * gesture is genuinely shorter than drawing again.
+   * Used to decide whether a drag is a cheap extension or a fresh draw. The
+   * radius is generous on purpose: the first playtest found the tip-only
+   * gesture undiscoverable, so the rule is now "if you started anywhere near
+   * the end of a route, you probably meant to continue it".
    */
-  routeToRefreshAt(x: number, y: number): Route | null {
+  routeToExtendAt(x: number, y: number): Route | null {
     let best: Route | null = null;
     let bestDist = TUNING.route.refreshSnapRadius;
 
@@ -139,7 +257,11 @@ export class Field {
     return best;
   }
 
-  /** True when (x, y) is close enough to the hive to begin a new route. */
+  /** The live route already serving `patch`, if any. */
+  routeTargeting(patch: Patch): Route | null {
+    return this.routes.find((r) => !r.dead && r.target === patch) ?? null;
+  }
+
   isNearHive(x: number, y: number): boolean {
     return Math.hypot(x - this.hiveX, y - this.hiveY) <= TUNING.hive.drawRadius;
   }
@@ -147,7 +269,7 @@ export class Field {
   /**
    * Commits a freshly drawn path as a new route.
    *
-   * At the route cap, the *most decayed* route is evicted rather than the
+   * At the route cap the *most decayed* route is evicted rather than the
    * oldest. A gesture is never refused mid-motion — being told "no" at the end
    * of a drag on a touchscreen reads as a bug, not a rule — and evicting the
    * weakest is the choice the player would have made anyway.
@@ -163,14 +285,13 @@ export class Field {
       if (weakest) this.killRoute(weakest);
     }
 
-    const route = new Route(coords, this.holdSeconds);
+    const route = new Route(coords, this.routeHoldSeconds);
     route.updateTip();
     route.target = this.nearestPatchTo(route.tipX, route.tipY);
     this.routes.push(route);
     return route;
   }
 
-  /** Retargets a route after it has been drawn or extended. */
   retarget(route: Route): void {
     route.target = this.nearestPatchTo(route.tipX, route.tipY);
   }
@@ -183,9 +304,6 @@ export class Field {
     for (const bee of this.bees) {
       if (bee.routeId === route.id) {
         bee.routeId = 0;
-        // Bees mid-flight fly home under their own power rather than snapping
-        // to the hive — a route vanishing should look like a swarm dispersing.
-        // Bees still queueing never left, so they simply go back to idle.
         bee.state = bee.state === 'idle' || bee.state === 'queued' ? 'idle' : 'homing';
       }
     }
@@ -202,7 +320,13 @@ export class Field {
     this.elapsed += dt;
 
     for (const patch of this.patches) {
-      patch.step(dt, () => this.randomPatchPosition());
+      patch.step(dt, (kind) => this.randomPatchPosition(kind));
+    }
+
+    if (this.windStrength > 0) this.stepWind(dt);
+
+    for (const wasp of this.wasps) {
+      wasp.step(dt, () => this.randomPatchPosition('normal'));
     }
 
     for (const route of [...this.routes]) {
@@ -213,7 +337,6 @@ export class Field {
         this.killRoute(route);
         continue;
       }
-      // A patch can wilt under a live route; re-aim rather than stranding it.
       if (!route.target || !route.target.alive) this.retarget(route);
     }
 
@@ -221,13 +344,41 @@ export class Field {
   }
 
   /**
-   * Assigns a bee to whichever live route currently has the fewest bees.
+   * Bends stored route points sideways.
    *
-   * Rebalancing happens one bee at a time, as each finishes a trip, rather than
-   * by reshuffling the whole swarm when routes change. That produces the
-   * gradual redistribution the design calls for — the swarm visibly *flows*
-   * toward a new route over a few seconds instead of teleporting.
+   * The wind moves the *line the player drew*, not the bees. Pushing the bees
+   * off the line instead would desynchronise them from the visible route, and
+   * the player would have no way to see or counter what was happening. Bending
+   * the route keeps cause and effect on screen: your straight line becomes an
+   * arc, so it gets longer, so throughput drops.
    */
+  private stepWind(dt: number): void {
+    this.windAngle += TUNING.wind.rotationSpeed * dt;
+    const nx = Math.cos(this.windAngle);
+    const ny = Math.sin(this.windAngle);
+    const push = this.windStrength * dt;
+
+    for (const route of this.routes) {
+      const poly = route.poly;
+      for (let i = 1; i < poly.count; i += 1) {
+        // Points further from the hive bend more, so the route bows rather
+        // than sliding sideways as a rigid whole.
+        const influence = i / poly.count;
+        poly.pts[i * 2] = (poly.pts[i * 2] ?? 0) + nx * push * influence;
+        poly.pts[i * 2 + 1] = (poly.pts[i * 2 + 1] ?? 0) + ny * push * influence;
+      }
+      route.rebuildLengths();
+    }
+  }
+
+  get windVector(): { x: number; y: number; strength: number } {
+    return {
+      x: Math.cos(this.windAngle),
+      y: Math.sin(this.windAngle),
+      strength: this.windStrength,
+    };
+  }
+
   private assignBee(bee: Bee): void {
     let best: Route | null = null;
     for (const route of this.routes) {
@@ -245,7 +396,7 @@ export class Field {
     bee.routeId = best.id;
     bee.s = 0;
 
-    // Take a slot in the departure queue. Spacing bees out at the hive is what
+    // Take a slot in the departure queue. Spacing bees at the hive is what
     // turns a travelling clump into a stream — without it, everyone assigned in
     // the same frame flies the whole route shoulder to shoulder.
     const departAt = Math.max(this.elapsed, best.nextDepartAt);
@@ -265,7 +416,22 @@ export class Field {
     bee.prevX = bee.x;
     bee.prevY = bee.y;
 
-    const speed = TUNING.bee.baseSpeed * bee.speedMul;
+    const speed = this.stats.beeSpeed * bee.speedMul;
+
+    // Wasps only threaten bees that are actually out in the field.
+    if (
+      this.wasps.length > 0 &&
+      (bee.state === 'outbound' || bee.state === 'inbound' || bee.state === 'collect')
+    ) {
+      for (const wasp of this.wasps) {
+        if (!wasp.threatens(bee.x, bee.y, this.hiveX, this.hiveY)) continue;
+        this.events.scattered.push({ x: bee.x, y: bee.y });
+        this.releaseBee(bee);
+        bee.carrying = 0;
+        bee.state = 'homing';
+        return;
+      }
+    }
 
     switch (bee.state) {
       case 'idle': {
@@ -275,7 +441,6 @@ export class Field {
       }
 
       case 'queued': {
-        // Milling at the hive entrance, waiting for a gap in the traffic.
         this.driftNearHive(bee, dt);
         bee.timer -= dt;
         if (bee.timer <= 0) {
@@ -294,10 +459,7 @@ export class Field {
       case 'homing': {
         this.flyToward(bee, this.hiveX, this.hiveY, speed, dt);
         if (Math.hypot(bee.x - this.hiveX, bee.y - this.hiveY) < 26) {
-          if (bee.carrying > 0) {
-            this.honey += bee.carrying;
-            bee.carrying = 0;
-          }
+          this.deposit(bee);
           bee.state = 'idle';
         }
         return;
@@ -308,7 +470,16 @@ export class Field {
         const patch = this.routeById(bee.routeId)?.target ?? null;
         if (patch) this.driftAround(bee, patch.x, patch.y, 16, dt);
         if (bee.timer <= 0) {
-          if (patch) bee.carrying = patch.drain(TUNING.bee.nectarPerTrip);
+          if (patch) {
+            bee.carrying = patch.drain(TUNING.bee.nectarPerTrip);
+            if (bee.carrying > 0) {
+              this.events.collected.push({
+                x: patch.x,
+                y: patch.y,
+                amount: bee.carrying,
+              });
+            }
+          }
           bee.state = 'inbound';
         }
         return;
@@ -349,19 +520,13 @@ export class Field {
           bee.s -= speed * dt;
           if (bee.s <= 0) {
             bee.s = 0;
-            if (bee.carrying > 0) {
-              this.honey += bee.carrying;
-              bee.carrying = 0;
-            }
-            // Re-pick a route on every return, so the swarm rebalances toward
-            // whatever the player has just drawn.
+            this.deposit(bee);
             this.releaseBee(bee);
             this.assignBee(bee);
             return;
           }
         }
 
-        // A bee whose route retreated past it is now beyond the live end.
         if (bee.s > route.liveLength) bee.s = route.liveLength;
 
         route.sample(bee.s, scratch);
@@ -381,6 +546,13 @@ export class Field {
       default:
         return;
     }
+  }
+
+  private deposit(bee: Bee): void {
+    if (bee.carrying <= 0) return;
+    this.honey += bee.carrying;
+    this.events.deposited += bee.carrying;
+    bee.carrying = 0;
   }
 
   private easeToward(bee: Bee, targetX: number, targetY: number): void {
@@ -429,7 +601,14 @@ export class Field {
     bee.y += (targetY - bee.y) * 0.25;
   }
 
-  stats(): FieldStats {
+  /** Returns and clears this frame's events. */
+  drainEvents(): FieldEvents {
+    const out = this.events;
+    this.events = { collected: [], deposited: 0, scattered: [] };
+    return out;
+  }
+
+  getStats(): FieldStats {
     let laden = 0;
     let collecting = 0;
     for (const bee of this.bees) {
@@ -443,10 +622,6 @@ export class Field {
       laden,
       collecting,
     };
-  }
-
-  get time(): number {
-    return this.elapsed;
   }
 }
 
