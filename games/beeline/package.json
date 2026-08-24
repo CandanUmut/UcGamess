@@ -1,0 +1,24 @@
+{
+  "name": "@ucgames/game-beeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The scaffold every UC Games game is cloned from. Playable, and passes every quality gate as-is.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node ../../packages/devtools/src/size-budget.ts",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ucgames/core": "workspace:*",
+    "@ucgames/portal": "workspace:*",
+    "phaser": "catalog:"
+  },
+  "devDependencies": {
+    "@ucgames/config": "workspace:*",
+    "@ucgames/devtools": "workspace:*",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}
