@@ -43,6 +43,16 @@ export class Hud {
   /** Swarm split between carrying and opening new routes. */
   private readonly swarmText: Phaser.GameObjects.Text;
 
+  /**
+   * How many flowers are still out in the dark.
+   *
+   * Without this the player cannot tell an unexplored corner from an empty one,
+   * and exploring becomes a superstition rather than a decision. The count says
+   * there is something worth finding; it deliberately never says where, which
+   * is the part the player has to go and buy with bees and time.
+   */
+  private readonly unfoundText: Phaser.GameObjects.Text;
+
   private barWidth = 560;
   private lastHoney = 0;
   private metShown = false;
@@ -96,6 +106,10 @@ export class Hud {
       .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: COLORS.dim })
       .setOrigin(0, 0.5);
 
+    this.unfoundText = scene.add
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: '#8fd0ff' })
+      .setOrigin(0, 0.5);
+
     this.root.add([
       this.dayText,
       this.timerText,
@@ -107,6 +121,7 @@ export class Hud {
       this.windArrow,
       this.windLabel,
       this.swarmText,
+      this.unfoundText,
     ]);
   }
 
@@ -155,6 +170,13 @@ export class Hud {
     this.windLabel.setText('wind').setPosition(cx, cy + 24);
   }
 
+  /** How many flowers remain undiscovered. Hidden at zero. */
+  setUnfound(count: number): void {
+    this.unfoundText.setText(
+      count > 0 ? `${count} flower${count === 1 ? '' : 's'} still out there` : '',
+    );
+  }
+
   /** Bees carrying versus bees opening routes — what a draw just cost. */
   setSwarm(foraging: number, building: number): void {
     this.swarmText.setText(
@@ -183,6 +205,7 @@ export class Hud {
     this.banner.setPosition(safe.centerX, safe.y + 140);
 
     this.swarmText.setPosition(safe.x + 24, top + 34);
+    this.unfoundText.setPosition(safe.x + 24, top + 56);
     this.windAnchorX = safe.right - 62;
     this.windAnchorY = top + 46;
     this.redrawWind();

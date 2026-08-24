@@ -50,6 +50,17 @@ export class Route {
   /** Set when the route dies, so Field can sweep it. */
   dead = false;
 
+  /**
+   * How beaten-in this path is, 0..1. Earned by traffic, lost by neglect.
+   *
+   * This is the thing the player builds rather than spends. A line the swarm
+   * has actually worked stops behaving like a scribble and starts behaving like
+   * a road: it retreats slowly, it barely bends in the wind, and bees fly it
+   * faster. Without it every route is disposable and redrawing is a chore
+   * rather than a choice — which is precisely why the game read as a toy.
+   */
+  strength = 0;
+
   constructor(coords: readonly number[], holdSeconds: number) {
     this.id = nextRouteId++;
     this.poly = buildPolyline(coords);
@@ -77,11 +88,49 @@ export class Route {
     this.tipY = scratch.y;
   }
 
+  /** Retreat speed right now, after the road's own resistance. */
+  get decaySpeed(): number {
+    return (
+      TUNING.route.decaySpeed * (1 - this.strength * TUNING.route.strengthDecayResist)
+    );
+  }
+
+  /** Multiplier on the speed of a bee flying this route. */
+  get speedMultiplier(): number {
+    return 1 + this.strength * TUNING.route.strengthSpeedBonus;
+  }
+
+  /** How much of the wind's sideways push this route actually takes. */
+  get windExposure(): number {
+    return 1 - this.strength * TUNING.route.strengthWindResist;
+  }
+
+  /** Records a delivery made along this route. */
+  reinforce(): void {
+    this.strength = Math.min(1, this.strength + TUNING.route.strengthPerDelivery);
+  }
+
   step(dt: number): void {
+    // Neglect undoes the road, **proportionally**.
+    //
+    // Subtracting a flat amount per second looks equivalent and is not: with
+    // both gain and loss constant, a route whose traffic beats the decay climbs
+    // to full and one whose traffic does not falls to nothing, with no stable
+    // value in between. Strength would have been a hidden boolean.
+    //
+    // Decaying a fraction of what is there gives a real equilibrium at
+    // `deliveriesPerSecond x strengthPerDelivery / strengthDecayPerSecond`, so
+    // a thinly-fed line genuinely sits at a third of a road and a well-fed one
+    // genuinely sits at full.
+    this.strength = Math.max(
+      0,
+      this.strength - this.strength * TUNING.route.strengthDecayPerSecond * dt,
+    );
+
     if (this.holdRemaining > 0) {
       this.holdRemaining -= dt;
     } else {
-      this.liveLength -= TUNING.route.decaySpeed * dt;
+      this.liveLength -= this.decaySpeed * dt;
     }
 
     if (this.liveLength <= TUNING.route.minLength) {
@@ -125,11 +174,12 @@ export class Route {
   }
 
   /**
-   * Rebuilds the route as "everything still alive" + "what the player just drew".
+   * Rebuilds the route as "everything still alive" + "what the player just
+   * drew", keeping the road's strength intact.
    *
-   * This is the refresh operation. The retained portion is truncated at exactly
-   * `liveLength` so the join is seamless and the player's drag genuinely only
-   * had to cover the retreated section.
+   * Extending is maintenance, so it costs nothing. That is the whole reason the
+   * refresh gesture is now worth finding: it is not merely a shorter drag, it
+   * is the one that does not throw away what the swarm has built.
    */
   extendWith(appended: readonly number[], holdSeconds: number): void {
     const kept = truncateCoords(this.poly, this.liveLength);
@@ -142,8 +192,15 @@ export class Route {
     this.updateTip();
   }
 
-  /** Replaces the path entirely, at full length. */
+  /**
+   * Replaces the path entirely, at full length, at the cost of half the road.
+   *
+   * Starting over is not free. The line is new ground even where it happens to
+   * lie on top of the old one, and charging for it is what makes "refresh from
+   * the tip" a decision rather than a tip for the manual nobody reads.
+   */
   replaceWith(coords: readonly number[], holdSeconds: number): void {
+    this.strength *= TUNING.route.strengthKeptOnRedraw;
     this.poly = buildPolyline(coords);
     this.liveLength = Math.min(this.poly.length, TUNING.route.maxLength);
     this.holdRemaining = holdSeconds;

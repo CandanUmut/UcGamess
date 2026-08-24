@@ -260,6 +260,89 @@ two tuning keys, because a constant nothing reads is a lie about the design.
 
 ---
 
+## Considered while making the board dark (2026-08-24)
+
+The brief was that the game still did not feel like a game: paths should mean
+something, and there was no scarcity or skill in it. Four things were built —
+fog, road strength, a corner hive, and distance-scaled yield (see
+`games/beeline/DESIGN.md` §18). These were weighed and left out.
+
+### A zoomed-out camera over a larger world
+
+The obvious way to make the map bigger: grow the world to 1920x1080 and zoom the
+camera to fit, with a second camera for the HUD.
+
+**Why cut:** at a 1.5x zoom a flower's reach ring lands near 17 CSS pixels on a
+phone in landscape, well under the ~44px a thumb reliably hits, and the design
+rules treat an unhittable target as a rejection cause. Moving the hive into a
+corner doubles the longest route without shrinking anything, and fog makes an
+unlit 1280x720 board feel far larger than a lit one ever did.
+
+**Build when:** never at this canvas size. If the game ever gets a scrolling
+world, this is moot rather than deferred.
+
+### A minimap
+
+**Why cut:** a minimap is a second place to look, and everything it would show
+is already on the field. Worse, it would quietly undo the fog — the value of a
+dark board is that the player holds the map in their head, and a minimap holds
+it for them.
+
+**Build when:** if the world ever exceeds one screen.
+
+### Live-only vision, where fog closes behind the swarm
+
+More realistic, and a real tension: you would have to keep looking.
+
+**Why cut:** re-scouting ground already paid for is busywork wearing a
+mechanic's clothes, and it punishes the player for looking away — on a portal,
+where sessions are three minutes and interrupted, that is a quit.
+
+**Build when:** probably never. If exploration turns out to be too cheap, the
+lever to try first is the sight radius, not memory.
+
+### A permanent "sight" upgrade
+
+Tempting: it competes well with the other five and reads instantly.
+
+**Why cut:** the upgrade list is five and has been since the scope freeze, and
+Scout Bees already sells sight as a one-off. A permanent sight upgrade would
+also flatten the ramp the fog gets from the flower band widening each day, which
+is doing that job for free.
+
+**Build when:** if playtests show players never exploring at all. Then the first
+thing to try is making Scout Bees cheaper, not adding a sixth upgrade.
+
+### Roads that persist between days
+
+Strength is earned and lost within a day. Carrying a road overnight would make
+it a genuine long-term investment.
+
+**Why cut:** the field is regenerated at dawn — new flowers, new thorns — so
+yesterday's road leads somewhere that no longer exists. Making the field
+persistent instead is a much larger change than it looks, and it would remove
+the "series of fresh attempts" shape the day cycle is built on.
+
+**Build when:** only alongside a persistent map, which is itself on this list as
+map/world progression.
+
+### Rich patches paying 3x on top of the distance ramp
+
+Left in, but flagged rather than cut. A far rich flower now reads around 11x a
+near ordinary one, and one turned up holding 7,741 honey against a day-nine
+quota of 1,120.
+
+**Why left in:** the pool is trips, not honey, so a 90-second day cannot drain
+it — and holding a long route to a rich far flower for a whole day is the
+hardest thing in the game. The two multipliers are also conceptually different
+axes: distance is position, rich is quality.
+
+**Watch for:** a playtest where finding the rich flower decides the day on its
+own. If that happens, drop `richYieldMultiplier` to 2 before touching the
+distance ramp, which is load-bearing.
+
+---
+
 ## How to add to this list
 
 Anything you were tempted to build but did not. Include what would change your

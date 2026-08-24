@@ -49,6 +49,15 @@ export class Bramble {
    */
   readonly spikes: readonly number[];
 
+  /**
+   * Whether the player has ever seen this thicket.
+   *
+   * An undiscovered thicket still blocks routes — that is the whole risk of
+   * drawing into the dark. It is simply not drawn until a bee has been near
+   * enough to see it, and the cut is where the player learns it was there.
+   */
+  discovered = false;
+
   constructor(
     x: number,
     y: number,
