@@ -1,4 +1,12 @@
 import { test, expect, type ConsoleMessage, type Page } from '@playwright/test';
+// Constants only, never `computeGameSize` — a test that recomputes the value it
+// is checking proves nothing except that the function equals itself.
+import {
+  DESIGN_HEIGHT,
+  DESIGN_WIDTH,
+  MAX_CANVAS_ASPECT,
+  MIN_CANVAS_ASPECT,
+} from '../../packages/core/src/scale/canvasSize.ts';
 
 /**
  * The submission smoke test: does the game boot, reach the menu, and stay
@@ -79,24 +87,101 @@ test('boots, reaches the menu, and logs no console errors', async ({ page }) => 
   expect(problems, `Console problems:\n${problems.join('\n')}`).toEqual([]);
 });
 
-test('renders at 16:9 without overflowing the viewport', async ({ page }) => {
-  await page.goto('/', { waitUntil: 'load' });
+/**
+ * Measures the canvas against the viewport it is in.
+ *
+ * `backing` is the drawing buffer (the game size Phaser renders at) and `css`
+ * is what the canvas actually occupies on the page. Comparing the two is how
+ * stretching is detected: FIT must scale uniformly, so the two aspect ratios
+ * have to agree no matter what shape either of them is.
+ */
+async function measureCanvas(page: Page) {
   await expect(page.locator('#game canvas')).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(500);
 
-  const box = await page.locator('#game canvas').boundingBox();
-  expect(box).not.toBeNull();
+  const css = await page.locator('#game canvas').boundingBox();
+  expect(css).not.toBeNull();
+
+  const backing = await page.evaluate(() => {
+    const el = document.querySelector('#game canvas') as HTMLCanvasElement;
+    return { width: el.width, height: el.height };
+  });
 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
 
-  // FIT scaling must letterbox inside the viewport, never spill outside it —
-  // overflow in a portal iframe shows up as clipped UI or a scrollbar.
-  expect(box!.width).toBeLessThanOrEqual(viewport!.width + 1);
-  expect(box!.height).toBeLessThanOrEqual(viewport!.height + 1);
+  return { css: css!, backing, viewport: viewport! };
+}
 
-  // And the aspect ratio stays 16:9 regardless of the viewport's shape.
-  expect(box!.width / box!.height).toBeCloseTo(16 / 9, 1);
+/**
+ * Whole-pixel rounding slack.
+ *
+ * The scale manager rounds the display size to whole pixels — deliberately, to
+ * stop sub-pixel text shimmer — so a canvas that fills its viewport can measure
+ * a pixel short of it.
+ */
+const ROUNDING = 2;
+
+test('fills the viewport without overflowing or stretching', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'load' });
+  const { css, backing, viewport } = await measureCanvas(page);
+
+  // Overflow in a portal iframe shows up as clipped UI or a scrollbar.
+  expect(css.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(css.height).toBeLessThanOrEqual(viewport.height + 1);
+
+  // Uniform scaling. This replaces the old "always exactly 16:9" assertion,
+  // which stopped being true once the canvas started matching the device's
+  // shape — and it is the stronger check, because it catches a stretched canvas
+  // at *any* aspect rather than only at one.
+  expect(css.width / css.height).toBeCloseTo(backing.width / backing.height, 1);
+
+  // The playfield every player shares is always fully present. A canvas smaller
+  // than the design size in either direction would mean some devices playing a
+  // cropped board.
+  expect(backing.width).toBeGreaterThanOrEqual(DESIGN_WIDTH);
+  expect(backing.height).toBeGreaterThanOrEqual(DESIGN_HEIGHT);
+
+  // Within the aspect bounds the canvas takes the viewport's own shape, so
+  // there is nothing left to letterbox. Outside them it letterboxes on purpose,
+  // and the overflow assertions above are the whole contract.
+  const wanted = viewport.width / viewport.height;
+  if (wanted >= MIN_CANVAS_ASPECT && wanted <= MAX_CANVAS_ASPECT) {
+    expect(css.width).toBeGreaterThanOrEqual(viewport.width - ROUNDING);
+    expect(css.height).toBeGreaterThanOrEqual(viewport.height - ROUNDING);
+  }
+});
+
+test('fills a landscape phone, where the browser chrome makes the viewport wide and short', async ({
+  page,
+}) => {
+  // The shape this was actually reported on. A landscape iPhone showing
+  // Safari's tab bar and toolbar is around 2.8:1, not the 2.17:1 its screen
+  // suggests, and a canvas locked to 16:9 covered only 63% of it.
+  await page.setViewportSize({ width: 932, height: 330 });
+  await page.goto('/', { waitUntil: 'load' });
+
+  const { css, viewport } = await measureCanvas(page);
+
+  expect(css.width).toBeGreaterThanOrEqual(viewport.width - ROUNDING);
+  expect(css.height).toBeGreaterThanOrEqual(viewport.height - ROUNDING);
+  expect(css.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(css.height).toBeLessThanOrEqual(viewport.height + 1);
+});
+
+test('re-fits when the device is rotated', async ({ page }) => {
+  // The scale manager re-fits the canvas on its own but cannot know the game
+  // size should change shape too, so without the viewport tracker a rotate puts
+  // the bars straight back.
+  await page.setViewportSize({ width: 400, height: 800 });
+  await page.goto('/', { waitUntil: 'load' });
+  await measureCanvas(page);
+
+  await page.setViewportSize({ width: 800, height: 400 });
+  const { css, viewport } = await measureCanvas(page);
+
+  expect(css.width).toBeGreaterThanOrEqual(viewport.width - ROUNDING);
+  expect(css.height).toBeGreaterThanOrEqual(viewport.height - ROUNDING);
 });
 
 test('the page does not scroll', async ({ page }) => {
