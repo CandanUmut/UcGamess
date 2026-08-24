@@ -82,13 +82,16 @@ export function applyAimAssist(
   const endY = out[out.length - 1];
   if (endX === undefined || endY === undefined) return { coords: out, connected: false };
 
-  const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius);
+  // Only ever snaps to a flower the player has found. Assist exists to make a
+  // drag mean what it looks like it means; pulling a line onto something
+  // invisible would hand back the information the dark was there to take away.
+  const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
   if (!patch) return { coords: out, connected: false };
 
   // Never snap through thorns. Assist exists to make a drag mean what it looks
   // like it means; hopping the line over a thicket the player can plainly see
   // would do the opposite — and the route would only be cut back there anyway.
-  if (field.pathBlocked(endX, endY, patch.x, patch.y)) {
+  if (field.pathBlocked(endX, endY, patch.x, patch.y, true)) {
     return { coords: out, connected: false };
   }
 
@@ -182,7 +185,7 @@ export function commitDrag(
     // rather than discarding the player's gesture.
   }
 
-  const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius);
+  const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
 
   // Drawing again at a flower that already has a route tops that route up
   // rather than spending one of the five slots on a duplicate.

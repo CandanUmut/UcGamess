@@ -23,6 +23,8 @@ export const PROVISION_ORDER: readonly ProvisionId[] = [
 export interface DayModifiers {
   /** Multiplier on every flower's starting pollen. */
   patchPool: number;
+  /** Radius the map is lit to around the hive at dawn. 0 for none. */
+  scoutRadius: number;
   /** Multiplier on the starting size of every thicket. */
   brambleScale: number;
   /** Whether thickets spread through the day. */
@@ -40,6 +42,7 @@ export interface DayModifiers {
 export function noModifiers(): DayModifiers {
   return {
     patchPool: 1,
+    scoutRadius: 0,
     brambleScale: 1,
     brambleGrows: true,
     waspIntercept: 1,
@@ -80,11 +83,16 @@ export const PROVISIONS: Record<ProvisionId, ProvisionInfo> = {
   scoutBees: {
     id: 'scoutBees',
     name: 'Scout Bees',
-    effect: '+45% pollen',
-    blurb: 'flowers bloom fuller at dawn',
+    effect: 'wide dawn light',
+    // Reveals rather than fattens the flowers. The old effect was a flat
+    // pollen bonus, which had nothing to do with scouting and was the least
+    // interesting thing honey could buy. Now that the board is dark, buying
+    // knowledge of it is the most valuable one-off there is — and the name
+    // finally describes what the item does.
+    blurb: 'the scouts map the field before dawn',
     relevant: () => true,
     apply: (m) => {
-      m.patchPool = 1.45;
+      m.scoutRadius = TUNING.fog.scoutRadius;
     },
   },
   waxedTrails: {

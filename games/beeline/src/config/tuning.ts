@@ -17,6 +17,8 @@ export interface HiveTuning {
   /** A route must start within this distance of the hive to be created. */
   drawRadius: number;
   depositSeconds: number;
+  /** How far the hive itself lights the field at dawn. */
+  sightRadius: number;
 }
 
 export interface BeeTuning {
@@ -59,10 +61,48 @@ export interface BeeTuning {
   workersPerPixel: number;
   /** Never commit more than this fraction of the swarm to building at once. */
   maxWorkerFraction: number;
+  /**
+   * How far a bee lights the field around itself.
+   *
+   * This is the whole scouting mechanic. Drawing a line into the dark sends
+   * bees down it, and they light it as they fly — so exploring is the verb the
+   * player already has, not a second one to learn.
+   */
+  sightRadius: number;
 }
 
 export interface RouteTuning {
   maxCount: number;
+  /**
+   * Strength gained each time a bee completes a delivery on the route.
+   *
+   * This is what makes a path mean something. A line the swarm has actually
+   * worked becomes a beaten track: it retreats slower, it barely bends in the
+   * wind, and bees fly it faster. It is the only thing in the game the player
+   * builds up rather than spends, and it is earned by use rather than bought.
+   */
+  strengthPerDelivery: number;
+  /**
+   * Fraction of remaining strength lost per second, so a neglected road goes
+   * back to scrub. A rate, not an amount — see `Route.step` for why that
+   * distinction is the difference between a dial and a hidden boolean.
+   */
+  strengthDecayPerSecond: number;
+  /** At full strength, retreat is slowed by this fraction. */
+  strengthDecayResist: number;
+  /** At full strength, wind bends the route this much less. */
+  strengthWindResist: number;
+  /** At full strength, bees fly this much faster along it. */
+  strengthSpeedBonus: number;
+  /**
+   * Fraction of strength kept when a route is redrawn from the hive rather than
+   * refreshed from its tip.
+   *
+   * Extending keeps everything; starting over costs half. The design has wanted
+   * the cheap gesture to matter economically since the first playtest, and this
+   * is the first thing that gives it a price rather than just a shorter drag.
+   */
+  strengthKeptOnRedraw: number;
   /** Seconds at full length before the far end starts retreating. */
   holdSeconds: number;
   /** Retreat speed in px/s once decay begins. */
@@ -93,15 +133,33 @@ export interface PatchTuning {
   basePool: number;
   poolPerDay: number;
   /**
-   * How much the field spreads per day.
+   * How much further out the frontier reaches each day.
    *
-   * Distance is already structurally expensive — retreat speed is constant in
-   * px/s, so a long route loses its flower just as fast but costs far more to
-   * rebuild, and now more workers to draw. Pushing flowers outward therefore
-   * ramps difficulty using pressure that already exists, rather than adding a
-   * new one.
+   * Only the *outer* edge moves. The inner edge stays put, so there is always a
+   * near flower to fall back on and the distance-yield decision is live on
+   * every day of a run rather than only the late ones.
+   *
+   * This is also what paces the fog. Day one's flowers spawn inside the hive's
+   * own light, so the first thirty seconds are exactly what they were before
+   * the board went dark; each day after that pushes a little more of the field
+   * past the edge of what the hive can see, and the player walks into scouting
+   * instead of being dropped into it.
    */
   radiusPerDay: number;
+  /**
+   * Where the distance-yield ramp starts and ends, and what it reaches.
+   *
+   * This is the change that turns distance from a pure cost into a decision.
+   * Round trip is 2L/speed, so a flower three times further takes three times
+   * as long to work and pays three times per trip — **identical honey per
+   * second**. What actually differs is that the same pool lasts three times
+   * longer. A far flower is therefore not "better", it is a longer-lived
+   * investment that costs more to reach and more to hold, and a near flower is
+   * the fallback that runs dry fast.
+   */
+  distanceYieldNear: number;
+  distanceYieldFar: number;
+  distanceYieldMax: number;
   richMinRadius: number;
   richYieldMultiplier: number;
   nightBloomMultiplier: number;
@@ -194,6 +252,15 @@ export interface Tuning {
   day: DayTuning;
   wind: WindTuning;
   wasp: WaspTuning;
+  fog: {
+    cellSize: number;
+    /** Reveal at the edge of a sight radius, rising to 1 at its centre. */
+    edgeReveal: number;
+    /** A flower or thicket is found once its cell is lit at least this much. */
+    discoverAt: number;
+    /** Radius the Scout Bees provision lights around the hive at dawn. */
+    scoutRadius: number;
+  };
   bramble: BrambleTuning;
   provisions: Record<
     'scoutBees' | 'pruningShears' | 'smokePot' | 'waxedTrails' | 'earlyRise',
@@ -213,11 +280,29 @@ export interface Tuning {
 }
 
 export const TUNING: Tuning = {
+  /**
+   * The hive sits in the lower left, not the middle.
+   *
+   * A centred hive on a 1280x720 board caps a route at about 560px, so every
+   * flower is a few seconds away and no route is ever a commitment. Moving the
+   * hive to a corner roughly doubles the longest possible route without
+   * shrinking anything on screen — which is the part that matters, because
+   * zooming the camera out to fit a larger world would push a flower's reach
+   * ring below the size a thumb can reliably hit.
+   *
+   * It also gives the board a direction. There is a home and there is a
+   * frontier, rather than a circle you sit in the middle of.
+   */
   hive: {
-    x: 640,
-    y: 400, // below centre, leaving room for the HUD
+    x: 210,
+    y: 545,
     drawRadius: 110,
     depositSeconds: 0.15,
+    // Sized against the *discovery* threshold, not the radius. Reveal falls off
+    // linearly to `fog.edgeReveal` at the rim, so a flower only counts as found
+    // inside about 0.79 of this — at 340 that was 267px, and day one's band
+    // reaches 300, so half the time the tutorial had nothing to point at.
+    sightRadius: 420,
   },
 
   bee: {
@@ -236,6 +321,7 @@ export const TUNING: Tuning = {
     // made day one unwinnable — the exact failure mode of taxing the core verb.
     workersPerPixel: 0.03,
     maxWorkerFraction: 0.35,
+    sightRadius: 105,
   },
 
   // Retuned after the first playtest, which reported the original pacing as
@@ -244,19 +330,40 @@ export const TUNING: Tuning = {
   // produces for ~15s and dies at ~22s: about half the hand traffic, and the
   // grace window between "stopped paying" and "gone" grows from 3s to 7s.
   route: {
-    maxCount: 3,
+    maxCount: 5,
+    // Tuned as an equilibrium, not as a count. A route carrying D deliveries a
+    // second settles at D x perDelivery / decay, and reaches it with a time
+    // constant of 1/decay — about ten seconds.
+    //
+    // The delivery rate across real routes spans roughly 2/s (a long line
+    // holding a third of the swarm) to 18/s (a short one holding all of it), so
+    // a ratio of 0.152 puts a thin far road at about a third strength, a
+    // middling one at about six tenths, and a short fat one at full.
+    //
+    // That spread is what makes the split decision bite. Three routes give
+    // three half-roads; one route gives one real road. Choosing between them is
+    // the question this game has been about since day two, and strength is the
+    // first thing that pays out differently depending on the answer.
+    strengthPerDelivery: 0.0152,
+    strengthDecayPerSecond: 0.1,
+    strengthDecayResist: 0.75,
+    strengthWindResist: 0.85,
+    strengthSpeedBonus: 0.35,
+    strengthKeptOnRedraw: 0.5,
     holdSeconds: 12.0,
     decaySpeed: 26,
     minLength: 40,
     refreshSnapRadius: 160,
     pointSpacing: 12,
-    maxLength: 900,
+    // The board is twice as deep now the hive sits in a corner.
+    maxLength: 1400,
   },
 
   patch: {
     baseCount: 2,
-    minRadius: 180,
-    maxRadius: 520,
+    // Day one's band is 230-300, comfortably inside the hive's 340 light.
+    minRadius: 230,
+    maxRadius: 300,
     reachRadius: 85,
     aimAssistRadius: 130,
     // Sized so one flower under the full swarm's attention runs dry in roughly
@@ -265,8 +372,16 @@ export const TUNING: Tuning = {
     // Scales with the day because the swarm's throughput does too.
     basePool: 180,
     poolPerDay: 70,
-    radiusPerDay: 20,
-    richMinRadius: 400,
+    radiusPerDay: 95,
+    distanceYieldNear: 260,
+    distanceYieldFar: 1000,
+    // 1000/260 rounded down. The multiplier has to match the *distance ratio*,
+    // not some pleasing round number: at 3x over a 3.85x span a far flower paid
+    // 22% less per second than a near one, so with thorns, wasps and a bigger
+    // draw cost on top of that nobody would ever have gone out there and the
+    // whole map would have been decoration.
+    distanceYieldMax: 3.8,
+    richMinRadius: 700,
     richYieldMultiplier: 3,
     nightBloomMultiplier: 4,
     nightBloomWindowSeconds: 12,
@@ -277,7 +392,17 @@ export const TUNING: Tuning = {
     secondsPerDay: 5,
     maxSeconds: 90,
     nightScreenMinSeconds: 6,
-    quotas: [60, 110, 170, 240, 320, 420, 540, 680, 850, 1050, 1280, 1550],
+    // Re-tuned against the deeper board. Distance-yield and beaten-in roads
+    // both raise throughput, so the old table left a competent player at three
+    // to four times quota through the whole midgame — no day after the first
+    // was ever in doubt, which is the opposite of what the table is for.
+    //
+    // Set against a simulated player who actually *spends* what the run earns.
+    // The first attempt was tuned against one that banked more than half its
+    // honey, which made the late game look unclearable when the real problem
+    // was that the model was not buying anything. A player who under-invests
+    // now stalls around day eight, which is the meta-progression working.
+    quotas: [60, 110, 260, 470, 540, 630, 750, 920, 1120, 1400, 1650, 1900],
     quotaGrowthAfterTable: 1.22,
   },
 
@@ -302,6 +427,20 @@ export const TUNING: Tuning = {
   },
 
   /**
+   * Fog.
+   *
+   * A 24px cell is finer than anything the player can act on and coarse enough
+   * that the whole grid is 1620 cells — small enough to push through a canvas
+   * texture whenever it changes without thinking about it.
+   */
+  fog: {
+    cellSize: 24,
+    edgeReveal: 0.3,
+    discoverAt: 0.45,
+    scoutRadius: 620,
+  },
+
+  /**
    * Thorn thickets. See sim/Bramble.ts for why the game needed them.
    *
    * Sized against the field the flowers actually sit in: a thicket is roughly
@@ -320,7 +459,7 @@ export const TUNING: Tuning = {
     baseRadius: 48,
     radiusPerDay: 3,
     maxRadius: 72,
-    maxCount: 5,
+    maxCount: 3,
     growthPerSecond: 0.35,
     growthFactor: 1.22,
     minLineFraction: 0.28,

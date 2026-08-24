@@ -13,6 +13,13 @@ export class Patch {
   maxPool: number;
   kind: PatchKind;
   alive = true;
+  /**
+   * Whether the player has ever seen this flower.
+   *
+   * An undiscovered flower is not drawn, is not labelled, and cannot be aimed
+   * at — it genuinely does not exist to the player until a bee finds it.
+   */
+  discovered = false;
   /** Drives the bloom-in and wilt-out animations. 0..1. */
   bloomT = 0;
   /**
@@ -31,8 +38,28 @@ export class Patch {
     if (kind === 'night') this.windowRemaining = TUNING.patch.nightBloomWindowSeconds;
   }
 
+  /**
+   * How much more this flower pays for being far from the hive, 1..3.
+   *
+   * Set by `Field` when the flower is placed, because distance needs the hive
+   * and a Patch does not know where that is.
+   *
+   * The arithmetic behind it is the point. A round trip is 2L/speed, so a
+   * flower three times further away takes three times as long to work and pays
+   * three times per trip — **the same honey per second**. What actually differs
+   * is that the same pool lasts three times longer. A far flower is therefore
+   * not a better flower, it is a longer-lived one that costs more to reach and
+   * more to hold; a near flower is the fallback that runs dry fast. That is a
+   * decision, where "distance is simply worse" was not.
+   */
+  distanceMultiplier = 1;
+
   /** Honey per bee-trip from this patch. */
   get yieldPerTrip(): number {
+    return this.kindMultiplier * this.distanceMultiplier;
+  }
+
+  private get kindMultiplier(): number {
     switch (this.kind) {
       case 'rich':
         return TUNING.patch.richYieldMultiplier;
@@ -41,6 +68,18 @@ export class Patch {
       default:
         return 1;
     }
+  }
+
+  /**
+   * Honey actually left in this flower.
+   *
+   * The number worth putting on screen. Pool alone stopped meaning anything the
+   * moment flowers started paying different rates — two flowers reading "180"
+   * can be worth 180 and 540 — and asking the player to multiply two figures in
+   * their head mid-drag is not a decision, it is arithmetic.
+   */
+  get honeyLeft(): number {
+    return this.pool * this.yieldPerTrip;
   }
 
   get fullness(): number {

@@ -83,16 +83,44 @@ export class RouteRenderer {
     const g = this.gfx;
     const bandLength = live / BANDS;
 
+    // A worked path is visibly a road: thicker, brighter, and warmer than a
+    // line drawn a moment ago. This is the only readout the strength system
+    // gets, and it is enough — the same principle as decay, where the route's
+    // health is its shape rather than a bar somewhere else on screen.
+    const strength = route.strength;
+    const widthGain = 1 + strength * 0.9;
+    const alphaGain = strength * 0.08;
+    const colour =
+      strength > 0.02 ? blend(COLORS.route, 0xfff3c4, strength) : COLORS.route;
+
+    // A soft underlay beneath a mature road, so it reads as packed ground
+    // rather than as a slightly fatter scribble.
+    if (strength > 0.15) {
+      g.lineStyle(11 * widthGain * 0.6, colour, 0.1 * strength);
+      g.beginPath();
+      let first = true;
+      for (let s = 0; s <= live; s += SAMPLE_STEP * 2) {
+        route.sample(s, scratch);
+        if (first) {
+          g.moveTo(scratch.x, scratch.y);
+          first = false;
+        } else {
+          g.lineTo(scratch.x, scratch.y);
+        }
+      }
+      g.strokePath();
+    }
+
     for (let band = 0; band < BANDS; band += 1) {
       const bandStart = band * bandLength;
       const bandEnd = bandStart + bandLength;
 
       // Brightest at the hive, faintest at the dissolving tip.
       const t = band / (BANDS - 1);
-      const alpha = 0.92 - t * 0.5;
-      const width = 7 - t * 3.4;
+      const alpha = 0.92 - t * 0.5 + alphaGain;
+      const width = (7 - t * 3.4) * widthGain;
 
-      g.lineStyle(width, COLORS.route, alpha);
+      g.lineStyle(width, colour, alpha);
       g.beginPath();
 
       let first = true;
@@ -132,4 +160,18 @@ export class RouteRenderer {
   destroy(): void {
     this.gfx.destroy();
   }
+}
+
+/** Linear blend between two packed RGB colours. */
+function blend(from: number, to: number, t: number): number {
+  const fr = (from >> 16) & 0xff;
+  const fg = (from >> 8) & 0xff;
+  const fb = from & 0xff;
+  const tr = (to >> 16) & 0xff;
+  const tg = (to >> 8) & 0xff;
+  const tb = to & 0xff;
+  const r = Math.round(fr + (tr - fr) * t);
+  const g = Math.round(fg + (tg - fg) * t);
+  const b = Math.round(fb + (tb - fb) * t);
+  return (r << 16) | (g << 8) | b;
 }
