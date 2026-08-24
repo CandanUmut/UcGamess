@@ -92,6 +92,29 @@ export class Route {
     this.updateTip();
   }
 
+  /**
+   * Severs the route at arc distance `s`, discarding everything beyond it.
+   *
+   * Unlike decay, this shortens the *drawn* path as well as the live length.
+   * That distinction matters: decay leaves a ghost showing where the route used
+   * to reach, which is the refresh target. A cut is not something to refresh
+   * back into — the thorns are still there — so leaving a ghost pointing
+   * straight through a thicket would be an invitation to redraw the same
+   * mistake.
+   */
+  cutAt(s: number): void {
+    const limit = Math.max(0, Math.min(s, this.poly.length));
+    this.poly = buildPolyline(truncateCoords(this.poly, limit));
+    this.liveLength = Math.min(this.liveLength, this.poly.length);
+
+    if (this.liveLength <= TUNING.route.minLength) {
+      this.liveLength = Math.max(this.liveLength, 0);
+      this.dead = true;
+    }
+
+    this.updateTip();
+  }
+
   /** Whether the live tip still reaches `target`, so bees can collect. */
   reachesTarget(): boolean {
     const patch = this.target;

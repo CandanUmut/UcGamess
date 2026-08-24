@@ -20,6 +20,7 @@ import {
   evaluateDay,
 } from '../game/DayCycle.ts';
 import { deriveStats } from '../game/Upgrades.ts';
+import { modifiersFor, PROVISIONS } from '../game/Provisions.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import { computeOffline, formatAway } from '../game/Offline.ts';
 import { commitDrag, resolveDragStart, type DragIntent } from '../game/RouteIntent.ts';
@@ -157,18 +158,35 @@ export class GameScene extends BaseGameplayScene {
     const features = featuresForDay(this.day);
     const patchCount = patchesForDay(this.day) + this.save.levels.bloom;
 
-    this.field.setStats(deriveStats(this.save.levels));
-    this.field.beginDay(this.day, features, patchCount, 1);
+    // A provision is spent the moment the day it was bought for begins, and
+    // persisted immediately. Consuming it here rather than when the night
+    // screen closes means a player who reloads mid-transition gets the item
+    // they paid for exactly once.
+    const provision = this.save.provision;
+    const modifiers = modifiersFor(provision);
+    if (provision) {
+      this.save.provision = null;
+      this.persist();
+    }
 
-    this.secondsLeft = dayLength(this.day) + extraSeconds;
+    this.field.setStats(deriveStats(this.save.levels));
+    this.field.beginDay(this.day, features, patchCount, 1, modifiers);
+
+    this.secondsLeft = dayLength(this.day) + extraSeconds + modifiers.extraDaySeconds;
     this.beeRenderer.resize(this.field.bees.length);
 
     this.hud.resetDay();
     this.hud.setVisible(true);
     this.hud.update(this.day, 0, dayQuota(this.day), this.secondsLeft);
 
+    // The day's own introduction outranks the provision note: a new element is
+    // the more important thing to read, and two banners at once is neither.
     const intro = dayIntroduction(this.day);
     if (intro) this.hud.showBanner(intro);
+    else if (provision)
+      this.hud.showBanner(
+        `${PROVISIONS[provision].name} — ${PROVISIONS[provision].blurb}`,
+      );
 
     this.idleSeconds = 0;
     this.sfx.startHum();
@@ -352,6 +370,7 @@ export class GameScene extends BaseGameplayScene {
     if (!intent || coords.length < 4) return;
 
     const result = commitDrag(this.field, intent, coords);
+    if (result.cutAt) this.showCut(result.cutAt.x, result.cutAt.y);
     if (result.kind === 'rejected') return;
 
     // Drawing costs workers, charged on what the gesture actually covered.
@@ -359,6 +378,12 @@ export class GameScene extends BaseGameplayScene {
     if (route) this.field.dispatchBuilders(route, result.drawnLength);
 
     if (result.connected) this.sfx.playVaried('collect', 0.18, 400);
+  }
+
+  /** The snip where thorns took a route. */
+  private showCut(x: number, y: number): void {
+    for (let i = 0; i < 4; i += 1) this.juice.scatter(x, y);
+    this.sfx.playVaried('draw', 0.24, 900);
   }
 
   /** Advances the press-and-hold that erases a route. */
@@ -500,6 +525,11 @@ export class GameScene extends BaseGameplayScene {
 
     for (const hit of events.scattered) this.juice.scatter(hit.x, hit.y);
     if (events.scattered.length > 0) this.sfx.playVaried('wasp', 0.2);
+
+    // A route severed by thorns gets the same acknowledgement as anything else
+    // that happened to the player. Losing a line silently is the difference
+    // between "the thorns cut me off" and "the game ate my drag".
+    for (const hit of events.cut) this.showCut(hit.x, hit.y);
   }
 
   private drawPreview(): void {
@@ -568,6 +598,12 @@ export class GameScene extends BaseGameplayScene {
           kind: p.kind,
         })),
       builders: () => this.field.countBuilders(),
+      brambles: () =>
+        this.field.brambles.map((b) => ({
+          x: Math.round(b.x),
+          y: Math.round(b.y),
+          radius: Math.round(b.radius),
+        })),
       wind: () => this.field.windVector,
       stats: () => this.field.getStats(),
       routes: () =>

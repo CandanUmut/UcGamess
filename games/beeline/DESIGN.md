@@ -135,6 +135,10 @@ One new element every couple of days. **Never two at once.** Odd days after an
 introduction are deliberately quiet so the last addition has room to be
 understood.
 
+> **Superseded by §15.** Thorns took day 3 and everything after it moved a day
+> later. The table below is the original shape; the rule it protects is
+> unchanged, and §15 has the current days.
+
 | Day | New              | Field     | Notes                                                                       |
 | --- | ---------------- | --------- | --------------------------------------------------------------------------- |
 | 1   | —                | 1 patch   | Hint line. Trivial quota. Teaching day.                                     |
@@ -173,6 +177,9 @@ seconds, then wilts regardless of state.
 
 Five, matching the dimensions agreed with the team: bee count, bee speed, path
 stability, more flowers, honey storage.
+
+> **Extended by §15.** These are still the five permanent upgrades. Honey now
+> also buys one-use **provisions**, spent on a single day.
 
 | #   | Upgrade               | Effect per level                     | Levels | Range             |
 | --- | --------------------- | ------------------------------------ | ------ | ----------------- |
@@ -705,7 +712,174 @@ passes, and headless WebKit is not Safari.
 
 ---
 
-## 13. Success criteria
+## 15. Thorns, provisions, and the forecast
+
+Three additions, from one note: the loop works but the field is empty and the
+night screen only sells statistics.
+
+### The problem the field had
+
+Nothing on the board ever made the _shape_ of a route matter. Wind bent lines
+and wasps punished long ones, but on any given frame the best line to a flower
+was the straight one. That makes the drag a target selection wearing a
+gesture's clothes: the player picks a flower, and the hand just carries out the
+decision. A game about drawing needs the drawing to be the decision.
+
+### Thorns
+
+Thickets of bramble sit on the field. **A route cannot pass through one** — it is
+clipped where it enters, and the piece beyond is discarded.
+
+That single rule does the work:
+
+- **Nothing to read, nothing to teach.** The line visibly stops at the thorns,
+  the bees reach a tip that touches no flower, mill, and come home empty. That
+  feedback path already existed for decay; thorns reuse it whole.
+- **The gesture is unchanged.** Still one drag, still outward toward a flower.
+  There is no avoid-verb, no pathfinding, no waypoint mode.
+- **The cost is honest.** Workers are charged on the length that survived the
+  cut, not on what the finger covered.
+- **They spread through the day**, so a line that was clear at dawn can be in
+  the thorns by mid-afternoon — the same pressure shape as flowers running dry.
+
+The best part was free: **wind bows a route sideways, and thorns grow, so
+between them a route the player already drew can be severed without the player
+touching anything.** Neither system was built for that. It is what turns a route
+from something you place into something you maintain.
+
+A cut, unlike decay, shortens the _drawn_ path as well as the live one. Decay
+leaves a ghost because refreshing along it is the right move; a cut must not,
+because redrawing along it would hit the same thicket.
+
+**Placement is the design, not decoration.** A thicket dropped at random usually
+sits where nobody was flying, changes nothing, and reads as scenery. Each one is
+placed on the line between the hive and a flower, nudged sideways by up to
+0.6× its radius, so it blocks the lazy straight line without walling the flower
+off. Three clearances are enforced: away from the hive draw ring, away from the
+heart of every flower's reach ring, and away from other thickets. A spot that
+cannot satisfy all three is skipped.
+
+The first build of this shipped **with no thorns on the field at all.** Between
+the hive ring (110px) and a flower ring (85px) there is only
+`distance − 195 − 2 × grown radius` of usable line, and at the original 58px
+growing to 1.35× that corridor came out at 412–487px — wider than most flowers
+are far. Every candidate was rejected, silently. Two things fixed it: the
+thicket was sized against the corridor it has to fit in, and the legal band of
+the line is now **computed** rather than sampled at 0.34–0.7 and hoped for.
+
+Two guarantees are tested rather than argued:
+
+- every flower always has a clear route to it — a single dog-leg through one
+  waypoint, not an elaborate serpentine;
+- the field actually receives the number of thickets the schedule asks for,
+  which is the test that fails when a clearance change quietly empties the board.
+
+**Three is the cap**, because that is what a fixed 1280×720 board with a hive in
+the middle can honestly hold. A schedule asking for five would have the night
+screen forecast thorns the day could not deliver.
+
+### Provisions
+
+One-use purchases, spent on the next day only. Five of them, and **at most one
+can be carried.**
+
+That cap is the whole system. A stackable inventory needs quantities, a screen
+to manage them, and balance against every combination, and it turns the night
+screen into bookkeeping. One slot keeps the question small and sharp: given
+what tomorrow holds, what is the single thing that would help most?
+
+| Provision          | Effect                               | Base | Offered when |
+| ------------------ | ------------------------------------ | ---- | ------------ |
+| **Scout Bees**     | +45% pollen in every flower          | 55   | always       |
+| **Waxed Trails**   | +8s route hold                       | 80   | always       |
+| **Pruning Shears** | thorns start at half size, no spread | 65   | thorns       |
+| **Smoke Pot**      | wasp reach ×0.45, safe zone ×1.9     | 70   | wasps        |
+| **Early Rise**     | +12 seconds of daylight              | 45   | always       |
+
+Rules that make it work rather than merely exist:
+
+- **Never offered when it could not help.** Smoke on a day with no wasps is
+  selling nothing, and one dud purchase costs the whole row its credibility.
+  This also gives the shelf its own ramp: three options early, five once the
+  field has thorns and wasps in it.
+- **Priced at roughly half a first upgrade level, growing 1.15× per day** and
+  capped. Flat pricing would be a real choice on day three and a rounding error
+  on day fifteen, at which point the row stops asking anything.
+- **Tap the packed one to put it back, at full price.** Nothing here should be a
+  decision a misplaced thumb makes permanent. The refund happens before the
+  charge, so swapping is one decision rather than a sequence to get right.
+- **Spent at dawn and persisted immediately**, so a reload mid-transition gives
+  the player the item they paid for exactly once.
+
+Provisions also give honey a second sink. Before, early honey was only ever
+"not enough for an upgrade yet".
+
+### The forecast
+
+The night screen now shows what tomorrow holds — flower count, thorns, wind,
+wasps, rich blooms — plus its quota and the next unlock a few days out.
+
+The progression track has been in this document since the first draft and was
+never built. It earns its place twice over now: buying smoke is a coin flip
+unless the player can see there are wasps tomorrow. The forecast turns the shelf
+from a gamble into a read, which is the difference between a purchase the player
+regrets and one they feel clever about.
+
+### Escalation, reshuffled
+
+Thorns took day 3, so everything after it moved a day later. The rule being
+protected is one new element at a time with a quiet day after it, not any
+particular day number.
+
+| Day | New          | Thickets |
+| --- | ------------ | -------- |
+| 1   | —            | 0        |
+| 2   | Splitting    | 0        |
+| 3   | **Thorns**   | 1        |
+| 5   | Wind         | 1        |
+| 6   | —            | 2        |
+| 7   | Wasps        | 2        |
+| 9   | Rich patches | 2        |
+| 10  | —            | 3        |
+| 11  | Second wasp  | 3        |
+| 12  | Night bloom  | 3        |
+
+Thicket-count bumps land on days 6 and 10, chosen to miss every day that
+introduces something. Count is intensity, not a new thing to learn — the same
+reason flower count has never counted against the rule.
+
+### Measured
+
+A scripted competent player, drawing dog-legs around thorns and refreshing on a
+timer, against the unchanged quota table:
+
+| Day | Honey | Quota | Ratio |
+| --- | ----- | ----- | ----- |
+| 1   | 294   | 60    | 4.90  |
+| 3   | 391   | 170   | 2.30  |
+| 5   | 641   | 320   | 2.00  |
+| 7   | 704   | 540   | 1.30  |
+| 9   | 1552  | 850   | 1.83  |
+| 11  | 998   | 1280  | 0.78  |
+
+The bot refreshes far faster than a person, so a human landing near 1.0 is the
+target — narrow wins and near misses from day four on, which is what the quota
+table was always aiming for. Days 1 and 2 have no thorns and stay unmissable.
+The dips at 7 and 11 are the wasps arriving, as intended.
+
+---
+
+## 16. Still unverified
+
+Everything §10 and §14 flagged is still true — no real phone and no real Safari
+has run this build. The additions above were verified in headless Chromium at
+1280×720: thorns place and render, a straight drag into one is clipped at the
+thicket edge, a full day 6 plays to a met quota, and packing and unpacking a
+provision moves honey by exactly the right amount, with zero console errors.
+
+---
+
+## 17. Success criteria
 
 Not submission-ready until all of these hold:
 

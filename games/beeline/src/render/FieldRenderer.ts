@@ -2,6 +2,7 @@ import type Phaser from 'phaser';
 import { COLORS, TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
 import type { Patch } from '../sim/Patch.ts';
+import type { Bramble } from '../sim/Bramble.ts';
 import { TEX } from './textures.ts';
 
 const PATCH_TINT: Record<string, number> = {
@@ -15,6 +16,14 @@ export class FieldRenderer {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly hiveGlow: Phaser.GameObjects.Image;
   private readonly waspGfx: Phaser.GameObjects.Graphics;
+  /**
+   * Thorns get their own layer beneath the routes.
+   *
+   * A route drawn *over* a thicket would look like it passes through, which is
+   * exactly the thing that cannot be true. Under the route layer, a line that
+   * ends at a thicket reads as stopped by it.
+   */
+  private readonly brambleGfx: Phaser.GameObjects.Graphics;
   private readonly scene: Phaser.Scene;
   private readonly depth: number;
   /** One label per patch, reused. Pollen left is a number worth reading now. */
@@ -30,6 +39,7 @@ export class FieldRenderer {
       .setTint(COLORS.hive)
       .setScale(1.6);
     this.waspGfx = scene.add.graphics().setDepth(depth + 3);
+    this.brambleGfx = scene.add.graphics().setDepth(depth + 4);
   }
 
   draw(field: Field, alpha: number, drawingFromHive: boolean): void {
@@ -38,6 +48,7 @@ export class FieldRenderer {
 
     for (const patch of field.patches) this.drawPatch(g, patch, field.time);
     this.drawLabels(field);
+    this.drawBrambles(field);
 
     // The area a new route can start from. Brightening it while the player is
     // mid-drag is the only chrome the playfield has.
@@ -131,6 +142,49 @@ export class FieldRenderer {
     }
   }
 
+  /**
+   * Thorn thickets: a dark mass with a spiked rim.
+   *
+   * Drawn dark and matte against a field of glowing flowers and a glowing hive,
+   * because the one thing the player has to read instantly is "nothing of mine
+   * goes there". The spikes are a fixed shape per thicket and only the radius
+   * animates, so growth reads as growth rather than as noise.
+   */
+  private drawBrambles(field: Field): void {
+    const g = this.brambleGfx;
+    g.clear();
+    if (field.brambles.length === 0) return;
+
+    for (const bramble of field.brambles) this.drawBramble(g, bramble);
+  }
+
+  private drawBramble(g: Phaser.GameObjects.Graphics, bramble: Bramble): void {
+    const { x, y, radius, spikes } = bramble;
+
+    // A soft dark halo so the edge does not look like a hard cut-out, and so
+    // the boundary the route stops at is visible slightly before it is reached.
+    g.fillStyle(0x000000, 0.32);
+    g.fillCircle(x, y, radius * 1.12);
+
+    g.fillStyle(COLORS.bramble, 0.96);
+    g.fillCircle(x, y, radius);
+
+    g.lineStyle(2, COLORS.brambleThorn, 0.75);
+    for (let i = 0; i < spikes.length; i += 2) {
+      const angle = spikes[i] ?? 0;
+      const reach = spikes[i + 1] ?? 1;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      g.beginPath();
+      g.moveTo(x + cos * radius * 0.55, y + sin * radius * 0.55);
+      g.lineTo(x + cos * radius * reach, y + sin * radius * reach);
+      g.strokePath();
+    }
+
+    g.lineStyle(2, COLORS.brambleThorn, 0.5);
+    g.strokeCircle(x, y, radius);
+  }
+
   private drawWasps(field: Field, alpha: number): void {
     const g = this.waspGfx;
     g.clear();
@@ -156,6 +210,7 @@ export class FieldRenderer {
     this.gfx.destroy();
     this.hiveGlow.destroy();
     this.waspGfx.destroy();
+    this.brambleGfx.destroy();
     for (const label of this.labels) label.destroy();
     this.labels = [];
   }

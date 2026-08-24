@@ -24,15 +24,22 @@ function advance(field: Field, seconds: number): void {
 
 describe('drawing costs workers', () => {
   it('charges more workers for a long draw than a short refresh', () => {
-    const field = newDay();
-    const long = field.createRoute(line(field, 400));
+    // Both measurements are taken on a fresh field with the whole swarm at the
+    // hive, so each one is purely the per-pixel charge.
+    //
+    // The previous shape drew the long route first and then advanced six
+    // seconds before the short one, which made the result depend on where the
+    // day's random flower happened to land: a route that reached it returned
+    // laden bees, which cannot be conscripted, and the short draw measured zero
+    // instead of its cost. That failed roughly one run in fourteen.
+    const longField = newDay();
+    const long = longField.createRoute(line(longField, 400));
     expect(long).not.toBeNull();
+    const forLong = longField.dispatchBuilders(long!, 400);
 
-    const forLong = field.dispatchBuilders(long!, 400);
-    advance(field, 6); // let them come home
-
-    const short = field.createRoute(line(field, 400));
-    const forShort = field.dispatchBuilders(short!, 90);
+    const shortField = newDay();
+    const short = shortField.createRoute(line(shortField, 400));
+    const forShort = shortField.dispatchBuilders(short!, 90);
 
     // The whole point of decaying from the far end: catching a route early is
     // cheaper in bees, not just in thumb effort.

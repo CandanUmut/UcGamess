@@ -54,9 +54,28 @@ export class Wasp {
     this.y += (dy / dist) * step;
   }
 
-  /** Whether a point is close enough to be scattered, given hive safety. */
-  threatens(x: number, y: number, hiveX: number, hiveY: number): boolean {
-    if (Math.hypot(x - hiveX, y - hiveY) <= TUNING.wasp.safeRadius) return false;
-    return Math.hypot(x - this.x, y - this.y) <= TUNING.wasp.interceptRadius;
+  /**
+   * Whether a point is close enough to be scattered, given hive safety.
+   *
+   * The two multipliers are how a Smoke Pot works: it widens the safe zone and
+   * shrinks the wasp's reach for a day. Applying it here rather than mutating
+   * TUNING keeps the tuning table a constant and the provision a parameter,
+   * which is the difference between a day-long effect and a permanent one that
+   * silently leaks into every later day.
+   */
+  threatens(
+    x: number,
+    y: number,
+    hiveX: number,
+    hiveY: number,
+    interceptMultiplier = 1,
+    safeRadiusMultiplier = 1,
+  ): boolean {
+    const safe = TUNING.wasp.safeRadius * safeRadiusMultiplier;
+    if (Math.hypot(x - hiveX, y - hiveY) <= safe) return false;
+    return (
+      Math.hypot(x - this.x, y - this.y) <=
+      TUNING.wasp.interceptRadius * interceptMultiplier
+    );
   }
 }

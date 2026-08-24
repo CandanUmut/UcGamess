@@ -55,6 +55,7 @@ describe('escalation schedule', () => {
     expect(features).toEqual({
       wind: false,
       wasps: 0,
+      brambles: 0,
       richPatches: false,
       nightBloom: false,
     });
@@ -66,11 +67,15 @@ describe('escalation schedule', () => {
 
   it('never introduces two new elements on the same day', () => {
     let previous = featuresForDay(1);
-    for (let day = 2; day <= 14; day += 1) {
+    for (let day = 2; day <= 16; day += 1) {
       const current = featuresForDay(day);
+      // Only the *first* thorn thicket counts as an introduction. Later days
+      // place more of them, but a second thicket is intensity, not a new thing
+      // to learn — the same reason a third flower has never counted either.
       const additions =
         (current.wind && !previous.wind ? 1 : 0) +
         (current.wasps > previous.wasps ? 1 : 0) +
+        (current.brambles > 0 && previous.brambles === 0 ? 1 : 0) +
         (current.richPatches && !previous.richPatches ? 1 : 0) +
         (current.nightBloom && !previous.nightBloom ? 1 : 0);
       expect(additions, `day ${day} introduced ${additions} things`).toBeLessThanOrEqual(

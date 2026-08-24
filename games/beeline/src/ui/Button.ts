@@ -37,7 +37,7 @@ export class Button {
   private readonly hitZone: Phaser.GameObjects.Zone;
   private readonly labelText: Phaser.GameObjects.Text;
   private readonly subText: Phaser.GameObjects.Text | undefined;
-  private readonly tint: number;
+  private tint: number;
   private readonly onClick: () => void;
   private enabled: boolean;
 
@@ -105,6 +105,12 @@ export class Button {
     this.subText?.setDepth(depth + 1);
     this.hitZone.setDepth(depth + 2);
     return this;
+  }
+
+  /** Recolours in place, for a button whose meaning changed rather than its text. */
+  setTint(tint: number): void {
+    this.tint = tint;
+    this.setEnabled(this.enabled);
   }
 
   setEnabled(enabled: boolean): void {
