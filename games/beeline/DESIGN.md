@@ -3,8 +3,12 @@
 > Working title. Verify against CrazyGames and Poki catalogues before submission —
 > a name confusable with an existing game is a documented rejection cause.
 
-**One sentence:** You draw flight routes from your hive to flower patches, and
-your swarm follows the lines you draw.
+**One sentence:** You draw flight routes from your hive out into a dark field,
+and the lines your swarm actually works become roads.
+
+> §18 is the current shape of the game. Sections 1-8 are the original design and
+> are still broadly true, but the board is dark now, the hive sits in a corner,
+> and a route is something you build up rather than something you replace.
 
 **The core verb is drawing.** Not tapping upgrade buttons, not managing menus.
 Every design decision below is checked against one question: does this keep the
@@ -137,7 +141,9 @@ understood.
 
 > **Superseded by §15.** Thorns took day 3 and everything after it moved a day
 > later. The table below is the original shape; the rule it protects is
-> unchanged, and §15 has the current days.
+> unchanged, and §15 has the current days. §18 adds a second, quieter ramp on
+> top of it: the flower band's outer edge moves a little further out every day,
+> which is what walks the player off the edge of the hive's light.
 
 | Day | New              | Field     | Notes                                                                       |
 | --- | ---------------- | --------- | --------------------------------------------------------------------------- |
@@ -879,7 +885,186 @@ provision moves honey by exactly the right amount, with zero console errors.
 
 ---
 
-## 17. Success criteria
+## 18. Short sight, roads, and a board worth learning
+
+The verdict on the previous build was that it still did not feel like a game:
+_"the paths should mean something"_, and _"it doesn't feel like there is
+scarcity or a talent needed"_. Both are correct, and they are the same problem
+seen from two ends.
+
+### What was actually wrong
+
+**Information was free and routes were disposable.** The whole field was lit, so
+the best flower was visible in the first frame and the drag was the execution of
+a decision the eye had already made. And because every route decayed to nothing
+in seconds, no route was ever a thing you owned — redrawing was a chore, not a
+choice. There was nothing to _learn_ about the board and nothing to _keep_.
+
+Four changes, and the point is that each one only works because of the others.
+
+### 1. Short sight
+
+The board starts dark. The hive lights its own neighbourhood; every bee carries
+a small light; what is seen stays seen for the rest of the day.
+
+**There is no scout button, because drawing into the dark already is one.** Bees
+fly the line you drew and light it as they go. Find a flower and you have found
+something worth having; find thorns and the route is cut, which is how you learn
+they were there. The verb does not change.
+
+Three rules keep it fair:
+
+- **Fog only ever retreats within a day.** Re-scouting ground you already paid
+  for is busywork wearing a mechanic's clothes.
+- **Undiscovered flowers cannot be aimed at.** Aim assist snapping onto
+  something invisible would hand back the information the dark was there to
+  take away. The simulation still resolves them — a bee that reaches an unseen
+  flower collects from it, which is exactly how exploring pays.
+- **Day one is fully lit.** The first thirty seconds are untouched.
+
+Implementation is a flat 24px grid — 1620 cells — pushed into a 54x30 canvas
+texture stretched over the field with linear filtering, so the GPU's own
+interpolation turns the grid into weather for the cost of one quad. It is
+redrawn only when a cell actually changes.
+
+### 2. Roads
+
+A route accrues **strength** from traffic. Strength buys three things: it
+retreats 75% slower, it takes 85% less of the wind, and bees fly it 35% faster.
+
+That last pair is the direct answer to _"for the wind the path can be stronger
+by doing something"_ — the something is using it.
+
+**Extending a route keeps its strength; redrawing from the hive halves it.**
+This is the first thing that gives the refresh gesture a _price_ rather than
+just a shorter drag, which the design has wanted since the first playtest.
+
+Two mistakes were worth the finding:
+
+- **Strength must decay proportionally, not by a flat amount.** With both gain
+  and loss constant there is no stable middle — a route either out-earns its
+  decay and pegs at full or falls to nothing. Strength would have been a hidden
+  boolean. Decaying a fraction of what is there gives a real equilibrium at
+  `deliveries/s x perDelivery / decay`.
+- **It has to be tuned as that equilibrium, not as a delivery count.** The first
+  pass pegged any working route at full in about thirteen seconds, which made
+  the road free rather than earned.
+
+Tuned so a thin far line settles around a third strength, a middling one around
+six tenths, and a short line carrying the whole swarm at full. **That is what
+makes the split decision bite: three routes give three half-roads, one route
+gives one real road.**
+
+### 3. A bigger board, by moving the hive
+
+The hive was in the middle, which caps a route at about 560px on a 1280x720
+field. It now sits in the lower left, and the longest route is about 1100.
+
+**Zooming a larger world out to fit was considered and rejected.** A 1.5x zoom
+puts a flower's reach ring near 17 CSS pixels on a phone, well under what a
+thumb reliably hits, and the design rules treat that as a rejection cause. A
+corner hive doubles the depth without shrinking anything, and gives the board a
+direction: there is a home and there is a frontier.
+
+Only the **outer** edge of the flower band moves with the day. The inner edge
+stays put, so there is always a near flower to fall back on — and that is also
+what paces the fog, since day one's band sits inside the hive's light and each
+day pushes a little more of the field past it. Roughly: everything lit on days
+one and two, a third of the board by day four, one flower in five by day nine.
+
+### 4. Distance pays
+
+Yield ramps linearly with distance from the hive, 1x to 3.8x.
+
+The arithmetic is the point, and it is worth stating exactly because it is what
+turns distance from a cost into a decision. A round trip is `2L/speed`, so a
+flower 3.8x further takes 3.8x as long to work and pays 3.8x per trip —
+**identical honey per second**. What differs is that the same pool lasts 3.8x
+longer. A far flower is not a better flower; it is a longer-lived one that costs
+more to reach and more to hold. A near flower is the fallback that runs dry
+fast.
+
+The multiplier has to match the _distance ratio_, not a pleasing round number.
+At 3x over a 3.85x span a far flower paid 22% less per second than a near one —
+and with thorns, wasps and a bigger draw cost on top, nobody would ever have
+gone out there and the whole map would have been decoration. A test pins the
+rate flat across the whole ramp.
+
+The flower's label is now **honey left** (`pool x yield`) rather than pollen.
+Two flowers reading "180" can be worth 180 and 690, and asking the player to
+multiply two figures mid-drag is arithmetic, not a decision.
+
+The HUD also says how many flowers are **still out there**. Without it the
+player cannot tell an unexplored corner from an empty one, and exploring becomes
+superstition. It says there is something to find and never says where.
+
+### Scout Bees changed jobs
+
+The provision used to be "+45% pollen", which had nothing to do with scouting
+and was the least interesting thing honey could buy. It now lights a wide radius
+at dawn. On a dark board that is the most valuable one-off there is, and the
+name finally describes what the item does.
+
+### Bugs this pass found
+
+- **A `maxCount: 5` retune landed on `route` instead of `bramble`**, silently
+  capping simultaneous routes at three for a whole release. Both are restored.
+- **Day one started completely dark.** Flowers spawned at 230-300 while the
+  hive lit 340 — but reveal falls off to `edgeReveal` at the rim, so the
+  _discovery_ radius was only 267. Sight is now sized against the threshold,
+  not the radius.
+- **A rich flower worth 2200 honey spawned seventy pixels from the hive.** The
+  placement fallback walked out at a random angle and clamped onto the board,
+  which with a corner hive drags the point back to an edge near home. Placement
+  now degrades in stages and never gives up the inner bound — distance is what
+  every other number on a flower is derived from.
+- **Thickets could box a flower against the board edge.** A prune pass after
+  placement drops any thicket that leaves a flower with no clear dog-leg, so the
+  guarantee is structural rather than statistical.
+
+### Measured
+
+A simulated player who keeps three earning routes, runs at most one scout at a
+time, refreshes by extending, and spends roughly what the run earns:
+
+| Day | Honey | Quota | Ratio |
+| --- | ----- | ----- | ----- |
+| 1   | 297   | 60    | 4.95  |
+| 2   | 405   | 110   | 3.68  |
+| 4   | 954   | 470   | 2.03  |
+| 6   | 1371  | 630   | 2.18  |
+| 8   | 1886  | 920   | 2.05  |
+| 10  | 2876  | 1400  | 2.05  |
+| 12  | 2283  | 1900  | 1.20  |
+
+Days one and two remain unmissable. A human at roughly 60% of this model lands
+near quota from day four on, which is the narrow-win band the table exists for.
+
+Two notes on the model, because both changed the answer:
+
+- An earlier bot opened a scout route every quarter second and starved at almost
+  zero honey. That is a **true fact about the game** — bees split evenly across
+  live routes, so four lines into the dark means most of the swarm flying to
+  nowhere — but it is not what a competent player does.
+- An earlier bot banked more than half the honey it earned, which made the late
+  game look unclearable when the real problem was that the model was not buying
+  anything. Quotas are set against a player who spends; one who under-invests
+  now stalls around day eight, which is the meta-progression working.
+
+### Still unverified
+
+Everything §10, §14 and §16 flagged. The additions above were verified in
+headless Chromium at 1280x720: day one is fully lit with the hint line intact, a
+day-nine board starts with one flower of six visible and the four richest in the
+dark, a scouted line finds a flower worth 2220 against near ones worth 574 and
+786, and three concurrent routes settle at visibly different strengths (1.0,
+0.47, 0.16) — with zero console errors.
+
+---
+
+---
+
+## 19. Success criteria
 
 Not submission-ready until all of these hold:
 

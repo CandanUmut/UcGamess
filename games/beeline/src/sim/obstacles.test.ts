@@ -341,55 +341,21 @@ describe('thicket placement', () => {
   it('always leaves at least one clear way to every flower', () => {
     // The load-bearing playability guarantee. Thorns are a puzzle only while
     // the puzzle has an answer — a flower walled off is not difficulty, it is a
-    // dead flower the player wastes a drag on. Placement enforces clearances
-    // that make this true; this test is what keeps them enforced.
+    // flower the player wastes a drag on and can never use.
     //
-    // "Clear" is deliberately modest: a single dog-leg through one waypoint,
-    // which is one flick of a thumb. If only an elaborate serpentine worked,
-    // the field would technically pass and still feel unfair.
-    const clear = (
-      field: Field,
-      ax: number,
-      ay: number,
-      bx: number,
-      by: number,
-    ): boolean => !field.pathBlocked(ax, ay, bx, by);
-
+    // Placement enforces clearances that make this nearly always true, and a
+    // prune pass after placement removes any thicket that boxed a flower in
+    // anyway. That combination is what makes the guarantee structural instead
+    // of a property we hope holds; this test is what keeps it that way.
     for (let day = 3; day <= 16; day += 1) {
-      for (let trial = 0; trial < 20; trial += 1) {
+      for (let trial = 0; trial < 25; trial += 1) {
         const field = new Field();
         field.beginDay(day, featuresForDay(day), patchesForDay(day), 1);
 
         for (const patch of field.patches) {
           if (!patch.alive) continue;
-
-          const dx = patch.x - field.hiveX;
-          const dy = patch.y - field.hiveY;
-          const span = Math.hypot(dx, dy) || 1;
-          const nx = -dy / span;
-          const ny = dx / span;
-
-          let reachable = clear(field, field.hiveX, field.hiveY, patch.x, patch.y);
-
-          for (let side = -1; side <= 1 && !reachable; side += 2) {
-            for (const offset of [90, 140, 190, 240, 300]) {
-              for (const along of [0.35, 0.5, 0.65]) {
-                const wx = field.hiveX + dx * along + nx * offset * side;
-                const wy = field.hiveY + dy * along + ny * offset * side;
-                if (
-                  clear(field, field.hiveX, field.hiveY, wx, wy) &&
-                  clear(field, wx, wy, patch.x, patch.y)
-                ) {
-                  reachable = true;
-                  break;
-                }
-              }
-              if (reachable) break;
-            }
-          }
-
           expect(
-            reachable,
+            field.hasClearApproach(patch.x, patch.y),
             `day ${day}: a flower had no clear route around the thorns`,
           ).toBe(true);
         }

@@ -4,12 +4,27 @@ import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp } from './Wasp.ts';
 import { Bramble, blockedDistanceAlong, segmentBlocked } from './Bramble.ts';
+import { Fog } from './Fog.ts';
 import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
 import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
 import { brambleRadiusForDay, type DayFeatures } from '../game/DayCycle.ts';
 import { noModifiers, type DayModifiers } from '../game/Provisions.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
+
+/**
+ * The playable board, in design units.
+ *
+ * Same as the canvas: the map got bigger by moving the hive into a corner
+ * rather than by growing the world and zooming out. Zooming would have shrunk a
+ * flower's reach ring below what a thumb can reliably hit, which the design
+ * rules treat as a rejection cause, and fog makes an unlit 1280x720 board feel
+ * far larger than a lit one ever did.
+ */
+export const WORLD_WIDTH = 1280;
+export const WORLD_HEIGHT = 720;
+/** Top strip reserved for the HUD; nothing spawns under it. */
+const HUD_MARGIN = 110;
 
 export interface FieldStats {
   honey: number;
@@ -31,6 +46,8 @@ export interface FieldEvents {
   dispatched: number;
   /** Where a route was severed by thorns, so the cut is visible and audible. */
   cut: Array<{ x: number; y: number }>;
+  /** Flowers found this step. Discovery is the reward for exploring. */
+  found: Array<{ x: number; y: number; honey: number }>;
 }
 
 const NO_FEATURES: DayFeatures = {
@@ -59,6 +76,8 @@ export class Field {
   bees: Bee[] = [];
   wasps: Wasp[] = [];
   brambles: Bramble[] = [];
+  /** What the player has seen of the board today. */
+  readonly fog = new Fog(WORLD_WIDTH, WORLD_HEIGHT);
 
   honey = 0;
   /** Debug affordance: freeze route decay to feel the contrast. */
@@ -78,6 +97,7 @@ export class Field {
     scattered: [],
     dispatched: 0,
     cut: [],
+    found: [],
   };
 
   private elapsed = 0;
@@ -165,9 +185,46 @@ export class Field {
       this.wasps.push(new Wasp(spot.x, spot.y));
     }
 
+    this.fog.clear();
+    // The hive lights its own neighbourhood, and Scout Bees light a great deal
+    // more. Day one's flowers spawn inside the hive's light, so the first
+    // thirty seconds are exactly what they were before fog existed.
+    this.fog.reveal(this.hiveX, this.hiveY, TUNING.hive.sightRadius);
+    if (modifiers.scoutRadius > 0) {
+      this.fog.reveal(this.hiveX, this.hiveY, modifiers.scoutRadius);
+    }
+    this.updateDiscoveries();
+
     this.applyStats();
     for (const bee of this.bees) {
       bee.reset(this.hiveX, this.hiveY, TUNING.bee.lateralSpread, TUNING.bee.speedJitter);
+    }
+  }
+
+  // ---------------------------------------------------------------- fog
+
+  /**
+   * Promotes anything now standing in lit ground to "found".
+   *
+   * Discovery is one-way. A flower seen once is remembered for the rest of the
+   * day even if nothing goes near it again — re-finding ground you already paid
+   * to explore is busywork wearing a mechanic's clothes.
+   */
+  private updateDiscoveries(): void {
+    for (const patch of this.patches) {
+      if (patch.discovered || !patch.alive) continue;
+      if (!this.fog.isDiscovered(patch.x, patch.y)) continue;
+      patch.discovered = true;
+      this.events.found.push({
+        x: patch.x,
+        y: patch.y,
+        honey: Math.round(patch.honeyLeft),
+      });
+    }
+
+    for (const bramble of this.brambles) {
+      if (bramble.discovered) continue;
+      if (this.fog.isDiscovered(bramble.x, bramble.y)) bramble.discovered = true;
     }
   }
 
@@ -194,56 +251,121 @@ export class Field {
   // ---------------------------------------------------------------- patches
 
   private randomPatchPosition(kind: PatchKind): { x: number; y: number } {
-    // The field widens as days pass. Distance is already expensive — constant
-    // retreat speed, more workers to draw — so spreading the flowers ramps
-    // difficulty using pressure that already exists rather than adding a new
-    // one. Bounded by the canvas: this is a fixed 16:9 view, not a scrolling
-    // world, so "larger map" means the flowers use more of it.
-    const spread = (this.day - 1) * TUNING.patch.radiusPerDay;
-    const minRadius = Math.min(
-      (kind === 'rich' ? TUNING.patch.richMinRadius : TUNING.patch.minRadius) +
-        spread * 0.5,
-      340,
+    // The hive sits in a corner, so "further out" is most of the board rather
+    // than a ring around the middle. That is where the extra map came from: the
+    // longest route went from about 560px to about 1100 without the camera
+    // moving or anything on screen getting smaller.
+    // Only the outer edge moves with the day. Keeping the inner edge fixed
+    // means a near flower is always available as a fallback, so choosing
+    // between a cheap short route and a lucrative long one is a decision on
+    // every day of a run rather than only the late ones.
+    const maxRadius = Math.min(
+      TUNING.patch.maxRadius + (this.day - 1) * TUNING.patch.radiusPerDay,
+      1120,
     );
-    const maxRadius = Math.min(TUNING.patch.maxRadius + spread, 560);
+    const minRadius =
+      kind === 'rich'
+        ? Math.min(TUNING.patch.richMinRadius, maxRadius * 0.75)
+        : TUNING.patch.minRadius;
 
     // Bounds leave room for the reach ring, which is the thing the player aims
-    // at — a patch whose ring runs off the edge is unaimable at exactly the
+    // at — a flower whose ring runs off the edge is unaimable at exactly the
     // moment it matters. The top margin also clears the HUD.
     const margin = TUNING.patch.reachRadius + 20;
     const minX = margin;
-    const maxX = 1280 - margin;
-    const minY = 110 + margin;
-    const maxY = 720 - margin;
+    const maxX = WORLD_WIDTH - margin;
+    const minY = HUD_MARGIN + margin;
+    const maxY = WORLD_HEIGHT - margin;
 
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      // sqrt keeps the distribution even by area rather than clustering inward.
-      const t = Math.sqrt(Math.random());
-      const radius = minRadius + t * (maxRadius - minRadius);
-      const angle = Math.random() * Math.PI * 2;
-      const x = clamp(this.hiveX + Math.cos(angle) * radius, minX, maxX);
-      const y = clamp(this.hiveY + Math.sin(angle) * radius * 0.72, minY, maxY);
+    // Rejection-sample the whole board rather than sampling an angle and a
+    // radius. With the hive in a corner most of a circle around it is off the
+    // board, so polar sampling would pile flowers along the two edges the
+    // circle still intersects.
+    const sample = (): { x: number; y: number; distance: number } => {
+      const x = minX + Math.random() * (maxX - minX);
+      const y = minY + Math.random() * (maxY - minY);
+      return { x, y, distance: Math.hypot(x - this.hiveX, y - this.hiveY) };
+    };
 
-      // Reject spots that overlap an existing patch — overlapping bloom circles
-      // read as one confusing blob and make aiming ambiguous.
-      const tooClose = this.patches.some(
-        (p) => p.alive && Math.hypot(p.x - x, p.y - y) < 150,
-      );
-      if (!tooClose) return { x, y };
+    // Overlapping bloom circles read as one confusing blob and make aiming
+    // ambiguous, so spacing is preferred — but it is the first thing given up.
+    const spaced = (x: number, y: number): boolean =>
+      !this.patches.some((p) => p.alive && Math.hypot(p.x - x, p.y - y) < 170);
+
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const spot = sample();
+      if (spot.distance < minRadius || spot.distance > maxRadius) continue;
+      if (spaced(spot.x, spot.y)) return { x: spot.x, y: spot.y };
     }
 
-    const angle = Math.random() * Math.PI * 2;
-    return {
-      x: clamp(this.hiveX + Math.cos(angle) * minRadius, minX, maxX),
-      y: clamp(this.hiveY + Math.sin(angle) * minRadius * 0.72, minY, maxY),
-    };
+    // Crowded board: keep the band, drop the spacing.
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const spot = sample();
+      if (spot.distance >= minRadius && spot.distance <= maxRadius) {
+        return { x: spot.x, y: spot.y };
+      }
+    }
+
+    // Still nothing. Give up the *outer* bound and take the spot closest to it,
+    // never the inner one.
+    //
+    // Which bound is negotiable is the whole point. Distance is what yield,
+    // honey value and the entire near-versus-far decision are derived from, so
+    // a flower inside its floor is not a slightly-off flower, it is a broken
+    // one — a rich patch worth 2200 honey once landed seventy pixels from the
+    // hive because the old fallback clamped a far point onto the board edge.
+    // Overshooting the ceiling only ever makes a flower a longer trip away.
+    let best: { x: number; y: number } | null = null;
+    let bestError = Number.POSITIVE_INFINITY;
+
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const spot = sample();
+      if (spot.distance < minRadius) continue;
+      const error = Math.abs(spot.distance - maxRadius);
+      if (error >= bestError) continue;
+      bestError = error;
+      best = { x: spot.x, y: spot.y };
+    }
+    if (best) return best;
+
+    // Nowhere on the board is far enough: take the furthest point there is.
+    let furthest = { x: maxX, y: minY };
+    let furthestDistance = Math.hypot(maxX - this.hiveX, minY - this.hiveY);
+    for (const corner of [
+      { x: minX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ]) {
+      const distance = Math.hypot(corner.x - this.hiveX, corner.y - this.hiveY);
+      if (distance > furthestDistance) {
+        furthestDistance = distance;
+        furthest = corner;
+      }
+    }
+    return furthest;
   }
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
     const spot = this.randomPatchPosition(kind);
     const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
+    patch.distanceMultiplier = this.distanceMultiplierAt(spot.x, spot.y);
     this.patches.push(patch);
     return patch;
+  }
+
+  /**
+   * How much more a flower here pays for being far out. 1 near, up to 3 far.
+   *
+   * Linear rather than anything curvier, because the player has to be able to
+   * read it off the board at a glance: twice as far out, roughly twice the
+   * honey in it.
+   */
+  distanceMultiplierAt(x: number, y: number): number {
+    const { distanceYieldNear, distanceYieldFar, distanceYieldMax } = TUNING.patch;
+    const distance = Math.hypot(x - this.hiveX, y - this.hiveY);
+    const span = Math.max(1, distanceYieldFar - distanceYieldNear);
+    const t = (distance - distanceYieldNear) / span;
+    return 1 + Math.min(1, Math.max(0, t)) * (distanceYieldMax - 1);
   }
 
   removePatch(): void {
@@ -254,13 +376,30 @@ export class Field {
     }
   }
 
-  /** Nearest living patch to a point, within `limit` if given. */
-  nearestPatchTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Patch | null {
+  /**
+   * Nearest living patch to a point, within `limit` if given.
+   *
+   * `requireDiscovered` is the whole point of the fog. Aim assist and route
+   * targeting must only ever consider flowers the player has actually found —
+   * snapping a drag onto something invisible would hand back the information
+   * the dark was there to take away, and would read as the game aiming for you.
+   *
+   * The simulation still resolves undiscovered flowers when it needs to: a bee
+   * that arrives at a route's tip and finds an unseen flower there collects
+   * from it, which is exactly how exploring pays off.
+   */
+  nearestPatchTo(
+    x: number,
+    y: number,
+    limit = Number.POSITIVE_INFINITY,
+    requireDiscovered = false,
+  ): Patch | null {
     let best: Patch | null = null;
     let bestDist = limit;
 
     for (const patch of this.patches) {
       if (!patch.alive) continue;
+      if (requireDiscovered && !patch.discovered) continue;
       const dist = Math.hypot(patch.x - x, patch.y - y);
       if (dist < bestDist) {
         bestDist = dist;
@@ -268,6 +407,11 @@ export class Field {
       }
     }
     return best;
+  }
+
+  /** Living flowers the player has actually seen. */
+  get knownPatches(): Patch[] {
+    return this.patches.filter((p) => p.alive && p.discovered);
   }
 
   // ---------------------------------------------------------------- brambles
@@ -376,15 +520,100 @@ export class Field {
       // host one.
       if (!placed) this.placeFreeBramble(radius, growth);
     }
+
+    this.pruneUnreachableBrambles();
+  }
+
+  /**
+   * Removes any thicket that leaves a flower with no way in.
+   *
+   * The clearance rules make this rare rather than impossible: they keep each
+   * thicket off the hive ring and off the heart of every reach ring, but two
+   * thickets placed legally can still box a flower against the edge of the
+   * board — which the corner hive made more likely, because flowers now spawn
+   * much closer to the corners.
+   *
+   * A walled-off flower is not difficulty, it is a flower the player wastes a
+   * drag on and cannot ever use. Checking after placement and dropping the
+   * offender makes the guarantee structural rather than a statistical property
+   * we hope holds, and it costs one sweep a day.
+   */
+  private pruneUnreachableBrambles(): void {
+    for (const patch of this.patches) {
+      if (!patch.alive) continue;
+
+      let guard = 0;
+      while (!this.hasClearApproach(patch.x, patch.y) && guard < this.brambles.length) {
+        guard += 1;
+
+        // Drop the thicket nearest the straight line in, which is the one most
+        // likely to be doing the boxing in.
+        let worst = -1;
+        let worstDistance = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < this.brambles.length; i += 1) {
+          const bramble = this.brambles[i];
+          if (!bramble) continue;
+          const distance = Math.hypot(bramble.x - patch.x, bramble.y - patch.y);
+          if (distance < worstDistance) {
+            worstDistance = distance;
+            worst = i;
+          }
+        }
+        if (worst < 0) break;
+        this.brambles.splice(worst, 1);
+      }
+    }
+  }
+
+  /**
+   * Whether a flower can be reached by a single dog-leg through one waypoint.
+   *
+   * Deliberately a modest bar: one bend is one flick of a thumb. A flower that
+   * needed an elaborate serpentine would technically pass a looser check and
+   * still feel unfair.
+   */
+  hasClearApproach(px: number, py: number): boolean {
+    if (!this.pathBlocked(this.hiveX, this.hiveY, px, py)) return true;
+
+    const dx = px - this.hiveX;
+    const dy = py - this.hiveY;
+    const span = Math.hypot(dx, dy) || 1;
+    const nx = -dy / span;
+    const ny = dx / span;
+
+    // Offsets scale with the route: a 190px sidestep is a sharp dodge on a
+    // 300px line and barely a lean on a 900px one, and the board now has both.
+    for (const fraction of [0.14, 0.22, 0.3, 0.4, 0.5]) {
+      const offset = Math.max(90, span * fraction);
+      for (const side of [-1, 1]) {
+        for (const along of [0.35, 0.5, 0.65]) {
+          const wx = this.hiveX + dx * along + nx * offset * side;
+          const wy = this.hiveY + dy * along + ny * offset * side;
+          if (
+            !this.pathBlocked(this.hiveX, this.hiveY, wx, wy) &&
+            !this.pathBlocked(wx, wy, px, py)
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   private placeFreeBramble(radius: number, growth: number): void {
-    for (let attempt = 0; attempt < 24; attempt += 1) {
-      const angle = Math.random() * Math.PI * 2;
-      const distance = 210 + Math.random() * 300;
-      const x = this.hiveX + Math.cos(angle) * distance;
-      const y = this.hiveY + Math.sin(angle) * distance * 0.72;
+    // Rejection-sample the whole board rather than a ring around the hive. With
+    // the hive in a corner most of such a ring is off the board, which is how
+    // this quietly stopped placing anything when the map changed shape.
+    const margin = radius * TUNING.bramble.growthFactor;
+    const minX = margin;
+    const maxX = WORLD_WIDTH - margin;
+    const minY = HUD_MARGIN + margin;
+    const maxY = WORLD_HEIGHT - margin;
 
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const x = minX + Math.random() * (maxX - minX);
+      const y = minY + Math.random() * (maxY - minY);
       if (!this.brambleSpotIsClear(x, y, radius)) continue;
 
       this.brambles.push(new Bramble(x, y, radius, growth));
@@ -442,9 +671,26 @@ export class Field {
     return blockedDistanceAlong(poly, limit, this.brambles);
   }
 
-  /** Whether a straight hop from a to b passes through thorns. */
-  pathBlocked(ax: number, ay: number, bx: number, by: number): boolean {
-    return segmentBlocked(ax, ay, bx, by, this.brambles);
+  /**
+   * Whether a straight hop from a to b passes through thorns.
+   *
+   * `knownOnly` distinguishes the two callers. Aim assist must reason from what
+   * the player can see, so it asks about discovered thickets — refusing to snap
+   * because of an invisible one would look like a bug. The route clip asks
+   * about all of them, because an unseen thicket is still there, and being cut
+   * by it is how the player finds out.
+   */
+  pathBlocked(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    knownOnly = false,
+  ): boolean {
+    const obstacles = knownOnly
+      ? this.brambles.filter((b) => b.discovered)
+      : this.brambles;
+    return segmentBlocked(ax, ay, bx, by, obstacles);
   }
 
   // ---------------------------------------------------------------- routes
@@ -655,6 +901,24 @@ export class Field {
     }
 
     for (const bee of this.bees) this.stepBee(bee, dt);
+
+    this.revealFromSwarm();
+    this.updateDiscoveries();
+  }
+
+  /**
+   * Lights the board around every bee that is actually out in the field.
+   *
+   * Idle bees drifting at the hive are skipped: they are already inside the
+   * hive's own light, and sweeping them would be a few hundred wasted disc
+   * fills a second for ground that is permanently lit anyway.
+   */
+  private revealFromSwarm(): void {
+    const radius = TUNING.bee.sightRadius;
+    for (const bee of this.bees) {
+      if (bee.state === 'idle' || bee.state === 'queued') continue;
+      this.fog.reveal(bee.x, bee.y, radius);
+    }
   }
 
   /**
@@ -670,10 +934,14 @@ export class Field {
     this.windAngle += TUNING.wind.rotationSpeed * dt;
     const nx = Math.cos(this.windAngle);
     const ny = Math.sin(this.windAngle);
-    const push = this.windStrength * dt;
+    const basePush = this.windStrength * dt;
 
     for (const route of this.routes) {
       const poly = route.poly;
+      // A beaten track holds its shape. This is the counterplay the player
+      // asked for: wind is no longer something that simply happens to you, it
+      // is something a road you have invested in resists.
+      const push = basePush * route.windExposure;
       for (let i = 1; i < poly.count; i += 1) {
         // Points further from the hive bend more, so the route bows rather
         // than sliding sideways as a rigid whole.
@@ -753,7 +1021,10 @@ export class Field {
     bee.prevX = bee.x;
     bee.prevY = bee.y;
 
-    const speed = this.stats.beeSpeed * bee.speedMul;
+    // A beaten track is faster to fly. Looked up once per bee per step rather
+    // than per branch below, since every movement case wants it.
+    const route = bee.routeId !== 0 ? this.routeById(bee.routeId) : undefined;
+    const speed = this.stats.beeSpeed * bee.speedMul * (route?.speedMultiplier ?? 1);
 
     // Wasps only threaten bees that are actually out in the field.
     if (
@@ -818,7 +1089,7 @@ export class Field {
 
       case 'collect': {
         bee.timer -= dt;
-        const patch = this.routeById(bee.routeId)?.target ?? null;
+        const patch = route?.target ?? null;
         if (patch) this.driftAround(bee, patch.x, patch.y, 16, dt);
         if (bee.timer <= 0) {
           if (patch) {
@@ -840,7 +1111,6 @@ export class Field {
         // Visibly mills at the dead tip, then gives up and returns empty. The
         // player should be able to see *why* honey stopped arriving.
         bee.timer -= dt;
-        const route = this.routeById(bee.routeId);
         if (route) this.driftAround(bee, route.tipX, route.tipY, 20, dt);
         if (bee.timer <= 0) bee.state = 'inbound';
         return;
@@ -849,7 +1119,6 @@ export class Field {
       case 'building':
       case 'outbound':
       case 'inbound': {
-        const route = this.routeById(bee.routeId);
         if (!route || route.dead) {
           this.releaseBee(bee);
           bee.state = 'homing';
@@ -880,6 +1149,10 @@ export class Field {
           bee.s -= speed * dt;
           if (bee.s <= 0) {
             bee.s = 0;
+            // A delivery beats the path in a little further. Only a laden
+            // arrival counts: a builder or a scattered bee coming home empty
+            // did not use the road, it merely walked it.
+            if (bee.carrying > 0) route.reinforce();
             this.deposit(bee);
             this.releaseBee(bee);
             this.assignBee(bee);
@@ -970,6 +1243,7 @@ export class Field {
       scattered: [],
       dispatched: 0,
       cut: [],
+      found: [],
     };
     return out;
   }
@@ -989,8 +1263,4 @@ export class Field {
       collecting,
     };
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return value < min ? min : value > max ? max : value;
 }

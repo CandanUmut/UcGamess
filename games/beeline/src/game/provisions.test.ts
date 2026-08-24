@@ -103,16 +103,35 @@ describe('provision effects', () => {
     }
   });
 
-  it('feeds a fuller field into the simulation for Scout Bees', () => {
+  it('lights far more of the board at dawn for Scout Bees', () => {
     const plain = new Field();
     plain.beginDay(5, featuresForDay(5), 3, 1);
-    const plainPool = plain.patches.reduce((sum, p) => sum + p.maxPool, 0);
 
     const scouted = new Field();
     scouted.beginDay(5, featuresForDay(5), 3, 1, modifiersFor('scoutBees'));
-    const scoutedPool = scouted.patches.reduce((sum, p) => sum + p.maxPool, 0);
 
-    expect(scoutedPool).toBeGreaterThan(plainPool);
+    expect(scouted.fog.exploredFraction()).toBeGreaterThan(
+      plain.fog.exploredFraction() * 1.5,
+    );
+  });
+
+  it('finds flowers the unscouted day would have started blind to', () => {
+    // Averaged over trials, because both fields place their flowers at random
+    // and a single day can happen to spawn everything near the hive.
+    let plainFound = 0;
+    let scoutedFound = 0;
+
+    for (let trial = 0; trial < 40; trial += 1) {
+      const plain = new Field();
+      plain.beginDay(7, featuresForDay(7), 4, 1);
+      plainFound += plain.knownPatches.length;
+
+      const scouted = new Field();
+      scouted.beginDay(7, featuresForDay(7), 4, 1, modifiersFor('scoutBees'));
+      scoutedFound += scouted.knownPatches.length;
+    }
+
+    expect(scoutedFound).toBeGreaterThan(plainFound);
   });
 
   it('lengthens route hold for Waxed Trails without touching the upgrade', () => {

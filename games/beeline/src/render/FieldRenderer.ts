@@ -46,7 +46,10 @@ export class FieldRenderer {
     const g = this.gfx;
     g.clear();
 
-    for (const patch of field.patches) this.drawPatch(g, patch, field.time);
+    for (const patch of field.patches) {
+      if (!patch.discovered) continue;
+      this.drawPatch(g, patch, field.time);
+    }
     this.drawLabels(field);
     this.drawBrambles(field);
 
@@ -65,8 +68,10 @@ export class FieldRenderer {
     const scale = patch.bloomT;
     if (scale <= 0.01) return;
 
-    const tint = patch.alive ? (PATCH_TINT[patch.kind] ?? COLORS.patch) : COLORS.patchDry;
-    const radius = 26 * scale;
+    const tint = patch.alive ? this.patchTint(patch) : COLORS.patchDry;
+    // Richer flowers are physically bigger, so "worth the distance" is legible
+    // from across the board before the number is read.
+    const radius = 26 * scale * (0.85 + 0.2 * patch.yieldPerTrip);
 
     // The ring marks where a route has to reach. It is the target the player
     // aims at, so it stays visible rather than being decorative.
@@ -106,6 +111,20 @@ export class FieldRenderer {
    * this one", which is the decision the player is actually making once a
    * flower can die for the day.
    */
+  /**
+   * Warmer with distance.
+   *
+   * A far flower pays up to three times a near one, and the player should be
+   * able to feel that from the colour before they read the number — the number
+   * confirms the decision, it should not be what triggers it.
+   */
+  private patchTint(patch: Patch): number {
+    const base = PATCH_TINT[patch.kind] ?? COLORS.patch;
+    if (patch.kind !== 'normal') return base;
+    const t = Math.min(1, Math.max(0, (patch.distanceMultiplier - 1) / 2));
+    return blend(COLORS.patch, 0xffd166, t);
+  }
+
   private drawLabels(field: Field): void {
     while (this.labels.length < field.patches.length) {
       const label = this.scene.add
@@ -126,7 +145,7 @@ export class FieldRenderer {
       const patch = field.patches[i];
       if (!label) continue;
 
-      if (!patch || !patch.alive || patch.bloomT < 0.5) {
+      if (!patch || !patch.alive || !patch.discovered || patch.bloomT < 0.5) {
         label.setVisible(false);
         continue;
       }
@@ -135,7 +154,10 @@ export class FieldRenderer {
       // Clear of the route's tip handle, which lands near the flower's edge and
       // was clipping the number.
       label.setPosition(patch.x, patch.y - 62);
-      label.setText(String(Math.ceil(patch.pool)));
+      // Honey left, not pollen left. Once flowers pay different rates by
+      // distance, two reading "180" can be worth 180 and 540, and asking the
+      // player to multiply two figures mid-drag is arithmetic, not a decision.
+      label.setText(String(Math.ceil(patch.honeyLeft)));
       // Warns before it runs dry, so retargeting is a decision rather than a
       // surprise.
       label.setColor(patch.fullness < 0.25 ? '#ff8a65' : '#f4f4f8');
@@ -155,7 +177,10 @@ export class FieldRenderer {
     g.clear();
     if (field.brambles.length === 0) return;
 
-    for (const bramble of field.brambles) this.drawBramble(g, bramble);
+    for (const bramble of field.brambles) {
+      if (!bramble.discovered) continue;
+      this.drawBramble(g, bramble);
+    }
   }
 
   private drawBramble(g: Phaser.GameObjects.Graphics, bramble: Bramble): void {
@@ -214,4 +239,18 @@ export class FieldRenderer {
     for (const label of this.labels) label.destroy();
     this.labels = [];
   }
+}
+
+/** Linear blend between two packed RGB colours. */
+function blend(from: number, to: number, t: number): number {
+  const fr = (from >> 16) & 0xff;
+  const fg = (from >> 8) & 0xff;
+  const fb = from & 0xff;
+  const tr = (to >> 16) & 0xff;
+  const tg = (to >> 8) & 0xff;
+  const tb = to & 0xff;
+  const r = Math.round(fr + (tr - fr) * t);
+  const g = Math.round(fg + (tg - fg) * t);
+  const b = Math.round(fb + (tb - fb) * t);
+  return (r << 16) | (g << 8) | b;
 }

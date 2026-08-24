@@ -1,13 +1,14 @@
 import Phaser from 'phaser';
 import { BaseGameplayScene, DESIGN_HEIGHT, DESIGN_WIDTH } from '@ucgames/core';
 import { COLORS, TUNING } from '../config/tuning.ts';
-import { Field } from '../sim/Field.ts';
+import { Field, WORLD_HEIGHT, WORLD_WIDTH } from '../sim/Field.ts';
 import type { Route } from '../sim/Route.ts';
 import { pushIfSpaced, type SamplePoint } from '../sim/polyline.ts';
 import { createGeneratedTextures } from '../render/textures.ts';
 import { createBeeRenderer, type BeeRenderer } from '../render/BeeRenderer.ts';
 import { RouteRenderer } from '../render/RouteRenderer.ts';
 import { FieldRenderer } from '../render/FieldRenderer.ts';
+import { FogRenderer } from '../render/FogRenderer.ts';
 import { Juice } from '../render/Juice.ts';
 import { Hud } from '../ui/Hud.ts';
 import { Sfx } from '../audio/Sfx.ts';
@@ -26,7 +27,23 @@ import { computeOffline, formatAway } from '../game/Offline.ts';
 import { commitDrag, resolveDragStart, type DragIntent } from '../game/RouteIntent.ts';
 import type { NightData } from './NightScene.ts';
 
-const DEPTH = { patch: 10, hive: 20, route: 30, bee: 40, juice: 50, hud: 100 } as const;
+/**
+ * Fog sits above the terrain and the routes but below the swarm and the juice.
+ *
+ * That ordering is deliberate: a bee flying into the dark stays visible while
+ * the ground around it is still black, so the player can see their scouts out
+ * ahead of what they know. Putting fog on top of everything would hide the
+ * thing doing the exploring.
+ */
+const DEPTH = {
+  patch: 10,
+  hive: 20,
+  route: 30,
+  fog: 35,
+  bee: 40,
+  juice: 50,
+  hud: 100,
+} as const;
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /** How long a finger must rest on a route to erase it. */
@@ -54,6 +71,7 @@ export class GameScene extends BaseGameplayScene {
   private beeRenderer!: BeeRenderer;
   private routeRenderer!: RouteRenderer;
   private fieldRenderer!: FieldRenderer;
+  private fogRenderer!: FogRenderer;
   private juice!: Juice;
   private hud!: Hud;
   private sfx!: Sfx;
@@ -106,6 +124,13 @@ export class GameScene extends BaseGameplayScene {
     this.routeRenderer = new RouteRenderer(this, DEPTH.route);
     this.previewGfx = this.add.graphics().setDepth(DEPTH.route + 1);
     this.hintGfx = this.add.graphics().setDepth(DEPTH.route + 2);
+    this.fogRenderer = new FogRenderer(
+      this,
+      this.field.fog,
+      WORLD_WIDTH,
+      WORLD_HEIGHT,
+      DEPTH.fog,
+    );
     this.beeRenderer = createBeeRenderer(this, 'blitter', DEPTH.bee);
     this.juice = new Juice(this, DEPTH.juice);
     this.hud = new Hud(this, DEPTH.hud);
@@ -380,6 +405,40 @@ export class GameScene extends BaseGameplayScene {
     if (result.connected) this.sfx.playVaried('collect', 0.18, 400);
   }
 
+  /**
+   * The moment a scout finds a flower.
+   *
+   * Worth more fanfare than anything else in the game. Exploring costs workers,
+   * costs time, and can end in a thicket — if the discovery itself is not
+   * satisfying then the whole loop of pushing into the dark has no payoff at
+   * its end, and the player will simply stop doing it.
+   */
+  private showDiscovery(x: number, y: number, honey: number): void {
+    for (let i = 0; i < 10; i += 1) this.juice.collect(x, y, 3);
+    this.sfx.play('upgrade', 0.32);
+
+    const label = this.add
+      .text(x, y - 84, `+${honey}`, {
+        fontFamily: FONT,
+        fontSize: '24px',
+        fontStyle: 'bold',
+        color: '#ffd966',
+        stroke: '#12100c',
+        strokeThickness: 5,
+      })
+      .setOrigin(0.5)
+      .setDepth(DEPTH.juice);
+
+    this.tweens.add({
+      targets: label,
+      y: label.y - 34,
+      alpha: 0,
+      duration: 1100,
+      ease: 'Quad.easeOut',
+      onComplete: () => label.destroy(),
+    });
+  }
+
   /** The snip where thorns took a route. */
   private showCut(x: number, y: number): void {
     for (let i = 0; i < 4; i += 1) this.juice.scatter(x, y);
@@ -449,6 +508,7 @@ export class GameScene extends BaseGameplayScene {
       alpha,
       this.drawing && this.intent?.kind === 'fresh',
     );
+    this.fogRenderer.draw(this.field.fog);
     this.drawPreview();
     this.drawHint();
     this.drawEraseHold();
@@ -504,6 +564,9 @@ export class GameScene extends BaseGameplayScene {
 
       const building = this.field.countBuilders();
       this.hud.setSwarm(this.field.bees.length - building, building);
+      this.hud.setUnfound(
+        this.field.patches.filter((p) => p.alive && !p.discovered).length,
+      );
     }
   }
 
@@ -530,6 +593,11 @@ export class GameScene extends BaseGameplayScene {
     // that happened to the player. Losing a line silently is the difference
     // between "the thorns cut me off" and "the game ate my drag".
     for (const hit of events.cut) this.showCut(hit.x, hit.y);
+
+    // Finding a flower is the payoff for exploring, so it gets the biggest
+    // one-off in the game: a burst, a rising chime, and the honey it holds
+    // floating up off it.
+    for (const found of events.found) this.showDiscovery(found.x, found.y, found.honey);
   }
 
   private drawPreview(): void {
@@ -566,7 +634,12 @@ export class GameScene extends BaseGameplayScene {
     const show = !this.hasDrawnEver && this.day === 1 && this.phase === 'playing';
     if (!show) return;
 
-    const patch = this.field.nearestPatchTo(this.field.hiveX, this.field.hiveY);
+    const patch = this.field.nearestPatchTo(
+      this.field.hiveX,
+      this.field.hiveY,
+      Number.POSITIVE_INFINITY,
+      true,
+    );
     if (!patch) return;
 
     const pulse = (this.field.time * 0.9) % 1;
@@ -595,6 +668,9 @@ export class GameScene extends BaseGameplayScene {
           y: Math.round(p.y),
           alive: p.alive,
           pool: Math.round(p.pool),
+          honeyLeft: Math.round(p.honeyLeft),
+          multiplier: Number(p.distanceMultiplier.toFixed(2)),
+          discovered: p.discovered,
           kind: p.kind,
         })),
       builders: () => this.field.countBuilders(),
@@ -603,7 +679,9 @@ export class GameScene extends BaseGameplayScene {
           x: Math.round(b.x),
           y: Math.round(b.y),
           radius: Math.round(b.radius),
+          discovered: b.discovered,
         })),
+      explored: () => this.field.fog.exploredFraction(),
       wind: () => this.field.windVector,
       stats: () => this.field.getStats(),
       routes: () =>
@@ -613,6 +691,7 @@ export class GameScene extends BaseGameplayScene {
           total: Math.round(r.poly.length),
           tipX: Math.round(r.tipX),
           tipY: Math.round(r.tipY),
+          strength: Number(r.strength.toFixed(2)),
           connected: r.reachesTarget(),
         })),
       day: () => ({
