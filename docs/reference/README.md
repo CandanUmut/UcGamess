@@ -8,8 +8,8 @@ These are **historical documents**. Do not edit them to reflect new information;
 update the living docs (`strategy.md`, `portal-requirements.md`, the ADRs) and
 leave these as the record of what we knew at the time.
 
-| File | What it is |
-| --- | --- |
+| File                                       | What it is                                                                                                                                     |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | [bootstrap-prompt.md](bootstrap-prompt.md) | The specification this monorepo was built to. Useful for understanding why the structure is the way it is, and what was explicitly scoped out. |
 
 ## Not in this repository
