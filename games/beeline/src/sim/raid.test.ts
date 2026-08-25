@@ -286,7 +286,13 @@ describe('hive defences fight without the player', () => {
 
   it('does not bank idle time and delete the next arrival instantly', () => {
     const field = new Field();
-    field.beginDay(1, featuresForDay(1), patchesForDay(1), 1, modifiersFor(['guardBees']));
+    field.beginDay(
+      1,
+      featuresForDay(1),
+      patchesForDay(1),
+      1,
+      modifiersFor(['guardBees']),
+    );
     field.honey = 5000;
 
     // A long quiet stretch with nothing at the door.

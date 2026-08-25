@@ -1572,7 +1572,7 @@ drone.
 Third playtest, and three notes in one message: "the maze walls don't do much
 now", "the wasp also don't do almost anything", and "spending money don't feel
 like it adds much value". They are three symptoms of the same thing — the board
-had rules but nothing on it was *pushing*.
+had rules but nothing on it was _pushing_.
 
 ### Wasps come for the hive
 
@@ -1591,7 +1591,7 @@ was most specific about ("every 25 second is too predictable"). A metronome is
 learned once and then stopped being looked at, which defeats the point of
 putting an enemy on the board at all. The fairness comes from the warning, not
 the schedule: 2.6 seconds ahead, marked on the board at the edge the raid will
-come from. Surprise about *when*, never about *whether you had a chance*.
+come from. Surprise about _when_, never about _whether you had a chance_.
 
 Two limits keep it pressure rather than punishment, both inherited from the
 rules the original wasp was written under: bee losses last only for the day, and
@@ -1615,7 +1615,7 @@ not carrying nectar — which puts the decision back inside the question the gam
 has been about since day two.
 
 One rule exists purely to make this work at all: a bee flying a route aimed at a
-wasp is not scattered by *that* wasp. The scatter radius is smaller than the
+wasp is not scattered by _that_ wasp. The scatter radius is smaller than the
 strike radius, so without the exemption every attacker would be turned back a
 moment before it could land a hit.
 
@@ -1624,7 +1624,7 @@ moment before it could land a hit.
 A route the wind has pressed into a hedge is **pinched**, and laden bees
 crossing that point lose what they carry.
 
-The important half is what is *not* punished. A line the player draws is slid
+The important half is what is _not_ punished. A line the player draws is slid
 clear of the walls before it exists (§26), so only the wind can put a route into
 that state. The tax lands on neglecting a road, never on an imprecise thumb —
 which is the distinction the whole maze design rests on. It is also the answer

@@ -649,11 +649,7 @@ export class GameScene extends BaseGameplayScene {
       this.tutorialText.setText(this.tutorial.current?.text ?? '');
 
       const building = this.field.countBuilders();
-      this.hud.setSwarm(
-        this.field.bees.length - building,
-        building,
-        this.field.beesLost,
-      );
+      this.hud.setSwarm(this.field.bees.length - building, building, this.field.beesLost);
       this.hud.setUnfound(
         this.field.patches.filter((p) => p.alive && !p.discovered).length,
       );

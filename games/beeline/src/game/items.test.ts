@@ -45,9 +45,7 @@ describe('the night offer', () => {
   it('always fills the row once the pool is big enough', () => {
     for (let day = 1; day <= 20; day += 1) {
       for (let trial = 0; trial < 25; trial += 1) {
-        expect(rollOffer(day, featuresForDay(day))).toHaveLength(
-          TUNING.items.offerCount,
-        );
+        expect(rollOffer(day, featuresForDay(day))).toHaveLength(TUNING.items.offerCount);
       }
     }
   });

@@ -24,7 +24,7 @@
     "size-budget": "node packages/devtools/src/size-budget.ts",
     "check-licenses": "node packages/devtools/src/check-licenses.ts",
     "create-game": "node scripts/create-game.ts",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm check-licenses",
+    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build && pnpm check-licenses",
     "prepare": "husky"
   },
   "devDependencies": {

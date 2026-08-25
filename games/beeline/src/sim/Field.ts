@@ -965,7 +965,10 @@ export class Field {
     for (let col = 0; col < this.maze.cols; col += 1) {
       for (let row = 0; row < this.maze.rows; row += 1) {
         const rim =
-          col === 0 || row === 0 || col === this.maze.cols - 1 || row === this.maze.rows - 1;
+          col === 0 ||
+          row === 0 ||
+          col === this.maze.cols - 1 ||
+          row === this.maze.rows - 1;
         if (!rim) continue;
         if (col === hiveCol && row === hiveRow) continue;
 
@@ -1512,7 +1515,8 @@ export class Field {
     // Comb Wax is paid here, at the hive, rather than at the flower: what it
     // buys is a better yield from honey the swarm has actually brought home,
     // so nectar lost to a wasp on the way back is not paid for.
-    this.honey += bee.carrying * this.stats.honeyMultiplier * (1 + this.modifiers.honeyBonus);
+    this.honey +=
+      bee.carrying * this.stats.honeyMultiplier * (1 + this.modifiers.honeyBonus);
     this.events.deposited += bee.carrying;
     bee.carrying = 0;
   }

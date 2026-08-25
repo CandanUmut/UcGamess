@@ -316,7 +316,9 @@ export function rerollCost(day: number, rerolls: number): number {
     Math.pow(costGrowth, Math.max(0, day - 1)),
     costCapMultiplier,
   );
-  return Math.round(rerollBase * dayGrowth * Math.pow(rerollGrowth, Math.max(0, rerolls)));
+  return Math.round(
+    rerollBase * dayGrowth * Math.pow(rerollGrowth, Math.max(0, rerolls)),
+  );
 }
 
 /**
@@ -345,7 +347,8 @@ export function rollOffer(
     const byRarity = pool.filter(
       (id) => ITEMS[id].rarity === rarity && !chosen.includes(id),
     );
-    const candidates = byRarity.length > 0 ? byRarity : pool.filter((id) => !chosen.includes(id));
+    const candidates =
+      byRarity.length > 0 ? byRarity : pool.filter((id) => !chosen.includes(id));
     const pick = candidates[Math.floor(random() * candidates.length)];
     if (pick) chosen.push(pick);
   }
@@ -375,5 +378,7 @@ export function modifiersFor(items: readonly ItemId[]): RunModifiers {
 export function inventoryLines(items: readonly ItemId[]): string[] {
   const counts = new Map<ItemId, number>();
   for (const id of items) counts.set(id, (counts.get(id) ?? 0) + 1);
-  return [...counts].map(([id, n]) => (n > 1 ? `${ITEMS[id].name} x${n}` : ITEMS[id].name));
+  return [...counts].map(([id, n]) =>
+    n > 1 ? `${ITEMS[id].name} x${n}` : ITEMS[id].name,
+  );
 }
