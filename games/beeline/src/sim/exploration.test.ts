@@ -154,6 +154,40 @@ describe('discovery', () => {
     expect(route).not.toBeNull();
     expect(route!.reachesTarget()).toBe(true);
   });
+
+  it('does not hand over the next flower when the current one runs dry', () => {
+    // The bug this closes made the fog close to pointless in real play. A route
+    // whose flower ran out re-aimed at the nearest flower *anywhere*, unseen
+    // ones included; the bees flew to it, lit it, and the game announced a
+    // discovery the player had never gone looking for. Every dead flower was a
+    // free map of the next one.
+    const field = newDay(1);
+    const near = new Patch(field.hiveX + 200, field.hiveY, 40);
+    const hidden = new Patch(field.hiveX + 620, field.hiveY, 500);
+    near.discovered = true;
+    hidden.discovered = false;
+    field.patches = [near, hidden];
+
+    const route = field.createRoute([
+      field.hiveX,
+      field.hiveY,
+      field.hiveX + 200,
+      field.hiveY,
+    ]);
+    expect(route!.target).toBe(near);
+
+    near.drain(999);
+    expect(near.alive).toBe(false);
+    field.step(1 / 60);
+
+    expect(route!.target).not.toBe(hidden);
+    expect(route!.target).toBeNull();
+
+    // And the moment the player has actually found it, it is a target again.
+    hidden.discovered = true;
+    field.step(1 / 60);
+    expect(route!.target).toBe(hidden);
+  });
 });
 
 describe('distance pays', () => {

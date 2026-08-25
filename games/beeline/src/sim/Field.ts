@@ -550,7 +550,8 @@ export class Field {
    *
    * The simulation still resolves undiscovered flowers when it needs to: a bee
    * that arrives at a route's tip and finds an unseen flower there collects
-   * from it, which is exactly how exploring pays off.
+   * from it, which is exactly how exploring pays off. That exception lives in
+   * `retarget`, bounded to the tip's own reach — see the note there.
    */
   nearestPatchTo(
     x: number,
@@ -751,7 +752,26 @@ export class Field {
     }
 
     route.targetWasp = null;
-    route.target = this.nearestPatchTo(route.tipX, route.tipY);
+
+    // Two ways a route may end up pointed at a flower, and only two.
+    //
+    // A flower the player has **found** — anywhere on the board. And a flower
+    // the tip is genuinely standing on, seen or not, which is the case the fog
+    // exists to pay off: you drew a line into the dark, it landed on something,
+    // and the bees you sent find it.
+    //
+    // What is excluded is the one in between, and it was quietly undoing the
+    // whole mechanic. When a route's flower ran dry the retarget picked the
+    // nearest flower *anywhere*, unseen ones included; the bees flew to it,
+    // lit it, and the game announced a discovery the player had not gone
+    // looking for. A dead flower became a free map of the next one.
+    const underTip = this.nearestPatchTo(
+      route.tipX,
+      route.tipY,
+      TUNING.patch.reachRadius,
+    );
+    route.target =
+      underTip ?? this.nearestPatchTo(route.tipX, route.tipY, Infinity, true);
   }
 
   /**
