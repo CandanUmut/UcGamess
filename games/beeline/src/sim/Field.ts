@@ -15,7 +15,7 @@ import {
 } from './polyline.ts';
 import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
 import type { DayFeatures } from '../game/DayCycle.ts';
-import { noModifiers, type DayModifiers } from '../game/Provisions.ts';
+import { noModifiers, type RunModifiers } from '../game/Items.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -154,8 +154,8 @@ export class Field {
 
   stats: DerivedStats = deriveStats(emptyLevels());
   features: DayFeatures = NO_FEATURES;
-  /** What the provision carried into today changes. Neutral when none was. */
-  modifiers: DayModifiers = noModifiers();
+  /** What the run's items change about today. Neutral on a run with none. */
+  modifiers: RunModifiers = noModifiers();
 
   /** Multiplier on effective swarm size, for the rewarded swarm boost. */
   swarmBoost = 1;
@@ -189,6 +189,8 @@ export class Field {
   beesLost = 0;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
+  /** Counts down to the next blow the hive's guards land. */
+  private guardTimer = TUNING.wasp.guardInterval;
 
   private elapsed = 0;
   private windAngle = Math.random() * Math.PI * 2;
@@ -217,13 +219,13 @@ export class Field {
   }
 
   private applyStats(): void {
-    const full = Math.round(this.stats.beeCount * this.swarmBoost);
+    const full = this.fullSwarm;
     this.setBeeCount(Math.max(MIN_SWARM, full - this.beesLost));
   }
 
   /** The swarm the hive would have today if no raid had landed. */
   get fullSwarm(): number {
-    return Math.round(this.stats.beeCount * this.swarmBoost);
+    return Math.round(this.stats.beeCount * this.swarmBoost) + this.modifiers.extraBees;
   }
 
   /**
@@ -240,7 +242,7 @@ export class Field {
     features: DayFeatures,
     patchCount: number,
     boost: number,
-    modifiers: DayModifiers = noModifiers(),
+    modifiers: RunModifiers = noModifiers(),
   ): void {
     this.features = features;
     this.modifiers = modifiers;
@@ -254,7 +256,7 @@ export class Field {
     this.wasps = [];
     this.beesLost = 0;
     this.raidEntry = null;
-    this.raid.begin(features.raidSize);
+    this.raid.begin(features.raidSize, modifiers.extraWarningSeconds);
 
     this.patchPool = Math.round(
       (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
@@ -719,8 +721,29 @@ export class Field {
    * to sit behind the wasp would be the game ignoring them at the exact moment
    * they were reacting to it.
    */
+  /**
+   * Points a route at the wasp the player's drag actually landed on.
+   *
+   * Called with what aim assist decided, which is the only reading of intent
+   * taken while the gesture was still happening. `retarget` re-derives a target
+   * from where the tip *is*, and a wasp covers most of a corridor in the time a
+   * slow drag takes — so on its own it loses the gesture that was aimed
+   * squarely at one. Intent captured at the drag wins over geometry read after
+   * it.
+   */
+  aimRouteAt(route: Route, wasp: Wasp | null): void {
+    if (!wasp || !wasp.alive) return;
+    route.targetWasp = wasp;
+    route.target = null;
+  }
+
   retarget(route: Route): void {
-    const wasp = this.nearestWaspTo(route.tipX, route.tipY, TUNING.wasp.reachRadius);
+    // Targeted on the assist radius, not the strike radius. Striking is a
+    // question of where a bee is; targeting is a question of what the player
+    // meant, and a wasp that moved 80px during the drag is still plainly what
+    // they were pointing at. Matching the two radii made the gesture fail
+    // silently whenever the raider was quick, which is every raider.
+    const wasp = this.nearestWaspTo(route.tipX, route.tipY, TUNING.wasp.aimRadius);
     if (wasp) {
       route.targetWasp = wasp;
       route.target = null;
@@ -880,6 +903,7 @@ export class Field {
     }
 
     for (const wasp of this.wasps) this.stepWasp(wasp, dt);
+    this.stepGuards(dt);
 
     // Wasps are swept after stepping rather than during, so a wasp beaten off
     // on the same step another one arrives is not skipped by the loop.
@@ -887,6 +911,38 @@ export class Field {
       this.wasps = this.wasps.filter((w) => w.alive);
       for (const route of this.routes) {
         if (route.targetWasp && !route.targetWasp.alive) route.targetWasp = null;
+      }
+    }
+  }
+
+  /**
+   * The hive's own defence: Guard Bees fighting whatever is at the door.
+   *
+   * The one part of the raid answer that does not need the player's attention,
+   * and that is the point of it. Every other defence costs a drag at the exact
+   * moment they were doing something else; guards are what you buy so that a
+   * raid arriving mid-gesture is survivable rather than a disaster.
+   */
+  private stepGuards(dt: number): void {
+    const guards = this.modifiers.hiveGuards;
+    if (guards <= 0) return;
+
+    const target = this.wasps.find((w) => w.isRaiding);
+    if (!target) {
+      // Reset rather than bank the timer. Otherwise the guards store up a
+      // whole day of idleness and delete the first wasp that lands.
+      this.guardTimer = TUNING.wasp.guardInterval;
+      return;
+    }
+
+    this.guardTimer -= dt * guards;
+    while (this.guardTimer <= 0) {
+      this.guardTimer += TUNING.wasp.guardInterval;
+      const downed = target.hit(1);
+      this.events.struck.push({ x: target.x, y: target.y });
+      if (downed) {
+        this.events.waspDown.push({ x: target.x, y: target.y });
+        break;
       }
     }
   }
@@ -974,7 +1030,10 @@ export class Field {
       case 'raiding': {
         wasp.hover(this.hiveX, this.hiveY, dt);
 
-        const take = Math.min(this.honey, TUNING.wasp.stealPerSecond * dt);
+        const take = Math.min(
+          this.honey,
+          TUNING.wasp.stealPerSecond * this.modifiers.stealResist * dt,
+        );
         this.honey -= take;
         this.events.stolen += take;
 
@@ -1113,7 +1172,7 @@ export class Field {
     this.windAngle += TUNING.wind.rotationSpeed * dt;
     const nx = Math.cos(this.windAngle);
     const ny = Math.sin(this.windAngle);
-    const basePush = this.windStrength * dt;
+    const basePush = this.windStrength * dt * this.modifiers.windResist;
 
     for (const route of this.routes) {
       const poly = route.poly;
@@ -1215,7 +1274,11 @@ export class Field {
     // A beaten track is faster to fly. Looked up once per bee per step rather
     // than per branch below, since every movement case wants it.
     const route = bee.routeId !== 0 ? this.routeById(bee.routeId) : undefined;
-    const speed = this.stats.beeSpeed * bee.speedMul * (route?.speedMultiplier ?? 1);
+    const speed =
+      this.stats.beeSpeed *
+      bee.speedMul *
+      (route?.speedMultiplier ?? 1) *
+      (1 + this.modifiers.beeSpeedBonus);
 
     // A bee flying a route aimed at a wasp strikes it the moment it gets
     // close, anywhere along the line.
@@ -1230,13 +1293,13 @@ export class Field {
       foe &&
       foe.alive &&
       foe.state !== 'fleeing' &&
-      (bee.state === 'outbound' || bee.state === 'building') &&
+      (bee.state === 'outbound' || bee.state === 'building' || bee.state === 'hunting') &&
       Math.hypot(bee.x - foe.x, bee.y - foe.y) <= TUNING.wasp.reachRadius
     ) {
       // One bee, one hit, and it goes home. It does not linger to fight: a
       // swarm pinned in a brawl is a swarm the player can no longer redirect,
       // and the whole cost of defending is meant to be the trips not taken.
-      const downed = foe.hit(TUNING.wasp.beeDamage);
+      const downed = foe.hit(TUNING.wasp.beeDamage + this.modifiers.beeDamageBonus);
       this.events.struck.push({ x: foe.x, y: foe.y });
       if (downed) this.events.waspDown.push({ x: foe.x, y: foe.y });
       this.releaseBee(bee);
@@ -1304,6 +1367,21 @@ export class Field {
         return;
       }
 
+      case 'hunting': {
+        const quarry = route?.targetWasp;
+        bee.timer -= dt;
+        if (!quarry || !quarry.alive || bee.timer <= 0) {
+          // Gives up rather than chasing across the board. A bee that never
+          // came back would be a permanent loss for a mis-aimed drag, which is
+          // a far harsher tax than the trip this is meant to cost.
+          this.releaseBee(bee);
+          bee.state = 'homing';
+          return;
+        }
+        this.flyToward(bee, quarry.x, quarry.y, speed, dt);
+        return;
+      }
+
       case 'homing': {
         this.flyToward(bee, this.hiveX, this.hiveY, speed, dt);
         if (Math.hypot(bee.x - this.hiveX, bee.y - this.hiveY) < 26) {
@@ -1363,7 +1441,14 @@ export class Field {
           bee.s += speed * dt;
           if (bee.s >= route.liveLength) {
             bee.s = route.liveLength;
-            if (route.reachesTarget()) {
+            if (route.targetWasp?.alive) {
+              // Leaves the road to run the wasp down. The route said where the
+              // fight was when it was drawn; by the time the bees get there the
+              // wasp has moved, and stopping at the tip would mean the defence
+              // only ever worked on a target that stood still.
+              bee.state = 'hunting';
+              bee.timer = TUNING.wasp.huntSeconds;
+            } else if (route.reachesTarget()) {
               bee.state = 'collect';
               bee.timer = TUNING.bee.collectSeconds;
             } else {
@@ -1427,7 +1512,7 @@ export class Field {
     // Comb Wax is paid here, at the hive, rather than at the flower: what it
     // buys is a better yield from honey the swarm has actually brought home,
     // so nectar lost to a wasp on the way back is not paid for.
-    this.honey += bee.carrying * this.stats.honeyMultiplier;
+    this.honey += bee.carrying * this.stats.honeyMultiplier * (1 + this.modifiers.honeyBonus);
     this.events.deposited += bee.carrying;
     bee.carrying = 0;
   }

@@ -143,7 +143,7 @@ export class Wasp {
    *
    * The two multipliers are how a Smoke Pot works — it widens the safe zone and
    * shrinks the wasp's reach for a day. Applying it here rather than mutating
-   * TUNING keeps the tuning table a constant and the provision a parameter.
+   * TUNING keeps the tuning table a constant and the item a parameter.
    */
   threatens(
     x: number,

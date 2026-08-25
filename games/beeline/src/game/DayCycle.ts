@@ -157,7 +157,7 @@ export function dayIntroduction(day: number): string | null {
  * The design has always claimed a progression track — "the night screen shows
  * the next unlock two or three days ahead, so there is always a visible reason
  * to start another day" — and it was never built. It matters more now that
- * provisions exist: buying smoke is a guess unless you can see there are wasps
+ * the shop is random: buying smoke is a guess unless you can see there are wasps
  * tomorrow. One line does both jobs.
  */
 export function forecastFor(day: number): string[] {

@@ -17,7 +17,15 @@ export type BeeState =
   /** Flying back along a route. */
   | 'inbound'
   /** Route died underneath it; flying straight home. */
-  | 'homing';
+  | 'homing'
+  /**
+   * Off the road, chasing the wasp its route was aimed at.
+   *
+   * A wasp crosses the board while the bees are still flying out to it, so a
+   * defence that ended at the route's tip would only ever hit a target that
+   * stood still. The chase is short and timed — see `TUNING.wasp.huntSeconds`.
+   */
+  | 'hunting';
 
 /**
  * One bee.

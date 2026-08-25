@@ -184,8 +184,9 @@ seconds, then wilts regardless of state.
 Five, matching the dimensions agreed with the team: bee count, bee speed, path
 stability, more flowers, honey storage.
 
-> **Extended by §15.** These are still the five permanent upgrades. Honey now
-> also buys one-use **provisions**, spent on a single day.
+> **Extended by §15, replaced in part by §28.** These are still the permanent
+> upgrades (now six — §27 added Comb Wax). The one-use **provisions** of §15
+> are gone; honey now also buys **run items** from a random shop. See §28.
 
 | #   | Upgrade               | Effect per level                     | Levels | Range             |
 | --- | --------------------- | ------------------------------------ | ------ | ----------------- |
@@ -1563,6 +1564,101 @@ no two notes in that set are a semitone or tritone apart, so any order the swarm
 happens to collect in is consonant. And it is rate-limited to about eleven a
 second, because one-per-frame at 60fps turns any note, however pleasant, into a
 drone.
+
+---
+
+## 28. Raids, defence, and a shop worth visiting
+
+Third playtest, and three notes in one message: "the maze walls don't do much
+now", "the wasp also don't do almost anything", and "spending money don't feel
+like it adds much value". They are three symptoms of the same thing — the board
+had rules but nothing on it was *pushing*.
+
+### Wasps come for the hive
+
+The old wasp drifted between random points and scattered a bee now and then.
+That is a slightly smaller board, not an enemy: you route around it once and
+never think about it again.
+
+Raids replace the drift. Wasps enter at the far rim of the maze and cross it by
+gradient descent over the same BFS distance field the flower placement already
+computes — so they respect the corridors, and the labyrinth becomes terrain
+both sides have to deal with rather than a pure tax on the player. On arrival
+they drain honey by the second and drive bees out of the day's swarm.
+
+**Timing is random inside a range, not fixed.** This is the one thing the report
+was most specific about ("every 25 second is too predictable"). A metronome is
+learned once and then stopped being looked at, which defeats the point of
+putting an enemy on the board at all. The fairness comes from the warning, not
+the schedule: 2.6 seconds ahead, marked on the board at the edge the raid will
+come from. Surprise about *when*, never about *whether you had a chance*.
+
+Two limits keep it pressure rather than punishment, both inherited from the
+rules the original wasp was written under: bee losses last only for the day, and
+the swarm never drops below four. A raid that shrank the hive permanently would
+compound one bad afternoon into an unrecoverable run.
+
+### Drawing a line at them
+
+The defence gesture is the drawing gesture. Drag a line at a wasp and the bees
+on that route fight it — five hits brings one down.
+
+Interception is by **proximity anywhere along the route**, not at the tip. Wasps
+move, usually straight at the hive, so a rule that only fired where the finger
+stopped would work solely against a target that stands still. Drawing a line
+across a raider's path is the gesture; interception is what makes it read as
+one. A bee that lands a hit goes home rather than staying to brawl, because a
+swarm pinned in a fight is a swarm the player can no longer redirect.
+
+The cost of defending is the trips not taken. A route aimed at a wasp is a route
+not carrying nectar — which puts the decision back inside the question the game
+has been about since day two.
+
+One rule exists purely to make this work at all: a bee flying a route aimed at a
+wasp is not scattered by *that* wasp. The scatter radius is smaller than the
+strike radius, so without the exemption every attacker would be turned back a
+moment before it could land a hit.
+
+### Wind finally has teeth
+
+A route the wind has pressed into a hedge is **pinched**, and laden bees
+crossing that point lose what they carry.
+
+The important half is what is *not* punished. A line the player draws is slid
+clear of the walls before it exists (§26), so only the wind can put a route into
+that state. The tax lands on neglecting a road, never on an imprecise thumb —
+which is the distinction the whole maze design rests on. It is also the answer
+to "wind after we made the paths stable almost don't matter": wind used to only
+make routes longer, which a strong road shrugged off.
+
+### The shop
+
+Provisions were the wrong shape. One slot, the same five things every night,
+thrown away at dusk — so nothing accumulated and no purchase ever changed how
+the hive played. Fifteen nights asking the same small question.
+
+Items answer it the way a roguelite does:
+
+- **Four random offers a night**, from a pool of fifteen across three rarities.
+  What is on the table is itself part of the run.
+- **They stack and they last the run.** By day ten a hive with three Guard Bees
+  and a Propolis Seal is a fortress and one with Swift Wings and Royal Jelly is
+  a courier service, and neither was planned at dawn on day one.
+- **Reroll at an escalating price** — doubling each time, so it is an escape
+  hatch from a bad table and not a way to fish the pool.
+
+Items are cleared when a run ends; the permanent upgrades are not. That split is
+the point: upgrades are what you keep, items are what this run turned out to be.
+
+Half the pool answers raids, including the hive defence the design was missing.
+**Guard Bees** fight at the door on their own — the only answer to a raid that
+does not cost a drag, and therefore the thing you buy so that a raid landing
+mid-gesture is survivable rather than a disaster.
+
+An offer is never made if it would do nothing tomorrow (no shears without
+brambles, no smoke before wasps). One dud purchase and a player stops trusting
+the whole row, and that matters far more with a random shop than it did with a
+fixed shelf, because there is no shelf to learn.
 
 ---
 

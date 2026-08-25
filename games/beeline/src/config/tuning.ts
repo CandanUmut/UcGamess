@@ -212,6 +212,12 @@ export interface WaspTuning {
   reachRadius: number;
   /** How close a wasp must get to the hive to start robbing it. */
   arriveRadius: number;
+  /** Seconds between blows from one Guard Bee. */
+  guardInterval: number;
+  /** How long a bee will chase a wasp off the road before giving up. */
+  huntSeconds: number;
+  /** How near a drag has to end for it to count as aimed at a wasp. */
+  aimRadius: number;
 }
 
 export interface RaidTuning {
@@ -256,9 +262,20 @@ export interface MazeTuning {
   startDay: number;
 }
 
-export interface ProvisionTuning {
-  /** Price at day one. Grows by `costGrowth` per day. */
-  base: number;
+export interface ItemShopTuning {
+  /** Cards on the table each night. */
+  offerCount: number;
+  /** Price at day one, by rarity. Grows by `costGrowth` per day. */
+  cost: { common: number; rare: number; epic: number };
+  costGrowth: number;
+  costCapMultiplier: number;
+  rerollBase: number;
+  /** Multiplier on the reroll price for each reroll already taken tonight. */
+  rerollGrowth: number;
+  epicChanceBase: number;
+  epicChancePerDay: number;
+  epicChanceMax: number;
+  rareChance: number;
 }
 
 /**
@@ -294,14 +311,11 @@ export interface Tuning {
     edgeReveal: number;
     /** A flower or thicket is found once its cell is lit at least this much. */
     discoverAt: number;
-    /** Radius the Scout Bees provision lights around the hive at dawn. */
+    /** Radius the Scout Bees item lights around the hive at dawn. */
     scoutRadius: number;
   };
   maze: MazeTuning;
-  provisions: Record<
-    'scoutBees' | 'pruningShears' | 'smokePot' | 'waxedTrails' | 'earlyRise',
-    ProvisionTuning
-  > & { costGrowth: number; costCapMultiplier: number };
+  items: ItemShopTuning;
   upgrades: Record<
     'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'combWax',
     UpgradeTuning
@@ -514,16 +528,35 @@ export const TUNING: Tuning = {
     health: 5,
     /** Honey a wasp drains per second once it reaches the hive. */
     stealPerSecond: 14,
+    // Sized against a whole raid rather than per second. An ignored raid costs
+    // roughly three bees and 140 honey — noticeable against a day-ten quota,
+    // survivable once, and genuinely bad three times. Defending early is what
+    // makes the difference, which is the decision the system exists for.
     /** Seconds between a raiding wasp driving off one more bee. */
-    beeLossInterval: 2.2,
+    beeLossInterval: 2.8,
     /** How long a wasp lingers at the hive before leaving on its own. */
-    raidSeconds: 12,
+    raidSeconds: 10,
     /** Damage one arriving bee does. */
     beeDamage: 1,
     /** How close a route's tip must be for its bees to reach the wasp. */
     reachRadius: 74,
     /** How close a wasp must get to the hive to start robbing it. */
     arriveRadius: 70,
+    // Two guards bring a wasp down in about two and a half seconds, so a
+    // stacked defence genuinely holds the door while a single one only buys
+    // time. That gap is what makes the second copy worth buying.
+    guardInterval: 1.0,
+    // Bounded, and shorter than it sounds. Bees are much faster than wasps, so
+    // four seconds is a comfortable margin for a chase that started next to its
+    // target — and a hard stop on one that did not, so a bad drag costs a trip
+    // rather than removing a bee from the day.
+    huntSeconds: 4,
+    // Wider than the flower assist, because a wasp is a moving target. A drag
+    // aimed squarely at one still ends well behind it: the wasp covers most of
+    // a corridor in the second the gesture takes. At the flower radius the
+    // defence gesture failed silently against exactly the raiders that most
+    // needed answering — the quick ones.
+    aimRadius: 200,
   },
 
   raid: {
@@ -586,14 +619,31 @@ export const TUNING: Tuning = {
    * free background noise by day fifteen. The cap stops the curve outrunning
    * the quota curve late.
    */
-  provisions: {
+  /**
+   * The item shop.
+   *
+   * Prices are set against a day's take rather than against each other: an
+   * early common is roughly a third of a good day, an epic is most of one. That
+   * is what makes a night a decision instead of a shopping list — you cannot
+   * have the row, only a piece of it.
+   *
+   * The reroll is priced to be used once and thought about twice. Doubling each
+   * time keeps the escape hatch open without letting a patient player fish the
+   * pool for the one item they wanted.
+   */
+  items: {
+    offerCount: 4,
+    cost: { common: 110, rare: 240, epic: 480 },
     costGrowth: 1.15,
     costCapMultiplier: 9,
-    scoutBees: { base: 55 },
-    pruningShears: { base: 65 },
-    smokePot: { base: 70 },
-    waxedTrails: { base: 80 },
-    earlyRise: { base: 45 },
+    rerollBase: 60,
+    rerollGrowth: 1.9,
+    // Epics stay a rare thrill early and become a real possibility deep in a
+    // run, which is what keeps a long run producing things you have not seen.
+    epicChanceBase: 0.04,
+    epicChancePerDay: 0.012,
+    epicChanceMax: 0.2,
+    rareChance: 0.3,
   },
 
   /**

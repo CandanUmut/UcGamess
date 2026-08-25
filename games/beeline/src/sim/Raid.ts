@@ -32,9 +32,18 @@ export class RaidClock {
   /** True between the warning and the arrival. */
   private warning = false;
   private random: () => number = Math.random;
+  private extraWarning = 0;
 
-  begin(size: number, random: () => number = Math.random): void {
+  /**
+   * Arms the clock for a day. `extraWarning` is what Lookouts buy.
+   *
+   * The extra seconds lengthen the warning without touching the gap, so the
+   * item sells exactly what it says — more time to react — rather than quietly
+   * making raids rarer as well.
+   */
+  begin(size: number, extraWarning = 0, random: () => number = Math.random): void {
     this.size = Math.max(0, Math.floor(size));
+    this.extraWarning = Math.max(0, extraWarning);
     this.random = random;
     this.warning = false;
 
@@ -47,7 +56,7 @@ export class RaidClock {
     // seconds would arrive before the player has a single route earning, and
     // "you lost honey you never had" teaches nothing.
     const first = Math.max(TUNING.raid.firstRaidEarliest, this.sampleGap());
-    this.timer = Math.max(0, first - TUNING.raid.warningSeconds);
+    this.timer = Math.max(0, first - this.warningWindow);
   }
 
   /** True while the warning is showing and the wasps have not landed yet. */
@@ -68,7 +77,7 @@ export class RaidClock {
 
     if (!this.warning) {
       this.warning = true;
-      this.timer = TUNING.raid.warningSeconds;
+      this.timer = this.warningWindow;
       return 'warning';
     }
 
@@ -76,8 +85,12 @@ export class RaidClock {
     // The gap is measured arrival-to-arrival, so the warning for the next raid
     // is subtracted out here rather than added on top. Otherwise every gap is
     // silently longer than the tuning says it is.
-    this.timer = Math.max(0, this.sampleGap() - TUNING.raid.warningSeconds);
+    this.timer = Math.max(0, this.sampleGap() - this.warningWindow);
     return 'arrive';
+  }
+
+  private get warningWindow(): number {
+    return TUNING.raid.warningSeconds + this.extraWarning;
   }
 
   private sampleGap(): number {

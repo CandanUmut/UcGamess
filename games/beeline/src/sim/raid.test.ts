@@ -4,6 +4,7 @@ import { Field } from './Field.ts';
 import { RaidClock } from './Raid.ts';
 import { Wasp } from './Wasp.ts';
 import { featuresForDay, patchesForDay, raidSizeForDay } from '../game/DayCycle.ts';
+import { modifiersFor } from '../game/Items.ts';
 
 const DT = 1 / 60;
 
@@ -33,7 +34,7 @@ function advance(field: Field, seconds: number): void {
 /** Runs a clock until the first raid lands, returning when the warning came. */
 function firstRaid(random: () => number): { warnedAt: number; arrivedAt: number } {
   const clock = new RaidClock();
-  clock.begin(1, random);
+  clock.begin(1, 0, random);
 
   let t = 0;
   let warnedAt = -1;
@@ -257,5 +258,60 @@ describe('wind pressing a route into a wall costs pollen', () => {
     expect(route!.isPinched).toBe(true);
     advance(field, TUNING.route.pinchSeconds + 0.5);
     expect(route!.isPinched).toBe(false);
+  });
+});
+
+describe('hive defences fight without the player', () => {
+  it('brings a raider down on their own, given enough guards', () => {
+    // The one answer to a raid that does not cost a drag. Everything else in
+    // the system asks the player to react at the worst possible moment; this
+    // is what they buy so that a raid landing mid-gesture is survivable.
+    const field = new Field();
+    field.beginDay(
+      1,
+      featuresForDay(1),
+      patchesForDay(1),
+      1,
+      modifiersFor(['guardBees', 'guardBees']),
+    );
+    field.honey = 5000;
+
+    const wasp = new Wasp(field.hiveX, field.hiveY);
+    wasp.beginRaid();
+    field.wasps.push(wasp);
+
+    advance(field, TUNING.wasp.health * TUNING.wasp.guardInterval + 1);
+    expect(wasp.health).toBe(0);
+  });
+
+  it('does not bank idle time and delete the next arrival instantly', () => {
+    const field = new Field();
+    field.beginDay(1, featuresForDay(1), patchesForDay(1), 1, modifiersFor(['guardBees']));
+    field.honey = 5000;
+
+    // A long quiet stretch with nothing at the door.
+    advance(field, 30);
+
+    const wasp = new Wasp(field.hiveX, field.hiveY);
+    wasp.beginRaid();
+    field.wasps.push(wasp);
+    field.step(DT);
+
+    expect(wasp.health).toBe(TUNING.wasp.health);
+  });
+
+  it('slows the theft when the hive is sealed', () => {
+    const drain = (items: Parameters<typeof modifiersFor>[0]): number => {
+      const field = new Field();
+      field.beginDay(1, featuresForDay(1), patchesForDay(1), 1, modifiersFor(items));
+      field.honey = 5000;
+      const wasp = new Wasp(field.hiveX, field.hiveY);
+      wasp.beginRaid();
+      field.wasps.push(wasp);
+      advance(field, 4);
+      return 5000 - field.honey;
+    };
+
+    expect(drain(['propolisSeal'])).toBeLessThan(drain([]) * 0.8);
   });
 });
