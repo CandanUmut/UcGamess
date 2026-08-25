@@ -28,6 +28,20 @@ export class Patch {
    */
   windowRemaining = Number.POSITIVE_INFINITY;
 
+  /**
+   * Which flower this is, as an index into `COLORS.species`.
+   *
+   * Purely cosmetic — nothing in the simulation reads it. It lives on the patch
+   * rather than being derived in the renderer so a flower keeps the same colour
+   * for its whole life; deriving it from position or id in the draw call would
+   * make a flower change species the moment anything about it moved.
+   *
+   * `Field` assigns it at spawn so that the flowers on screen at any moment are
+   * different from each other, which a per-patch random roll does not
+   * guarantee.
+   */
+  species = 0;
+
   constructor(x: number, y: number, pool: number, kind: PatchKind = 'normal') {
     this.id = nextPatchId++;
     this.x = x;

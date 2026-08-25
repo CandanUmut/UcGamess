@@ -6,19 +6,43 @@ not to be worked around.
 
 ---
 
-## Principle: placeholder-first, and placeholders must be shippable
+## What actually shipped
 
-Stage 2 uses **no external assets at all** — Phaser primitives and textures
-generated at runtime. Every asset below is an _upgrade to something that already
-works_, never a blocker.
+Measured on the production build, not estimated:
 
-If art never arrives, Beeline still ships. It just looks plainer.
+| File | Brotli | What it is |
+| --- | --- | --- |
+| `sprites/meadow.jpg` | 43.3 KB | Seamless grass, tiled as the ground |
+| `fonts/nunito.woff2` | 18.1 KB | Variable UI face, subsetted |
+| `sprites/flower-*.png` | 11.7 KB × 6 | One daisy per species |
+| `audio/meadow.webm` | ~13 KB | Ambient loop, Opus (Safari gets the `.m4a`) |
+| `sprites/bee.png` | ~5 KB | Top-down honeybee |
+| `particles/*.png` | ~5 KB | Two starbursts |
 
-This is not a hedge. The visual identity of this game is **motion and trails**,
-not illustration: a few hundred dots streaming along glowing curves reads well
-with almost no art, and badly with a lot of mediocre art. Small sprites and
-strong motion is the correct art direction here, and it happens to be the cheap
-one.
+Total initial download **746 KB** against a 5 MB warn threshold, of which Phaser
+is still 275 KB. Every file is CC0 or OFL; see `assets/LICENSES.md` for the
+per-file provenance and the modifications made.
+
+## Principle: nothing on this list may block the game
+
+Every asset is an _upgrade to something that already works_. The bee falls back
+to a version drawn in code, the flowers and particles fall back to the generated
+glow, the ground falls back to the camera's background colour, the font falls
+back to the system stack behind a 1.2s timeout, and the music simply does not
+play. A dropped request costs looks; it cannot cost a boot.
+
+That is not caution for its own sake. These are the first files this game has
+ever fetched — before them the whole thing was primitives and synthesised audio,
+and "interactive in well under a second" was free. It is now something that has
+to be kept, and a fallback per asset is how.
+
+> **Direction change, day 2026-08-24.** The board used to be near-black with
+> unexplored ground rendered as darkness. It is now a lit meadow with unexplored
+> ground rendered as mist. Short sight works identically either way — what hides
+> the field is cosmetic to the mechanic — and the lit version is both the one
+> the game is about and the one with usable free art behind it. Most of what
+> follows was written for the dark board; where the two disagree, this section
+> and `assets/LICENSES.md` are current.
 
 ---
 
@@ -173,10 +197,17 @@ generated-in-code precedent from the template.
 
 ## Stage mapping
 
-| Stage                  | Assets                                                               |
-| ---------------------- | -------------------------------------------------------------------- |
-| **2 — feel prototype** | **None.** Primitives and generated textures only.                    |
-| 3 — full loop          | Still none required. Generated textures for bee, trail, patch, hive. |
-| 4 — polish             | Real sprites for flower/hive/wasp/UI, the audio set, font decision.  |
+| Stage                  | Assets                                                                  |
+| ---------------------- | ----------------------------------------------------------------------- |
+| **2 — feel prototype** | **None.** Primitives and generated textures only.                       |
+| 3 — full loop          | Still none required. Generated textures for bee, trail, patch, hive.    |
+| 4 — polish             | **Done:** bee, flowers, ground, font, music, particles. See the top.    |
+| Still open             | Hive and wasp, both still Phaser primitives. UI panels stay code-drawn. |
 
 Nothing on this page blocks Stage 2 or Stage 3.
+
+**The UI pack was evaluated and rejected.** Kenney's UI Pack is CC0 and would
+have covered the night screen's panels and buttons, but it is bright flat-yellow
+cartoon chrome and reads as a different game bolted onto this one. The
+code-drawn UI is more coherent than the free art would have been, which is the
+one case where "generate it" beats "ship it".

@@ -9,7 +9,11 @@ import {
   type BeelineSave,
 } from '../game/SaveState.ts';
 
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// Nunito first, system stack behind it. The fallback is load-bearing twice
+// over: the face may not have arrived (see main.ts), and the subset is
+// deliberately small, so a glyph it lacks — the play triangle, the arrow — is
+// drawn by the next family along.
+const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /**
  * The title screen.
@@ -39,7 +43,7 @@ export class MenuScene extends BaseScene {
 
     const view = viewRect(this);
     this.add
-      .rectangle(view.centerX, view.centerY, view.width, view.height, 0x12100c)
+      .rectangle(view.centerX, view.centerY, view.width, view.height, 0xe9f0d6)
       .setOrigin(0.5);
 
     // Read the save before drawing, so the primary button can say what it does.
@@ -83,7 +87,7 @@ export class MenuScene extends BaseScene {
       y: 350,
       width: 380,
       label: resuming ? `Continue — day ${this.save.day}` : 'Play',
-      tint: 0x4ade80,
+      tint: 0x2f8f57,
       onClick: () => this.start(),
     });
 
@@ -104,7 +108,7 @@ export class MenuScene extends BaseScene {
         width: 380,
         label: 'Start over',
         sublabel: 'clears your hive and every upgrade',
-        tint: 0xff8a65,
+        tint: 0xc0472c,
         onClick: () => this.confirmReset(),
       });
     }
@@ -141,7 +145,7 @@ export class MenuScene extends BaseScene {
       y: 470,
       width: 240,
       label: 'Yes, start over',
-      tint: 0xff8a65,
+      tint: 0xc0472c,
       onClick: () => {
         writeSave(this.context.save, newSave());
         void this.context.save.flush();
@@ -154,7 +158,7 @@ export class MenuScene extends BaseScene {
       y: 470,
       width: 240,
       label: 'Keep my hive',
-      tint: 0x60a5fa,
+      tint: 0x2b6ca8,
       onClick: () => {
         warning.destroy();
         this.scene.restart();

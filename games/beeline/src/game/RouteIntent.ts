@@ -1,6 +1,5 @@
 import { TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
-import { buildPolyline, truncateCoords } from '../sim/polyline.ts';
 
 export type IntentKind = 'extend' | 'fresh';
 
@@ -18,17 +17,19 @@ export interface CommitResult {
   /** Length the player actually had to draw. Workers are charged on this. */
   drawnLength: number;
   /**
-   * What the gesture covered before thorns took any of it.
+   * What the finger covered, before the walls bent the line.
    *
-   * Equal to `drawnLength` whenever nothing was cut, so the gap between the two
-   * is exactly what the thorns cost the player.
+   * Equal to `drawnLength` whenever the trace was clear. Sliding along a wall
+   * is a longer trip than the drag that produced it, so `drawnLength` is the
+   * larger of the pair whenever a wall was touched — the inversion that came
+   * with deflecting rather than severing.
    */
   fullLength: number;
   connected: boolean;
   /** The route that was created or changed, 0 if none. */
   routeId: number;
-  /** Where thorns cut the drag short, if they did. */
-  cutAt: { x: number; y: number } | null;
+  /** Where the drag first met a wall and was turned along it, if it did. */
+  deflectedAt: { x: number; y: number } | null;
 }
 
 /**
@@ -103,29 +104,6 @@ export function applyAimAssist(
   return { coords: out, connected: true };
 }
 
-/**
- * Trims a freshly drawn path at the first thorns it enters.
- *
- * The route is not refused and no error is shown — the line simply stops where
- * the thicket starts. That is the entire teaching mechanism for thorns: the
- * player sees their line end at the obstacle, sees the bees reach a tip that
- * touches no flower and come home empty, and draws around it next time. There
- * is nothing to read.
- */
-function clipAtThorns(
-  field: Field,
-  coords: readonly number[],
-): { coords: number[]; cutAt: { x: number; y: number } | null } {
-  const poly = buildPolyline(coords);
-  const hit = field.blockedDistance(poly, poly.length);
-  if (!Number.isFinite(hit)) return { coords: [...coords], cutAt: null };
-
-  const clipped = truncateCoords(poly, hit);
-  const x = clipped[clipped.length - 2] ?? 0;
-  const y = clipped[clipped.length - 1] ?? 0;
-  return { coords: clipped, cutAt: { x, y } };
-}
-
 /** Applies a completed drag to the field. */
 export function commitDrag(
   field: Field,
@@ -133,21 +111,22 @@ export function commitDrag(
   rawCoords: readonly number[],
 ): CommitResult {
   const assisted = applyAimAssist(field, rawCoords);
-  const clip = clipAtThorns(field, assisted.coords);
-  const coords = clip.coords;
-  const cutAt = clip.cutAt;
+  const slid = field.slidePath(assisted.coords);
+  const coords = slid.coords;
+  const deflectedAt = slid.contact;
 
-  // Workers are charged on what survived, not on what the finger covered. The
-  // player got a shorter route than they drew, so they pay for a shorter route
-  // — being billed in full for a line the thorns ate would be the one genuinely
-  // unfair reading of this mechanic.
+  // Workers are charged on the line the swarm will actually fly, which after a
+  // slide is a little longer than the finger's path. That is what a wall costs
+  // now: the extra road needed to go along it rather than through it, billed at
+  // the ordinary per-pixel rate. It stays fair because the player still gets
+  // the route — they are paying for road, not for road taken away.
   const drawnLength = pathLength(coords);
-  // What the gesture covered before thorns took any of it. Equal to
-  // `drawnLength` whenever nothing was cut.
+  // The raw gesture, before the walls bent it.
   const gestureLength = pathLength(assisted.coords);
 
-  // A cut left nothing usable. Report it so the snip is still shown; silently
-  // doing nothing is what makes a touchscreen game feel broken.
+  // The drag jammed in a corner with nothing usable behind it. Report it so the
+  // contact still shows; silently doing nothing is what makes a touchscreen
+  // game feel broken.
   if (coords.length < 4) {
     return {
       kind: 'rejected',
@@ -155,11 +134,11 @@ export function commitDrag(
       fullLength: gestureLength,
       connected: false,
       routeId: 0,
-      cutAt,
+      deflectedAt,
     };
   }
 
-  // Aim assist may have snapped onto a flower that the clip then cut away from.
+  // Aim assist may have snapped onto a flower the slide then led away from.
   const endX = coords[coords.length - 2] ?? 0;
   const endY = coords[coords.length - 1] ?? 0;
   const connected =
@@ -178,7 +157,7 @@ export function commitDrag(
         fullLength: Math.max(before, route.poly.length),
         connected,
         routeId: route.id,
-        cutAt,
+        deflectedAt,
       };
     }
     // The route died mid-drag. Fall through and treat it as a fresh draw
@@ -199,7 +178,7 @@ export function commitDrag(
       fullLength: gestureLength,
       connected,
       routeId: existing.id,
-      cutAt,
+      deflectedAt,
     };
   }
 
@@ -210,7 +189,7 @@ export function commitDrag(
     fullLength: gestureLength,
     connected: route ? connected : false,
     routeId: route ? route.id : 0,
-    cutAt,
+    deflectedAt,
   };
 }
 

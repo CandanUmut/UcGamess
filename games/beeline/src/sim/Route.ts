@@ -142,19 +142,26 @@ export class Route {
   }
 
   /**
-   * Severs the route at arc distance `s`, discarding everything beyond it.
+   * Re-lays the live path along `coords`, which is the same road slid clear of
+   * a wall it had come to touch.
    *
-   * Unlike decay, this shortens the *drawn* path as well as the live length.
-   * That distinction matters: decay leaves a ghost showing where the route used
-   * to reach, which is the refresh target. A cut is not something to refresh
-   * back into — the thorns are still there — so leaving a ghost pointing
-   * straight through a thicket would be an invitation to redraw the same
-   * mistake.
+   * `liveLength` is carried over **as an absolute number**, not as a fraction.
+   * That single choice is what keeps walls a real pressure now that they no
+   * longer sever anything: sliding along a wall is a longer trip than cutting
+   * the corner would have been, so holding the live length fixed means the tip
+   * pulls back by exactly the detour the wall imposed. A route pushed into a
+   * wall visibly loses reach, and the fix is the ordinary refresh gesture.
+   *
+   * Strength survives untouched. Being pressed against a wall is the board
+   * moving, not the swarm forgetting the road, and charging a road's hard-won
+   * strength for it would punish exactly the long-lived routes that strength
+   * exists to reward.
    */
-  cutAt(s: number): void {
-    const limit = Math.max(0, Math.min(s, this.poly.length));
-    this.poly = buildPolyline(truncateCoords(this.poly, limit));
-    this.liveLength = Math.min(this.liveLength, this.poly.length);
+  deflectTo(coords: readonly number[]): void {
+    const live = this.liveLength;
+
+    this.poly = buildPolyline(coords);
+    this.liveLength = Math.min(live, this.poly.length);
 
     if (this.liveLength <= TUNING.route.minLength) {
       this.liveLength = Math.max(this.liveLength, 0);

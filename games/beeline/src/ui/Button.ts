@@ -1,6 +1,10 @@
 import Phaser from 'phaser';
 
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// Nunito first, system stack behind it. The fallback is load-bearing twice
+// over: the face may not have arrived (see main.ts), and the subset is
+// deliberately small, so a glyph it lacks — the play triangle and the arrow
+// in the night screen — is drawn by the next family along.
+const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /**
  * Minimum tap target, in design units.

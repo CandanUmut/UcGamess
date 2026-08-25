@@ -10,14 +10,14 @@ import { COLORS, TUNING } from '../config/tuning.ts';
 import { Field, WORLD_HEIGHT, WORLD_WIDTH } from '../sim/Field.ts';
 import type { Route } from '../sim/Route.ts';
 import { pushIfSpaced, type SamplePoint } from '../sim/polyline.ts';
-import { createGeneratedTextures } from '../render/textures.ts';
+import { createGeneratedTextures, TEX_FILES } from '../render/textures.ts';
 import { createBeeRenderer, type BeeRenderer } from '../render/BeeRenderer.ts';
 import { RouteRenderer } from '../render/RouteRenderer.ts';
 import { FieldRenderer } from '../render/FieldRenderer.ts';
 import { FogRenderer } from '../render/FogRenderer.ts';
 import { Juice } from '../render/Juice.ts';
 import { Hud } from '../ui/Hud.ts';
-import { Sfx } from '../audio/Sfx.ts';
+import { MUSIC_FILES, MUSIC_KEY, Sfx } from '../audio/Sfx.ts';
 import {
   dayLength,
   dayQuota,
@@ -51,7 +51,11 @@ const DEPTH = {
   juice: 50,
   hud: 100,
 } as const;
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// Nunito first, system stack behind it. The fallback is load-bearing twice
+// over: the face may not have arrived (see main.ts), and the subset is
+// deliberately small, so a glyph it lacks — the play triangle, the arrow — is
+// drawn by the next family along.
+const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /** How long a finger must rest on a route to erase it. */
 const ERASE_HOLD_SECONDS = 0.75;
@@ -117,6 +121,16 @@ export class GameScene extends BaseGameplayScene {
 
   preload(): void {
     createGeneratedTextures(this);
+
+    // The only files the game fetches, and nothing depends on them: the bee
+    // falls back to a version drawn in code, the flowers and the ground fall
+    // back to primitives, and the music simply does not play. A portal CDN that
+    // drops one of these costs looks, never a boot.
+    for (const [key, path] of TEX_FILES) this.load.image(key, path);
+    this.load.audio(MUSIC_KEY, MUSIC_FILES);
+    this.load.on('loaderror', (file: { key: string }) => {
+      console.warn(`[beeline] optional asset "${file.key}" failed to load.`);
+    });
   }
 
   protected build(): void {
@@ -146,7 +160,7 @@ export class GameScene extends BaseGameplayScene {
       WORLD_HEIGHT,
       DEPTH.fog,
     );
-    this.beeRenderer = createBeeRenderer(this, 'blitter', DEPTH.bee);
+    this.beeRenderer = createBeeRenderer(this, 'sprite', DEPTH.bee);
     this.juice = new Juice(this, DEPTH.juice);
     this.hud = new Hud(this, DEPTH.hud);
     this.tutorialText = this.add
@@ -256,6 +270,7 @@ export class GameScene extends BaseGameplayScene {
 
     this.idleSeconds = 0;
     this.sfx.startHum();
+    this.sfx.startMusic();
     // Respect a pause that is already in force — the rotate gate can be up
     // before the first day ever starts, and starting gameplay here anyway was
     // measured to let the countdown run behind the prompt.
@@ -439,7 +454,9 @@ export class GameScene extends BaseGameplayScene {
     if (!intent || coords.length < 4) return;
 
     const result = commitDrag(this.field, intent, coords);
-    if (result.cutAt) this.showCut(result.cutAt.x, result.cutAt.y);
+    if (result.deflectedAt) {
+      this.showDeflect(result.deflectedAt.x, result.deflectedAt.y);
+    }
     if (result.kind === 'rejected') return;
 
     // Drawing costs workers, charged on what the gesture actually covered.
@@ -484,10 +501,18 @@ export class GameScene extends BaseGameplayScene {
     });
   }
 
-  /** The snip where thorns took a route. */
-  private showCut(x: number, y: number): void {
-    for (let i = 0; i < 4; i += 1) this.juice.scatter(x, y);
-    this.sfx.playVaried('draw', 0.24, 900);
+  /**
+   * The brush where a route met a wall and ran along it.
+   *
+   * Quieter and smaller than the snip it replaces, deliberately. A severed
+   * route was a loss and wanted to land like one; a slide costs the player a
+   * little length and nothing else. On a maze board a line touches a wall
+   * constantly, so dressing each contact up as a catastrophe would make the
+   * game feel like it was scolding you for playing it.
+   */
+  private showDeflect(x: number, y: number): void {
+    this.juice.scatter(x, y);
+    this.sfx.playVaried('draw', 0.1, 520);
   }
 
   /** Advances the press-and-hold that erases a route. */
@@ -644,7 +669,7 @@ export class GameScene extends BaseGameplayScene {
     // A route severed by thorns gets the same acknowledgement as anything else
     // that happened to the player. Losing a line silently is the difference
     // between "the thorns cut me off" and "the game ate my drag".
-    for (const hit of events.cut) this.showCut(hit.x, hit.y);
+    for (const hit of events.deflected) this.showDeflect(hit.x, hit.y);
 
     // Finding a flower is the payoff for exploring, so it gets the biggest
     // one-off in the game: a burst, a rising chime, and the honey it holds

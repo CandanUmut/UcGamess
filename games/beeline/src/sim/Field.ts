@@ -1,11 +1,17 @@
-import { TUNING } from '../config/tuning.ts';
+import { COLORS, TUNING } from '../config/tuning.ts';
 import { Bee } from './Bee.ts';
 import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp } from './Wasp.ts';
 import { Maze } from './Maze.ts';
+import { slideAlongWalls, type WallSlide } from './deflect.ts';
 import { Fog } from './Fog.ts';
-import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
+import {
+  coordsLength,
+  truncateCoords,
+  type Polyline,
+  type SamplePoint,
+} from './polyline.ts';
 import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
 import type { DayFeatures } from '../game/DayCycle.ts';
 import { noModifiers, type DayModifiers } from '../game/Provisions.ts';
@@ -68,7 +74,7 @@ export interface FieldEvents {
   /** Workers committed to a newly drawn route this step. */
   dispatched: number;
   /** Where a route was severed by thorns, so the cut is visible and audible. */
-  cut: Array<{ x: number; y: number }>;
+  deflected: Array<{ x: number; y: number }>;
   /** Flowers found this step. Discovery is the reward for exploring. */
   found: Array<{ x: number; y: number; honey: number }>;
 }
@@ -137,7 +143,7 @@ export class Field {
     deposited: 0,
     scattered: [],
     dispatched: 0,
-    cut: [],
+    deflected: [],
     found: [],
   };
 
@@ -415,8 +421,28 @@ export class Field {
     const spot = this.randomPatchPosition(kind);
     const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
     patch.distanceMultiplier = this.distanceMultiplierAt(spot.x, spot.y);
+    patch.species = this.nextSpecies();
     this.patches.push(patch);
     return patch;
+  }
+
+  /**
+   * A flower colour not already on the board, where one is available.
+   *
+   * Rolling independently per flower would put two of the same colour on screen
+   * often enough to notice — with six species and five flowers that is better
+   * than even odds on any given day. Picking from what is currently unused
+   * makes the board legible by colour, which is the entire point of having
+   * colours. Falls back to a plain roll once every species is in use.
+   */
+  private nextSpecies(): number {
+    const taken = new Set(this.patches.filter((p) => p.alive).map((p) => p.species));
+    const free: number[] = [];
+    for (let i = 0; i < COLORS.species.length; i += 1) {
+      if (!taken.has(i)) free.push(i);
+    }
+    if (free.length === 0) return Math.floor(Math.random() * COLORS.species.length);
+    return free[Math.floor(Math.random() * free.length)] ?? 0;
   }
 
   /**
@@ -727,7 +753,7 @@ export class Field {
         continue;
       }
 
-      this.clipRouteAtThorns(route);
+      this.deflectRouteAtWalls(route);
       if (route.dead) {
         this.killRoute(route);
         continue;
@@ -800,12 +826,27 @@ export class Field {
    * because it makes a route something you maintain rather than something you
    * place.
    */
-  private clipRouteAtThorns(route: Route): void {
+  private deflectRouteAtWalls(route: Route): void {
     const hit = this.blockedDistance(route.poly, route.liveLength);
     if (!Number.isFinite(hit) || hit >= route.liveLength) return;
 
-    this.events.cut.push({ x: route.tipX, y: route.tipY });
-    route.cutAt(hit);
+    const live = truncateCoords(route.poly, route.liveLength);
+    const slid = slideAlongWalls(live, this.maze);
+    if (!slid.contact) return;
+
+    this.events.deflected.push(slid.contact);
+    route.deflectTo(slid.coords);
+  }
+
+  /**
+   * Slides a path the player just drew clear of the walls it pressed into.
+   *
+   * Shared with the commit path so a freshly drawn line and a wind-bowed one
+   * are deflected by exactly the same rule. Two notions of what a wall does is
+   * how an obstacle stops being something a player can predict.
+   */
+  slidePath(coords: readonly number[]): WallSlide {
+    return slideAlongWalls(coords, this.maze);
   }
 
   get windVector(): { x: number; y: number; strength: number } {
@@ -1074,7 +1115,7 @@ export class Field {
       deposited: 0,
       scattered: [],
       dispatched: 0,
-      cut: [],
+      deflected: [],
       found: [],
     };
     return out;

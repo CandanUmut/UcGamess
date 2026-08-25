@@ -2,7 +2,11 @@ import type Phaser from 'phaser';
 import { COLORS } from '../config/tuning.ts';
 import { DESIGN_WIDTH } from '@ucgames/core';
 
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// Nunito first, system stack behind it. The fallback is load-bearing twice
+// over: the face may not have arrived (see main.ts), and the subset is
+// deliberately small, so a glyph it lacks — the play triangle and the arrow
+// in the night screen — is drawn by the next family along.
+const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /**
  * Day timer, honey progress against quota, and the day banner.
@@ -82,13 +86,13 @@ export class Hud {
       .setOrigin(1, 0.5);
 
     this.barBg = scene.add
-      .rectangle(0, 0, this.barWidth, 14, 0xffffff, 0.1)
+      .rectangle(0, 0, this.barWidth, 14, 0x3c3524, 0.14)
       .setOrigin(0, 0.5);
     this.barFill = scene.add
       .rectangle(0, 0, this.barWidth, 14, COLORS.hive)
       .setOrigin(0, 0.5)
       .setScale(0, 1);
-    this.quotaTick = scene.add.rectangle(0, 0, 3, 22, 0xffffff, 0.55).setOrigin(0.5, 0.5);
+    this.quotaTick = scene.add.rectangle(0, 0, 3, 22, 0x3c3524, 0.5).setOrigin(0.5, 0.5);
 
     this.honeyText = scene.add
       .text(0, 0, '0 / 60', { fontFamily: FONT, fontSize: '20px', color: COLORS.dim })
@@ -114,7 +118,7 @@ export class Hud {
       .setOrigin(0, 0.5);
 
     this.unfoundText = scene.add
-      .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: '#8fd0ff' })
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: '#1f6f9c' })
       .setOrigin(0, 0.5);
 
     this.root.add([
@@ -155,7 +159,7 @@ export class Hud {
     const tipX = cx + this.windX * len;
     const tipY = cy + this.windY * len;
 
-    g.lineStyle(3, 0x8fd0ff, 0.85);
+    g.lineStyle(3, 0x1f6f9c, 0.85);
     g.beginPath();
     g.moveTo(cx - this.windX * len, cy - this.windY * len);
     g.lineTo(tipX, tipY);
@@ -164,7 +168,7 @@ export class Hud {
     // Arrowhead.
     const nx = -this.windY;
     const ny = this.windX;
-    g.fillStyle(0x8fd0ff, 0.95);
+    g.fillStyle(0x1f6f9c, 0.95);
     g.fillTriangle(
       tipX + this.windX * 8,
       tipY + this.windY * 8,
@@ -191,7 +195,7 @@ export class Hud {
         ? `${foraging} foraging · ${building} building`
         : `${foraging} foraging`,
     );
-    this.swarmText.setColor(building > 0 ? '#ffd966' : COLORS.dim);
+    this.swarmText.setColor(building > 0 ? '#b9761c' : COLORS.dim);
   }
 
   private windAnchorX = 0;
@@ -224,17 +228,17 @@ export class Hud {
     const seconds = Math.max(0, Math.ceil(secondsLeft));
     this.timerText.setText(String(seconds));
     // Red in the last ten seconds. Time pressure should be felt, not read.
-    this.timerText.setColor(seconds <= 10 ? '#ff8a65' : COLORS.text);
+    this.timerText.setColor(seconds <= 10 ? COLORS.bad : COLORS.text);
 
     const ratio = quota > 0 ? honey / quota : 0;
     this.barFill.setScale(Math.min(1, ratio), 1);
 
     const met = honey >= quota;
-    this.barFill.setFillStyle(met ? 0x7fd1ae : COLORS.hive);
+    this.barFill.setFillStyle(met ? 0x3f8f5f : COLORS.hive);
     this.honeyText.setText(
       met ? `${Math.floor(honey)} — quota met` : `${Math.floor(honey)} / ${quota}`,
     );
-    this.honeyText.setColor(met ? '#7fd1ae' : COLORS.dim);
+    this.honeyText.setColor(met ? COLORS.good : COLORS.dim);
 
     if (met && !this.metShown) {
       this.metShown = true;

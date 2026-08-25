@@ -1403,6 +1403,87 @@ thing here that cannot be done in code.
 
 ---
 
+## 26. Walls you slide along, on a board you can see
+
+Two changes from the same playtest note: _"when the path touches the walls it
+gets cut out, I want it to bounce."_
+
+### Routes slide along walls instead of dying at them
+
+A line that met a wall used to end there. On the old field of scattered thorn
+circles that was survivable. On a maze it is the worst thing the game does,
+because **a maze is walls** — every route runs alongside one for most of its
+length, and asking a thumb to trace a corridor without ever grazing its sides
+demands exactly the precision §24 promises not to require. Corridors are a full
+cell wide so that _the interesting part is the topology, never the precision_;
+clipping quietly took that promise back. A player who read the maze correctly,
+picked a good corridor and traced it with an ordinary thumb still lost the whole
+line past the first wobble, and the mistake being punished was not a routing
+mistake.
+
+Now a step that cannot be taken gives back the part of it that can. Press into a
+wall and the line runs **along** it. A sloppy trace of the right corridor
+produces the right corridor; a drag aimed at a wall with no way through still
+goes nowhere. The topology is still the puzzle — only the precision tax is gone.
+
+**Sliding, not reflecting.** A true bounce sends the line away from the wall at
+an angle, so the obstacle decides where the route goes and a drag into a
+corridor wall _leaves the corridor_. Sliding keeps the player's intent: the
+component of the drag the wall permits survives, the component it refuses is
+dropped.
+
+It still costs something, in the currency the game already charges in. Going
+along a wall is a longer trip than cutting the corner would have been, and
+workers are charged per pixel of route, so a wall is paid for in swarm. For a
+**live** route pushed into a wall the detour comes out of the route's _reach_:
+`liveLength` carries over unchanged, so the tip pulls back by exactly what the
+detour added, and the ordinary refresh gesture wins it back. Strength is never
+touched — being pressed against a wall is the board moving, not the swarm
+forgetting the road.
+
+The load-bearing property is that **a slid path is never a path the maze would
+then cut.** Routes are re-checked every fixed step, so a deflection that left
+the line still technically blocked would sever it a frame later and the whole
+change would be invisible. That is asserted directly, over generated boards,
+rather than reasoned about.
+
+### The board is a lit meadow
+
+Unexplored ground is low morning mist now, not darkness.
+
+**Nothing about short sight changed.** What hides the field is cosmetic to the
+mechanic: an undiscovered flower is not drawn at all, so the fog never had to
+conceal anything, and it can be tuned purely on looks. What the change bought is
+that the game looks like the thing it is about — and, less obviously, that free
+art became usable at all. For a dark glow aesthetic almost no CC0 art fits; for
+a lit meadow a great deal does.
+
+One inversion to watch: on black, things were legible by being _paler_ than the
+ground. On a pale field they must be _darker_ than it. That is why the bee is
+dark amber, why the surround band is lighter than the playfield rather than
+dimmed, and why HUD chrome is ink rather than white. Anything added later obeys
+the same rule.
+
+**Flowers have species.** Six colours, assigned from whatever is not currently
+on the board rather than rolled per flower — with six species and five flowers,
+independent rolls put two of the same colour on screen better than half the
+time, which defeats the point. Hue is identity; the distance-worth signal moved
+to the _halo_, which warms as the payout climbs. Those were the same channel
+before, which is why every flower used to be a shade of one green-to-amber ramp
+and none of them was "the purple one".
+
+**Bees are bees.** The swarm moved to the sprite renderer, which was written for
+exactly this and had been sitting unused. The bee art is the studio's own, in
+profile, so bees are **mirrored rather than rotated** — spinning a profile
+sprite by its heading puts half the swarm on its back on every return trip. The
+residual lean is clamped well short of vertical.
+
+The cost is a GameObject per bee where there used to be a shared Blitter Bob,
+which is the trade the two-renderer split exists to let us measure. **It has not
+been measured on a real phone at a full swarm**, and that is the open risk here.
+
+---
+
 ## 25. Success criteria
 
 Not submission-ready until all of these hold:
