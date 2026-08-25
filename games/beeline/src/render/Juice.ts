@@ -11,6 +11,8 @@ interface Pop {
   maxLife: number;
   tint: number;
   size: number;
+  /** Which texture this pop draws with. */
+  tex: string;
 }
 
 const MAX_POPS = 220;
@@ -36,8 +38,20 @@ export class Juice {
   private readonly sprites: Phaser.GameObjects.Image[] = [];
   private readonly pops: Pop[] = [];
   private cursor = 0;
+  /**
+   * The starburst keys, resolved once against what actually loaded.
+   *
+   * The two shipped PNGs are the only files this game fetches, and nothing here
+   * is allowed to depend on them arriving. Resolving to the generated glow when
+   * a key is missing keeps a dropped request cosmetic.
+   */
+  private readonly sparkleTex: string;
+  private readonly glintTex: string;
 
   constructor(scene: Phaser.Scene, depth: number) {
+    this.sparkleTex = scene.textures.exists(TEX.sparkle) ? TEX.sparkle : TEX.glow;
+    this.glintTex = scene.textures.exists(TEX.glint) ? TEX.glint : TEX.glow;
+
     for (let i = 0; i < MAX_POPS; i += 1) {
       const sprite = scene.add.image(0, 0, TEX.glow).setDepth(depth);
       sprite.setVisible(false);
@@ -51,6 +65,7 @@ export class Juice {
         maxLife: 1,
         tint: COLORS.bee,
         size: 1,
+        tex: TEX.glow,
       });
     }
   }
@@ -71,9 +86,43 @@ export class Juice {
     }
   }
 
+  /**
+   * A flower found in the dark.
+   *
+   * The one moment the game most wants to celebrate — exploring costs workers,
+   * costs time, and can end in a thicket, so the payoff has to land. A ring of
+   * starbursts is the only place a shipped sprite earns its bytes over a
+   * gradient: a gradient cannot have points on it.
+   */
+  discover(x: number, y: number): void {
+    for (let i = 0; i < 7; i += 1) {
+      const angle = (i / 7) * Math.PI * 2 + Math.random() * 0.4;
+      const speed = 60 + Math.random() * 70;
+      this.spawn(
+        x,
+        y,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        0.75,
+        COLORS.hive,
+        0.55,
+        this.sparkleTex,
+      );
+    }
+  }
+
   /** Honey banked at the hive. */
   deposit(x: number, y: number): void {
-    this.spawn(x, y, (Math.random() - 0.5) * 40, -70, 0.42, COLORS.hive, 0.36);
+    this.spawn(
+      x,
+      y,
+      (Math.random() - 0.5) * 40,
+      -70,
+      0.42,
+      COLORS.hive,
+      0.36,
+      this.glintTex,
+    );
   }
 
   /** A bee driven off by a wasp. */
@@ -113,6 +162,7 @@ export class Juice {
     life: number,
     tint: number,
     size: number,
+    tex: string = TEX.glow,
   ): void {
     // Ring buffer: the oldest pop is overwritten rather than dropping the new
     // one, so a burst always shows something.
@@ -128,6 +178,7 @@ export class Juice {
     pop.maxLife = life;
     pop.tint = tint;
     pop.size = size;
+    pop.tex = tex;
   }
 
   /** Advances and redraws. Uses real frame delta — these are visuals only. */
@@ -150,6 +201,9 @@ export class Juice {
       const t = Math.max(0, pop.life / pop.maxLife);
 
       sprite.setVisible(true);
+      // Only touched when it actually differs — setTexture re-resolves the
+      // frame, and the overwhelming majority of pops share one texture.
+      if (sprite.texture.key !== pop.tex) sprite.setTexture(pop.tex);
       sprite.setPosition(pop.x, pop.y);
       sprite.setTint(pop.tint);
       sprite.setAlpha(t);

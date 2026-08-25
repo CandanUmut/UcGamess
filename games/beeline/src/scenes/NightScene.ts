@@ -25,7 +25,11 @@ import type { BeelineSave } from '../game/SaveState.ts';
 import { Button } from '../ui/Button.ts';
 import type { Sfx } from '../audio/Sfx.ts';
 
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// Nunito first, system stack behind it. The fallback is load-bearing twice
+// over: the face may not have arrived (see main.ts), and the subset is
+// deliberately small, so a glyph it lacks — the play triangle, the arrow — is
+// drawn by the next family along.
+const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export interface NightData {
   result: DayResult;
@@ -93,7 +97,7 @@ export class NightScene extends BaseScene {
     // show through around the edges of the night screen.
     const view = viewRect(this);
     this.add
-      .rectangle(view.centerX, view.centerY, view.width, view.height, 0x08070a, 0.93)
+      .rectangle(view.centerX, view.centerY, view.width, view.height, 0xf6f3e2, 0.97)
       .setOrigin(0.5);
 
     const met = result.outcome === 'met';

@@ -509,19 +509,56 @@ export const TUNING: Tuning = {
   },
 };
 
+/**
+ * A sunlit meadow, not a night field.
+ *
+ * The board used to be near-black, with the unexplored part rendered as
+ * darkness. Reading it as *mist over a bright field* instead costs the design
+ * nothing — short sight works the same way whether what hides the ground is
+ * dark or fog — and it buys a game that looks like the thing it is about.
+ *
+ * Every value below is chosen against a pale ground, which inverts the old
+ * rule: things that used to glow pale against black now have to sit *darker*
+ * than the field to be seen. That is why the bee is dark amber rather than the
+ * near-white it was, and why nothing here is a pastel.
+ */
 export const COLORS = {
-  background: '#12100c',
-  hive: 0xf2b134,
-  bee: 0xffd966,
-  beeLaden: 0xffa726,
-  patch: 0x7fd1ae,
-  patchDry: 0x4a5750,
-  wall: 0x3a2f22,
-  wallThorn: 0x6b5a3e,
-  route: 0xffe08a,
+  background: '#e9f0d6',
+  /** The ground beyond the playfield, a shade off the field itself. */
+  surround: 0xdae3c2,
+  hive: 0xb9761c,
+  bee: 0x6b4a16,
+  beeLaden: 0xd98b18,
+  patch: 0x67b58c,
+  patchDry: 0xa8b09a,
+  wall: 0x46603a,
+  wallThorn: 0x2c3d24,
+  route: 0xc98a2b,
+  /**
+   * Flower species colours.
+   *
+   * Variety here is not only decoration: five flowers that differ only in size
+   * are hard to refer to, and "the purple one" is how a person actually thinks
+   * about the board they are working.
+   *
+   * It does not cost the game its value signal. Distance-worth still rides on
+   * the *halo* around a flower, which warms as the payout climbs, so hue tells
+   * you which flower and warmth tells you what it is worth. Those were the same
+   * channel before, and separating them is what made room for this.
+   */
+  species: [
+    0xe2669a, // pink
+    0x9b6fd4, // violet
+    0xe4573f, // poppy red
+    0xf0b429, // buttercup
+    0xf2f0e6, // white daisy
+    0x4f9ede, // cornflower
+  ],
+  /** Warm end of the distance halo; the cool end is the flower's own colour. */
+  halo: 0xffb454,
   /** Text colours are CSS strings; Phaser text styles do not take hex numbers. */
-  text: '#f4f4f8',
-  dim: '#8a8aa0',
-  good: '#7fd1ae',
-  bad: '#ff8a65',
+  text: '#3c3524',
+  dim: '#7b7358',
+  good: '#3f8f5f',
+  bad: '#c0472c',
 } as const;

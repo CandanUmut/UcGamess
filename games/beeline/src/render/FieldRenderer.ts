@@ -6,9 +6,16 @@ import {
   WORLD_HEIGHT as PLAYFIELD_HEIGHT,
   WORLD_WIDTH as PLAYFIELD_WIDTH,
 } from '../sim/Field.ts';
-import { TEX } from './textures.ts';
+import { FLOWER_TEX, TEX } from './textures.ts';
 
-const PATCH_TINT: Record<string, number> = {
+/**
+ * Overrides for the two flowers that are not ordinary.
+ *
+ * A rich flower and a night bloom have to be identifiable *as* those before
+ * anything else about them is read, so they keep a fixed colour rather than
+ * drawing from the species palette. Ordinary flowers get a species.
+ */
+const KIND_TINT: Record<string, number> = {
   normal: COLORS.patch,
   rich: 0xffb454,
   night: 0xb98cff,
@@ -41,6 +48,27 @@ export class FieldRenderer {
   private readonly depth: number;
   /** One label per patch, reused. Pollen left is a number worth reading now. */
   private labels: Phaser.GameObjects.Text[] = [];
+  /**
+   * One flower head per patch, reused.
+   *
+   * Pooled exactly like the labels rather than created per frame: patches come
+   * and go through a day, and rebuilding a GameObject every time a flower
+   * blooms is the kind of churn that shows up as a hitch on a phone.
+   */
+  private flowers: Phaser.GameObjects.Image[] = [];
+  /**
+   * The ground, as one tiled sprite under everything.
+   *
+   * A flat fill read as a menu background; real grass under the board is what
+   * makes it a *field*. A TileSprite rather than a stretched image so the tile
+   * keeps its own scale however large the canvas is — stretching a 512px photo
+   * across 1280 would soften it into a smear, and the fine detail is the part
+   * that says grass.
+   *
+   * Null when the file did not arrive; the camera's background colour is
+   * already the same meadow green, so the board simply looks plainer.
+   */
+  private readonly ground: Phaser.GameObjects.TileSprite | null;
 
   constructor(scene: Phaser.Scene, field: Field, depth: number) {
     this.scene = scene;
@@ -51,6 +79,12 @@ export class FieldRenderer {
       .setDepth(depth + 1)
       .setTint(COLORS.hive)
       .setScale(1.6);
+    this.ground = scene.textures.exists(TEX.meadow)
+      ? scene.add
+          .tileSprite(0, 0, PLAYFIELD_WIDTH, PLAYFIELD_HEIGHT, TEX.meadow)
+          .setOrigin(0, 0)
+          .setDepth(depth - 5)
+      : null;
     this.waspGfx = scene.add.graphics().setDepth(depth + 3);
     this.wallGfx = scene.add.graphics().setDepth(depth + 4);
     this.surroundGfx = scene.add.graphics().setDepth(depth + 60);
@@ -74,7 +108,11 @@ export class FieldRenderer {
     // Four bands around the playfield. Drawn as bands rather than as one big
     // rectangle with a hole because Graphics has no even-odd fill, and a mask
     // would cost a render texture for something this simple.
-    g.fillStyle(0x000000, 0.55);
+    // A *paler* band than the field, not a darker one. On the old near-black
+    // board the surround was dimmed to push it back; on a lit board the same
+    // trick reads as scorched earth, and washing it out is what puts it behind
+    // the playfield instead.
+    g.fillStyle(COLORS.surround, 1);
     if (left < 0) g.fillRect(left, top, -left, bottom - top);
     if (right > PLAYFIELD_WIDTH) {
       g.fillRect(PLAYFIELD_WIDTH, top, right - PLAYFIELD_WIDTH, bottom - top);
@@ -98,6 +136,7 @@ export class FieldRenderer {
       if (!patch.discovered) continue;
       this.drawPatch(g, patch, field.time);
     }
+    this.drawFlowers(field);
     this.drawLabels(field);
     this.drawWalls(field);
 
@@ -117,22 +156,22 @@ export class FieldRenderer {
     if (scale <= 0.01) return;
 
     const tint = patch.alive ? this.patchTint(patch) : COLORS.patchDry;
+    const halo = patch.alive ? this.haloTint(patch) : COLORS.patchDry;
     // Richer flowers are physically bigger, so "worth the distance" is legible
     // from across the board before the number is read.
     const radius = 26 * scale * (0.85 + 0.2 * patch.yieldPerTrip);
 
     // The ring marks where a route has to reach. It is the target the player
     // aims at, so it stays visible rather than being decorative.
-    g.lineStyle(2, tint, patch.alive ? 0.45 : 0.15);
+    g.lineStyle(2, halo, patch.alive ? 0.55 : 0.2);
     g.strokeCircle(patch.x, patch.y, TUNING.patch.reachRadius * scale);
 
-    g.fillStyle(tint, 0.06);
+    g.fillStyle(halo, 0.14);
     g.fillCircle(patch.x, patch.y, radius * 1.7);
 
-    // The inner disc shrinks with the remaining pool, so a patch running dry is
-    // readable from across the field without a number on it.
-    g.fillStyle(tint, 0.85);
-    g.fillCircle(patch.x, patch.y, radius * (0.4 + 0.6 * patch.fullness));
+    // The flower head itself is a sprite, placed in drawFlowers(). Only the
+    // rings and washes are drawn here — they change every frame with bloom and
+    // pool, where the sprite only moves and scales.
 
     if (patch.kind === 'rich' && patch.alive) {
       // A second ring, so "worth the distance" is visible at a glance.
@@ -167,20 +206,83 @@ export class FieldRenderer {
    * confirms the decision, it should not be what triggers it.
    */
   private patchTint(patch: Patch): number {
-    const base = PATCH_TINT[patch.kind] ?? COLORS.patch;
-    if (patch.kind !== 'normal') return base;
+    return (
+      KIND_TINT[patch.kind] ??
+      COLORS.species[patch.species % COLORS.species.length] ??
+      COLORS.patch
+    );
+  }
+
+  /**
+   * The halo colour, which carries what the flower is worth.
+   *
+   * Distance-worth used to be painted onto the flower itself, which meant hue
+   * was spoken for and every flower on the board was a shade of one
+   * green-to-amber ramp. Moving it out here frees the flower to have a species
+   * and keeps the signal: the ring and the outer wash warm toward `COLORS.halo`
+   * as the payout climbs, so a far flower still announces itself from across the
+   * field without the number being read.
+   */
+  private haloTint(patch: Patch): number {
+    if (patch.kind !== 'normal') return this.patchTint(patch);
     const t = Math.min(1, Math.max(0, (patch.distanceMultiplier - 1) / 2));
-    return blend(COLORS.patch, 0xffd166, t);
+    return blend(this.patchTint(patch), COLORS.halo, t);
+  }
+
+  /**
+   * Places the flower heads.
+   *
+   * Scale still carries the same two readings the drawn disc did — bloom-in and
+   * remaining pool — so nothing about how the board is read changed when the
+   * shape became a real flower. A patch that has run dry is greyed rather than
+   * hidden, because the player needs to see that the flower they routed to is
+   * the one that is finished.
+   */
+  private drawFlowers(field: Field): void {
+    while (this.flowers.length < field.patches.length) {
+      const flower = this.scene.add
+        .image(0, 0, FLOWER_TEX[0] ?? TEX.glow)
+        .setOrigin(0.5)
+        .setDepth(this.depth + 1);
+      this.flowers.push(flower);
+    }
+
+    for (let i = 0; i < this.flowers.length; i += 1) {
+      const flower = this.flowers[i];
+      const patch = field.patches[i];
+      if (!flower) continue;
+
+      if (!patch || patch.bloomT <= 0.01 || !patch.discovered) {
+        flower.setVisible(false);
+        continue;
+      }
+
+      const key = FLOWER_TEX[patch.species % FLOWER_TEX.length] ?? FLOWER_TEX[0];
+      if (key && flower.texture.key !== key && this.scene.textures.exists(key)) {
+        flower.setTexture(key);
+      }
+
+      const radius = 26 * patch.bloomT * (0.85 + 0.2 * patch.yieldPerTrip);
+      const head = radius * (0.55 + 0.45 * patch.fullness);
+
+      flower.setVisible(true);
+      flower.setPosition(patch.x, patch.y);
+      // The art is 96px square with a little margin, so a flower of `head`
+      // radius wants a touch more than 2*head of sprite.
+      flower.setDisplaySize(head * 2.4, head * 2.4);
+      flower.setAlpha(patch.alive ? 1 : 0.4);
+      flower.setTint(patch.alive ? 0xffffff : COLORS.patchDry);
+    }
   }
 
   private drawLabels(field: Field): void {
     while (this.labels.length < field.patches.length) {
       const label = this.scene.add
         .text(0, 0, '', {
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+          fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
           fontSize: '19px',
-          color: '#f4f4f8',
-          stroke: '#12100c',
+          color: '#2f2a1c',
+          stroke: '#f7f8ee',
           strokeThickness: 4,
         })
         .setOrigin(0.5)
@@ -270,7 +372,7 @@ export class FieldRenderer {
   ): void {
     // A soft dark halo so the edge does not read as a hard cut-out, and so the
     // boundary a route stops at is visible slightly before it is reached.
-    g.fillStyle(0x000000, 0.4);
+    g.fillStyle(COLORS.wallThorn, 0.3);
     g.fillRoundedRect(x - 3, y - 3, width + 6, height + 6, 8);
 
     g.fillStyle(COLORS.wall, 0.97);
@@ -309,6 +411,9 @@ export class FieldRenderer {
     this.surroundGfx.destroy();
     for (const label of this.labels) label.destroy();
     this.labels = [];
+    for (const flower of this.flowers) flower.destroy();
+    this.flowers = [];
+    this.ground?.destroy();
   }
 }
 

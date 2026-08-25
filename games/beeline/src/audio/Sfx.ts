@@ -5,6 +5,20 @@ export type SfxKey =
 
 const SAMPLE_RATE = 22_050;
 
+/** Phaser cache key for the shipped background loop. */
+export const MUSIC_KEY = 'meadow-music';
+
+/**
+ * The music, in both formats a browser might want.
+ *
+ * Phaser takes the first one the browser reports it can play, so only one is
+ * ever fetched. Opus in WebM is smaller and covers Chrome, Firefox and Edge;
+ * the AAC in MP4 is there because Safari plays neither Opus nor Vorbis
+ * reliably, and Safari is a documented portal rejection cause rather than an
+ * edge case worth shrugging at.
+ */
+export const MUSIC_FILES = ['audio/meadow.webm', 'audio/meadow.m4a'];
+
 /**
  * Sound synthesised at boot instead of shipped as files.
  *
@@ -28,6 +42,7 @@ export class Sfx {
   private readonly scene: Phaser.Scene;
   private available = false;
   private hum: Phaser.Sound.BaseSound | undefined;
+  private music: Phaser.Sound.BaseSound | undefined;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -103,10 +118,38 @@ export class Sfx {
   startHum(): void {
     if (!this.available || this.hum) return;
     try {
-      this.hum = this.scene.sound.add('hum', { loop: true, volume: 0.14 });
+      // Quieter than it was. The hum used to be the only thing under the game
+      // and could carry it; with music behind it, it goes back to being what it
+      // is — the hive, close by — rather than competing for the same space.
+      this.hum = this.scene.sound.add('hum', { loop: true, volume: 0.08 });
       this.hum.play();
     } catch {
       this.hum = undefined;
+    }
+  }
+
+  /**
+   * Starts the background loop, if it arrived.
+   *
+   * Routed through Phaser's sound manager for the same reason the synthesised
+   * buffers are: `@ucgames/core`'s AudioManager mutes that manager around ad
+   * calls, so music ducks for a commercial break with no code here knowing ads
+   * exist. A private Audio element would keep playing over the ad, which is a
+   * portal rejection.
+   *
+   * Mixed well down. Background music that a player notices on the second loop
+   * is background music they will mute, and a muted game sounds broken rather
+   * than quiet.
+   */
+  startMusic(): void {
+    if (this.music) return;
+    if (!this.scene.cache.audio.exists(MUSIC_KEY)) return;
+    try {
+      this.music = this.scene.sound.add(MUSIC_KEY, { loop: true, volume: 0.3 });
+      this.music.play();
+    } catch (error) {
+      console.warn('[beeline] Could not start music.', error);
+      this.music = undefined;
     }
   }
 
@@ -114,6 +157,9 @@ export class Sfx {
     this.hum?.stop();
     this.hum?.destroy();
     this.hum = undefined;
+    this.music?.stop();
+    this.music?.destroy();
+    this.music = undefined;
   }
 }
 
