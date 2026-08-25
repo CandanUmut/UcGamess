@@ -229,6 +229,17 @@ export interface ProvisionTuning {
   base: number;
 }
 
+/**
+ * Level ceiling for an upgrade that is not meant to have one.
+ *
+ * A finite number rather than `Infinity` on purpose: it flows through save
+ * clamping, cost tables and display, and every one of those has an awkward
+ * edge with a non-finite value. At the growth rates here, level 400 costs
+ * more honey than exists, so it is a ceiling in the same sense that the
+ * speed of light is a speed limit.
+ */
+export const UNCAPPED = 400;
+
 export interface UpgradeTuning {
   base: number;
   growth: number;
@@ -259,7 +270,7 @@ export interface Tuning {
     ProvisionTuning
   > & { costGrowth: number; costCapMultiplier: number };
   upgrades: Record<
-    'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore',
+    'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'combWax',
     UpgradeTuning
   >;
   offline: { baseCapHoney: number; baseWindowHours: number; honeyPerHour: number };
@@ -361,9 +372,25 @@ export const TUNING: Tuning = {
     // Sized so one flower under the full swarm's attention runs dry in roughly
     // 25-35 seconds at any point in the progression. Big enough that a day is
     // never lost to an empty field, small enough that standing still is wrong.
-    // Scales with the day because the swarm's throughput does too.
+    //
+    // `poolPerDay` was 70, and that second sentence had stopped being true.
+    // Measured at day ten: a flower held 810 pollen, and against a 3.8x
+    // distance multiplier that is up to 3,078 honey on one flower for a quota
+    // of 2,050. **One flower was more than the whole day.** So the loop this
+    // game is built on — work a flower, watch it run dry, pick the next one and
+    // draw again — simply stopped happening: you drew one route, waited, and
+    // won. The day was long enough to be boring rather than short enough to be
+    // tight, which is exactly the "not challenging, too many resources" report.
+    //
+    // At 55 a day-ten flower holds 675, or roughly 1,485 honey once distance is
+    // paid. Clearing 2,050 therefore means genuinely working three or four
+    // flowers, which is three or four drags and a retarget every time one dies.
+    // The board carries more flowers to compensate, so the income is there —
+    // it just has to be gone and got rather than parked on.
+    // The throughput per flower is untouched — only how long it lasts — so the
+    // 25-35 second figure above still holds for the flower you are on.
     basePool: 180,
-    poolPerDay: 70,
+    poolPerDay: 55,
     radiusPerDay: 95,
     distanceYieldNear: 260,
     distanceYieldFar: 1000,
@@ -398,8 +425,20 @@ export const TUNING: Tuning = {
     // honey, which made the late game look unclearable when the real problem
     // was that the model was not buying anything. A player who under-invests
     // now stalls around day eight, which is the meta-progression working.
-    quotas: [60, 110, 460, 700, 860, 1050, 1300, 1550, 1750, 2050, 2300, 2500],
-    quotaGrowthAfterTable: 1.22,
+    //
+    // The tail climbs slightly steeper than before, and Comb Wax is why.
+    //
+    // Quotas compound and a player's power did not: every line used to max out
+    // around day ten and hand over its full effect at once, after which the
+    // curve simply ran away. An uncapped economic line changes the shape — a
+    // player who keeps buying keeps earning more, so the quota can keep asking
+    // for more, and the run ends when the player stops keeping up rather than
+    // when the shop runs out.
+    //
+    // Days one to seven are untouched. That is where a new player decides
+    // whether to keep going, and none of this problem lives there.
+    quotas: [60, 110, 460, 700, 860, 1050, 1300, 1550, 1800, 2150, 2500, 2900],
+    quotaGrowthAfterTable: 1.18,
   },
 
   // Shifted a day later than the original schedule to make room for brambles on
@@ -473,14 +512,58 @@ export const TUNING: Tuning = {
     earlyRise: { base: 45 },
   },
 
+  /**
+   * Every level is a thing to want on the night screen.
+   *
+   * The ceiling used to be 12,556 honey to buy literally everything, against a
+   * board that supplied 40,000 by day ten. A player was maxed out with money
+   * left over and a night screen full of nothing — the report was "maxed out on
+   * almost everything, lots of resource, not many places to spend it", and the
+   * arithmetic agreed.
+   *
+   * The lines are extended rather than a sixth line invented. More *kinds* of
+   * upgrade would mean more to read on a screen the player is trying to get
+   * through quickly; more levels of a line they already understand costs no
+   * comprehension at all, and the geometric price curve does the rest — the top
+   * levels of swarm size are the honey sink that the late game was missing.
+   *
+   * Growth rates are unchanged. They were tuned against the shape of the run,
+   * and it is the length of the ladder that was wrong, not its steepness.
+   */
   upgrades: {
-    swarmSize: { base: 80, growth: 1.55, levels: 8, perLevel: 6 },
-    beeSpeed: { base: 100, growth: 1.6, levels: 6, perLevel: 16 },
-    // 12s → 22s of grace. Still the flagship: the only upgrade that directly
+    swarmSize: { base: 80, growth: 1.55, levels: 12, perLevel: 6 },
+    beeSpeed: { base: 100, growth: 1.6, levels: 9, perLevel: 16 },
+    // 12s → 26s of grace. Still the flagship: the only upgrade that directly
     // buys relief from the core pressure rather than more throughput.
-    routePersistence: { base: 140, growth: 1.75, levels: 5, perLevel: 2.0 },
-    bloom: { base: 120, growth: 1.8, levels: 4, perLevel: 1 },
-    honeyStore: { base: 70, growth: 1.5, levels: 5, perLevel: 300 },
+    routePersistence: { base: 140, growth: 1.75, levels: 7, perLevel: 2.0 },
+    bloom: { base: 120, growth: 1.8, levels: 6, perLevel: 1 },
+    // Seven, not more: the offline window can only ever earn
+    // `baseWindowHours * honeyPerHour` = 2,400, and a cap above that is a
+    // ceiling nothing reaches. Level seven puts it at 2,300, just under. There
+    // is a test that fails the moment this line raises a ceiling that does not
+    // bind, which is what caught an eighth level being added here.
+    honeyStore: { base: 70, growth: 1.5, levels: 7, perLevel: 300 },
+    /**
+     * The line that never runs out.
+     *
+     * Every other upgrade has to stop somewhere, and not for want of
+     * generosity: unbounded bee speed breaks a fixed-timestep simulation,
+     * unbounded route hold deletes the decay the whole game is built on, and
+     * unbounded swarm size is a GameObject per bee. Those are real ceilings.
+     *
+     * So the ladder that has no ceiling is an economic one. Comb Wax pays a
+     * flat percentage more honey per delivery, which is safe to grow forever
+     * — it scales income, and the quota curve compounds too, so the two can
+     * chase each other indefinitely without anything in the simulation
+     * having to move faster or hold more.
+     *
+     * It is what makes the night screen never say "nothing to buy". A player
+     * who has capped everything else still has somewhere to put a day's
+     * honey, and still watches a number go up for putting it there. The
+     * growth rate is gentler than the rest (1.28) precisely so it stays a
+     * purchase rather than becoming a monument.
+     */
+    combWax: { base: 90, growth: 1.28, levels: UNCAPPED, perLevel: 0.04 },
   },
 
   /**

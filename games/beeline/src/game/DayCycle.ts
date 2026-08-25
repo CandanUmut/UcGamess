@@ -46,7 +46,20 @@ export function patchesForDay(day: number): number {
   if (day <= 1) return 2;
   if (day <= 3) return 3;
   if (day <= 6) return 4;
-  return 5;
+  if (day <= 9) return 5;
+  // More flowers, each holding less.
+  //
+  // The two go together. Shrinking the pool is what forces a player to move on
+  // when a flower runs dry — the loop the game is built on — but on its own it
+  // just makes the day poorer, because the swarm spends it hunting. Adding
+  // flowers puts the next target within reach of the one that just died, so
+  // the retargeting is a decision rather than a walk.
+  //
+  // Five route slots against seven flowers is also the first point in the run
+  // where the board offers more than the player can hold at once, which is
+  // where choosing *which* flowers starts to matter.
+  if (day <= 12) return 6;
+  return 7;
 }
 
 /**

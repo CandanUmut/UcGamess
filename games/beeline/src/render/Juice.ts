@@ -47,10 +47,13 @@ export class Juice {
    */
   private readonly sparkleTex: string;
   private readonly glintTex: string;
+  /** A real pollen grain for the pickup, falling back to the soft glow. */
+  private readonly pollenTex: string;
 
   constructor(scene: Phaser.Scene, depth: number) {
     this.sparkleTex = scene.textures.exists(TEX.sparkle) ? TEX.sparkle : TEX.glow;
     this.glintTex = scene.textures.exists(TEX.glint) ? TEX.glint : TEX.glow;
+    this.pollenTex = scene.textures.exists(TEX.pollen) ? TEX.pollen : TEX.glow;
 
     for (let i = 0; i < MAX_POPS; i += 1) {
       const sprite = scene.add.image(0, 0, TEX.glow).setDepth(depth);
@@ -80,8 +83,11 @@ export class Juice {
         (Math.random() - 0.5) * 60,
         -50 - Math.random() * 40,
         0.5,
-        COLORS.beeLaden,
+        // Untinted: the pollen grain has its own colour, and multiplying an
+        // amber tint over an already-amber grain only muddies it.
+        0xffffff,
         0.3,
+        this.pollenTex,
       );
     }
   }

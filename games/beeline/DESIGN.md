@@ -1484,6 +1484,88 @@ been measured on a real phone at a full swarm**, and that is the open risk here.
 
 ---
 
+## 27. Day ten had nothing left to want
+
+The report from a real run: _"Day 10 I am maxed out on almost everything and the
+game is not challenging, lots of resource, not many places to spend the money
+on"_, plus _"flowers are usually too close"_ and _"lots of resource on each
+flower"_.
+
+All of it checked out, and the arithmetic was blunt about it.
+
+| Measured at day 10          | Before | After    |
+| --------------------------- | ------ | -------- |
+| Board supply ÷ quota        | 4.3x   | ~2.4x    |
+| Honey on one flower         | ~1,780 | ~1,090   |
+| Cost to buy everything      | 12,556 | uncapped |
+| Cumulative supply by day 10 | 40,231 | ~24,000  |
+
+**One flower was nearly the whole day.** A day-ten flower held 810 pollen, and
+against a 3.8x distance multiplier that is up to 3,078 honey for a quota of
+2,050 — so the loop this game is built on, work a flower until it runs dry and
+then pick the next one, simply stopped happening. You drew one route and waited.
+Pools now grow at 45 a day rather than 70, and the board carries more flowers to
+compensate, so the income is still there but has to be gone and got.
+
+**The far half of the board was decoration.** Flowers were placed in a band of
+maze-steps whose ceiling sat around six on a board whose far corner is eleven,
+so everything was drawn from the near half. The first fix — pushing the _floor_
+outward — was wrong, and a play simulation said so: it cost enough travel time
+to halve the mid-game clear rate, because every flower got further away instead
+of the choice getting wider. Raising the ceiling keeps a near flower on offer
+and puts a genuinely distant one beside it.
+
+### Upgrades that never finish
+
+The deeper problem was the shop. Everything could be bought for 12,556 honey
+against a board that supplied 40,000 by day ten, so a player was maxed out with
+money spare and a night screen full of nothing.
+
+Longer ladders alone would only have moved the wall. What the run needed was a
+line with no end, and the constraint is that most of these upgrades genuinely
+cannot have one: unbounded bee speed breaks a fixed-timestep simulation,
+unbounded route hold deletes the decay the game is built on, and unbounded swarm
+size is a GameObject per bee. Those ceilings are real.
+
+So the endless line is an economic one. **Comb Wax** pays a flat percentage more
+honey per delivery — safe to grow forever, because it scales income and the
+quota curve compounds too, so the two chase each other without anything in the
+simulation moving faster or holding more. It is why the night screen can never
+say "nothing to buy", and why a player who has capped the physical lines still
+watches a number climb for spending a day's honey.
+
+It also fixed the difficulty curve rather than flattening it. Power that keeps
+growing can be asked for more, so the quota tail is _steeper_ than before, and a
+run now ends when the player stops keeping up instead of when the shop runs out.
+Simulated: comfortable through day ten, tightening at eleven to thirteen, over
+around fifteen — with nothing but Honey Store maxed by then.
+
+> **Simulated, not playtested.** The numbers above come from a scripted player
+> run against the real simulation, and that script is measurably weaker than the
+> human who filed the report — it cleared the old mid-game only half the time
+> while the human was coasting. It is a good yardstick for _change_ and a poor
+> one for absolute difficulty. The next real run is what settles this.
+
+### The sound that plays five hundred times
+
+Collection is the most-played sound in the game and was built like a one-shot
+reward: a ping rising from 880Hz to 1300Hz, hard attack, fast decay. Three
+things made that tiring — the band (1-4kHz is where ear fatigue sets in), the
+4ms attack (a click, and a click repeated is a rattle), and a "shimmer" partial
+at 2.02x the fundamental, a deliberately detuned octave whose beating reads as
+_urgency_.
+
+It is now a struck wooden note at 440Hz with clean octave and twelfth partials
+that fade faster than the fundamental, an 18ms attack, and no pitch rise at all
+— a rising blip insists on being noticed, and this one has to let the ear move
+on. Pitches are drawn from a **major pentatonic** rather than detuned at random:
+no two notes in that set are a semitone or tritone apart, so any order the swarm
+happens to collect in is consonant. And it is rate-limited to about eleven a
+second, because one-per-frame at 60fps turns any note, however pleasant, into a
+drone.
+
+---
+
 ## 25. Success criteria
 
 Not submission-ready until all of these hold:
