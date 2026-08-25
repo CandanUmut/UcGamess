@@ -105,6 +105,15 @@ export interface RouteTuning {
   strengthKeptOnRedraw: number;
   /** Seconds at full length before the far end starts retreating. */
   holdSeconds: number;
+  /**
+   * How long a route stays "pinched" after the wind presses it into a wall.
+   *
+   * Longer than a fixed step so the hazard is something a player can see and
+   * react to rather than a coin flip resolved between frames.
+   */
+  pinchSeconds: number;
+  /** How near the pinch a laden bee has to pass to lose its load. */
+  pinchRadius: number;
   /** Retreat speed in px/s once decay begins. */
   decaySpeed: number;
   /** Below this live length the route dies. */
@@ -185,11 +194,40 @@ export interface WindTuning {
 
 export interface WaspTuning {
   startDay: number;
-  secondWaspDay: number;
   speed: number;
   safeRadius: number;
   interceptRadius: number;
   scatterSeconds: number;
+  /** Bee hits to bring one down. */
+  health: number;
+  /** Honey a wasp drains per second once it reaches the hive. */
+  stealPerSecond: number;
+  /** Seconds between a raiding wasp driving off one more bee. */
+  beeLossInterval: number;
+  /** How long a wasp lingers at the hive before leaving on its own. */
+  raidSeconds: number;
+  /** Damage one arriving bee does. */
+  beeDamage: number;
+  /** How close a route's tip must be for its bees to reach the wasp. */
+  reachRadius: number;
+  /** How close a wasp must get to the hive to start robbing it. */
+  arriveRadius: number;
+  /** Seconds between blows from one Guard Bee. */
+  guardInterval: number;
+  /** How long a bee will chase a wasp off the road before giving up. */
+  huntSeconds: number;
+  /** How near a drag has to end for it to count as aimed at a wasp. */
+  aimRadius: number;
+}
+
+export interface RaidTuning {
+  minGapSeconds: number;
+  maxGapSeconds: number;
+  firstRaidEarliest: number;
+  warningSeconds: number;
+  baseSize: number;
+  sizeEveryDays: number;
+  maxSize: number;
 }
 
 export interface MazeTuning {
@@ -224,9 +262,20 @@ export interface MazeTuning {
   startDay: number;
 }
 
-export interface ProvisionTuning {
-  /** Price at day one. Grows by `costGrowth` per day. */
-  base: number;
+export interface ItemShopTuning {
+  /** Cards on the table each night. */
+  offerCount: number;
+  /** Price at day one, by rarity. Grows by `costGrowth` per day. */
+  cost: { common: number; rare: number; epic: number };
+  costGrowth: number;
+  costCapMultiplier: number;
+  rerollBase: number;
+  /** Multiplier on the reroll price for each reroll already taken tonight. */
+  rerollGrowth: number;
+  epicChanceBase: number;
+  epicChancePerDay: number;
+  epicChanceMax: number;
+  rareChance: number;
 }
 
 /**
@@ -255,20 +304,18 @@ export interface Tuning {
   day: DayTuning;
   wind: WindTuning;
   wasp: WaspTuning;
+  raid: RaidTuning;
   fog: {
     cellSize: number;
     /** Reveal at the edge of a sight radius, rising to 1 at its centre. */
     edgeReveal: number;
     /** A flower or thicket is found once its cell is lit at least this much. */
     discoverAt: number;
-    /** Radius the Scout Bees provision lights around the hive at dawn. */
+    /** Radius the Scout Bees item lights around the hive at dawn. */
     scoutRadius: number;
   };
   maze: MazeTuning;
-  provisions: Record<
-    'scoutBees' | 'pruningShears' | 'smokePot' | 'waxedTrails' | 'earlyRise',
-    ProvisionTuning
-  > & { costGrowth: number; costCapMultiplier: number };
+  items: ItemShopTuning;
   upgrades: Record<
     'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'combWax',
     UpgradeTuning
@@ -354,6 +401,13 @@ export const TUNING: Tuning = {
     strengthSpeedBonus: 0.35,
     strengthKeptOnRedraw: 0.5,
     holdSeconds: 12.0,
+    // What finally gives the wind teeth. A route the player drew is always
+    // clear of the walls; only the wind can press a live one into a hedge, and
+    // while it is pressed the bees crossing that point lose what they carry.
+    // So the punishment lands on neglect, never on an imprecise thumb — which
+    // is the distinction the whole maze design rests on.
+    pinchSeconds: 0.8,
+    pinchRadius: 30,
     decaySpeed: 26,
     minLength: 40,
     refreshSnapRadius: 160,
@@ -452,13 +506,76 @@ export const TUNING: Tuning = {
     rotationSpeed: 0.12,
   },
 
+  /**
+   * Wasps, and the raids they come in.
+   *
+   * They used to drift about scattering the odd bee, which the playtest called
+   * out as doing "almost nothing". They now come for the hive itself.
+   *
+   * Timing is deliberately **random inside a range** rather than on a fixed
+   * interval. A metronome is something you learn once and then stop looking at;
+   * an unpredictable arrival keeps you watching the board, which is the whole
+   * point of putting an enemy on it. The warning is what keeps that fair —
+   * surprise about *when*, never about *whether you had a chance*.
+   */
   wasp: {
     startDay: 7,
-    secondWaspDay: 11,
     speed: 95,
     safeRadius: 160,
     interceptRadius: 34,
     scatterSeconds: 1.2,
+    /** Bee hits to bring one down. */
+    health: 5,
+    /** Honey a wasp drains per second once it reaches the hive. */
+    stealPerSecond: 14,
+    // Sized against a whole raid rather than per second. An ignored raid costs
+    // roughly three bees and 140 honey — noticeable against a day-ten quota,
+    // survivable once, and genuinely bad three times. Defending early is what
+    // makes the difference, which is the decision the system exists for.
+    /** Seconds between a raiding wasp driving off one more bee. */
+    beeLossInterval: 2.8,
+    /** How long a wasp lingers at the hive before leaving on its own. */
+    raidSeconds: 10,
+    /** Damage one arriving bee does. */
+    beeDamage: 1,
+    /** How close a route's tip must be for its bees to reach the wasp. */
+    reachRadius: 74,
+    /** How close a wasp must get to the hive to start robbing it. */
+    arriveRadius: 70,
+    // Two guards bring a wasp down in about two and a half seconds, so a
+    // stacked defence genuinely holds the door while a single one only buys
+    // time. That gap is what makes the second copy worth buying.
+    guardInterval: 1.0,
+    // Bounded, and shorter than it sounds. Bees are much faster than wasps, so
+    // four seconds is a comfortable margin for a chase that started next to its
+    // target — and a hard stop on one that did not, so a bad drag costs a trip
+    // rather than removing a bee from the day.
+    huntSeconds: 4,
+    // Wider than the flower assist, because a wasp is a moving target. A drag
+    // aimed squarely at one still ends well behind it: the wasp covers most of
+    // a corridor in the second the gesture takes. At the flower radius the
+    // defence gesture failed silently against exactly the raiders that most
+    // needed answering — the quick ones.
+    aimRadius: 200,
+  },
+
+  raid: {
+    /** Gap between raids, sampled uniformly. Never a metronome. */
+    minGapSeconds: 16,
+    maxGapSeconds: 38,
+    /** Quiet opening so the first raid never lands before the day has started. */
+    firstRaidEarliest: 18,
+    /**
+     * Seconds of warning before wasps appear.
+     *
+     * The whole fairness budget. Long enough to break off what you were doing
+     * and draw a defence, short enough that the surprise survives.
+     */
+    warningSeconds: 2.6,
+    /** Wasps per raid: base, plus one more every `sizeEveryDays`. */
+    baseSize: 1,
+    sizeEveryDays: 3,
+    maxSize: 4,
   },
 
   /**
@@ -502,14 +619,31 @@ export const TUNING: Tuning = {
    * free background noise by day fifteen. The cap stops the curve outrunning
    * the quota curve late.
    */
-  provisions: {
+  /**
+   * The item shop.
+   *
+   * Prices are set against a day's take rather than against each other: an
+   * early common is roughly a third of a good day, an epic is most of one. That
+   * is what makes a night a decision instead of a shopping list — you cannot
+   * have the row, only a piece of it.
+   *
+   * The reroll is priced to be used once and thought about twice. Doubling each
+   * time keeps the escape hatch open without letting a patient player fish the
+   * pool for the one item they wanted.
+   */
+  items: {
+    offerCount: 4,
+    cost: { common: 110, rare: 240, epic: 480 },
     costGrowth: 1.15,
     costCapMultiplier: 9,
-    scoutBees: { base: 55 },
-    pruningShears: { base: 65 },
-    smokePot: { base: 70 },
-    waxedTrails: { base: 80 },
-    earlyRise: { base: 45 },
+    rerollBase: 60,
+    rerollGrowth: 1.9,
+    // Epics stay a rare thrill early and become a real possibility deep in a
+    // run, which is what keeps a long run producing things you have not seen.
+    epicChanceBase: 0.04,
+    epicChancePerDay: 0.012,
+    epicChanceMax: 0.2,
+    rareChance: 0.3,
   },
 
   /**

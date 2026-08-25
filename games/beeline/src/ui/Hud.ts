@@ -29,6 +29,8 @@ export class Hud {
   private readonly dayText: Phaser.GameObjects.Text;
   private readonly timerText: Phaser.GameObjects.Text;
   private readonly banner: Phaser.GameObjects.Text;
+  private readonly alertText: Phaser.GameObjects.Text;
+  private alertPhase = 0;
 
   /**
    * Wind readout.
@@ -121,6 +123,14 @@ export class Hud {
       .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: '#1f6f9c' })
       .setOrigin(0, 0.5);
 
+    // Sits under the honey bar rather than in the banner slot. The banner is a
+    // once-a-day announcement that fades; a raid is a state the player is in,
+    // and it has to still be on screen while they deal with it.
+    this.alertText = scene.add
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '20px', color: '#e0523c' })
+      .setOrigin(0.5, 0)
+      .setAlpha(0);
+
     this.root.add([
       this.dayText,
       this.timerText,
@@ -133,6 +143,7 @@ export class Hud {
       this.windLabel,
       this.swarmText,
       this.unfoundText,
+      this.alertText,
     ]);
   }
 
@@ -189,13 +200,19 @@ export class Hud {
   }
 
   /** Bees carrying versus bees opening routes — what a draw just cost. */
-  setSwarm(foraging: number, building: number): void {
+  setSwarm(foraging: number, building: number, lost = 0): void {
     this.swarmText.setText(
-      building > 0
-        ? `${foraging} foraging · ${building} building`
-        : `${foraging} foraging`,
+      [
+        `${foraging} foraging`,
+        building > 0 ? `${building} building` : '',
+        // Shown only once a raid has actually taken some. A permanent "0 lost"
+        // would be a scoreboard for something that has not happened.
+        lost > 0 ? `${lost} lost` : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
     );
-    this.swarmText.setColor(building > 0 ? '#b9761c' : COLORS.dim);
+    this.swarmText.setColor(lost > 0 ? '#e0523c' : building > 0 ? '#b9761c' : COLORS.dim);
   }
 
   private windAnchorX = 0;
@@ -214,6 +231,7 @@ export class Hud {
     this.quotaTick.setPosition(barX + this.barWidth, top);
     this.honeyText.setPosition(safe.centerX, top + 16);
     this.banner.setPosition(safe.centerX, safe.y + 140);
+    this.alertText.setPosition(safe.centerX, top + 42);
 
     this.swarmText.setPosition(safe.x + 24, top + 34);
     this.unfoundText.setPosition(safe.x + 24, top + 56);
@@ -258,6 +276,24 @@ export class Hud {
       yoyo: true,
       ease: 'Quad.easeOut',
     });
+  }
+
+  /**
+   * The live raid line: null clears it, a string keeps it up and pulsing.
+   *
+   * Driven every frame rather than tweened, because the thing it describes can
+   * end at any moment and a tween that outlives its cause is how a HUD starts
+   * lying to the player.
+   */
+  setAlert(text: string | null, deltaSeconds = 0): void {
+    if (!text) {
+      this.alertText.setAlpha(0);
+      this.alertPhase = 0;
+      return;
+    }
+    this.alertPhase += deltaSeconds * 6;
+    this.alertText.setText(text);
+    this.alertText.setAlpha(0.72 + 0.28 * Math.abs(Math.sin(this.alertPhase)));
   }
 
   /** One-line announcement for a day that introduces something new. */

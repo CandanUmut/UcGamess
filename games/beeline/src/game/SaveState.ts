@@ -1,6 +1,6 @@
 import type { SaveManager } from '@ucgames/core';
 import { emptyLevels, maxLevel, UPGRADE_ORDER, type UpgradeLevels } from './Upgrades.ts';
-import { isProvisionId, type ProvisionId } from './Provisions.ts';
+import { isItemId, type ItemId } from './Items.ts';
 
 export const SAVE_KEY = 'beeline.save';
 export const SAVE_KEYS = [SAVE_KEY] as const;
@@ -20,11 +20,16 @@ export interface BeelineSave {
   /** Epoch ms of the last day completed, for offline accrual. */
   lastPlayedAt: number;
   /**
-   * The one-use provision bought last night and not yet spent.
+   * Everything this run has bought. Stacks are repeats in the list.
    *
-   * A single slot rather than an inventory, deliberately. See Provisions.ts.
+   * Cleared when a run ends, which is what makes an item a run and an upgrade a
+   * career. See Items.ts.
    */
-  provision: ProvisionId | null;
+  items: ItemId[];
+  /** Tonight's four offers, so a reload does not reroll them for free. */
+  offer: ItemId[];
+  /** Rerolls taken tonight, which is what the next one is priced from. */
+  rerolls: number;
   /** Whether the first-run tutorial has been played through. */
   tutorialDone: boolean;
 }
@@ -38,7 +43,9 @@ export function newSave(): BeelineSave {
     bestDayHoney: 0,
     bestRunDay: 0,
     lastPlayedAt: Date.now(),
-    provision: null,
+    items: [],
+    offer: [],
+    rerolls: 0,
     tutorialDone: false,
   };
 }
@@ -80,11 +87,20 @@ export function coerceSave(raw: unknown): BeelineSave {
     bestDayHoney: clampNumber(data.bestDayHoney, 0, Number.MAX_SAFE_INTEGER, 0),
     bestRunDay: clampInt(data.bestRunDay, 0, 9999),
     lastPlayedAt: clampNumber(data.lastPlayedAt, 0, Date.now(), Date.now()),
-    // An unknown id — a provision renamed or removed between versions — becomes
-    // "none" rather than crashing the lookup at dawn.
-    provision: isProvisionId(data.provision) ? data.provision : null,
+    // Unknown ids — items renamed or removed between versions — are dropped
+    // rather than crashing the lookup at dawn.
+    items: coerceItems(data.items),
+    offer: coerceItems(data.offer),
+    rerolls: clampInt(data.rerolls, 0, 99),
     tutorialDone: data.tutorialDone === true,
   };
+}
+
+function coerceItems(value: unknown): ItemId[] {
+  if (!Array.isArray(value)) return [];
+  // Capped as well as filtered. A corrupt or hand-edited save with a hundred
+  // thousand entries would otherwise be a frame-rate bug at every dawn.
+  return value.filter(isItemId).slice(0, 200);
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {

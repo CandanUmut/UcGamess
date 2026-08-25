@@ -1,5 +1,6 @@
 import { TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
+import type { Wasp } from '../sim/Wasp.ts';
 
 export type IntentKind = 'extend' | 'fresh';
 
@@ -77,23 +78,45 @@ export function resolveDragStart(field: Field, x: number, y: number): DragIntent
 export function applyAimAssist(
   field: Field,
   coords: readonly number[],
-): { coords: number[]; connected: boolean } {
+): { coords: number[]; connected: boolean; wasp: Wasp | null } {
   const out = [...coords];
   const endX = out[out.length - 2];
   const endY = out[out.length - 1];
-  if (endX === undefined || endY === undefined) return { coords: out, connected: false };
+  if (endX === undefined || endY === undefined) {
+    return { coords: out, connected: false, wasp: null };
+  }
 
   // Only ever snaps to a flower the player has found. Assist exists to make a
   // drag mean what it looks like it means; pulling a line onto something
   // invisible would hand back the information the dark was there to take away.
   const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
-  if (!patch) return { coords: out, connected: false };
+
+  // A wasp outranks a flower at the same distance, and is caught from further
+  // out, because it is the only target on the board that moves. A drag aimed
+  // squarely at a raider still ends well behind it — the wasp crosses most of a
+  // corridor in the second the gesture takes — so matching the flower radius
+  // made the defence fail silently against precisely the quick raiders that
+  // most needed answering.
+  //
+  // "At the same distance" is literal: the wider catch never steals a drag that
+  // landed nearer a flower, so a route to a marigold with a wasp drifting two
+  // corridors away is still a route to the marigold.
+  const wasp = field.nearestWaspTo(endX, endY, TUNING.wasp.aimRadius);
+  const toWasp = wasp ? Math.hypot(wasp.x - endX, wasp.y - endY) : Infinity;
+  const toPatch = patch ? Math.hypot(patch.x - endX, patch.y - endY) : Infinity;
+
+  if (wasp && toWasp <= toPatch && !field.pathBlocked(endX, endY, wasp.x, wasp.y)) {
+    if (toWasp > TUNING.wasp.reachRadius * 0.5) out.push(wasp.x, wasp.y);
+    return { coords: out, connected: true, wasp };
+  }
+
+  if (!patch) return { coords: out, connected: false, wasp: null };
 
   // Never snap through thorns. Assist exists to make a drag mean what it looks
   // like it means; hopping the line over a thicket the player can plainly see
   // would do the opposite — and the route would only be cut back there anyway.
   if (field.pathBlocked(endX, endY, patch.x, patch.y)) {
-    return { coords: out, connected: false };
+    return { coords: out, connected: false, wasp: null };
   }
 
   // Only extend to the flower's centre if we are not already inside it, so a
@@ -101,7 +124,7 @@ export function applyAimAssist(
   if (Math.hypot(patch.x - endX, patch.y - endY) > TUNING.patch.reachRadius * 0.5) {
     out.push(patch.x, patch.y);
   }
-  return { coords: out, connected: true };
+  return { coords: out, connected: true, wasp: null };
 }
 
 /** Applies a completed drag to the field. */
@@ -143,7 +166,8 @@ export function commitDrag(
   const endY = coords[coords.length - 1] ?? 0;
   const connected =
     assisted.connected &&
-    field.nearestPatchTo(endX, endY, TUNING.patch.reachRadius) !== null;
+    (field.nearestPatchTo(endX, endY, TUNING.patch.reachRadius) !== null ||
+      field.nearestWaspTo(endX, endY, TUNING.wasp.reachRadius) !== null);
 
   if (intent.kind === 'extend') {
     const route = field.routeById(intent.routeId);
@@ -151,6 +175,7 @@ export function commitDrag(
       const before = route.poly.length;
       route.extendWith(coords, field.routeHoldSeconds);
       field.retarget(route);
+      field.aimRouteAt(route, assisted.wasp);
       return {
         kind: 'extend',
         drawnLength,
@@ -167,11 +192,14 @@ export function commitDrag(
   const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
 
   // Drawing again at a flower that already has a route tops that route up
-  // rather than spending one of the five slots on a duplicate.
+  // rather than spending one of the five slots on a duplicate. Wasps are
+  // deliberately excluded: piling a second line onto a raider is a legitimate
+  // thing to want, and it is how a big raid is actually beaten.
   const existing = patch ? field.routeTargeting(patch) : null;
   if (existing) {
     existing.replaceWith(coords, field.routeHoldSeconds);
     field.retarget(existing);
+    field.aimRouteAt(existing, assisted.wasp);
     return {
       kind: 'fresh',
       drawnLength,
@@ -183,6 +211,7 @@ export function commitDrag(
   }
 
   const route = field.createRoute(coords);
+  if (route) field.aimRouteAt(route, assisted.wasp);
   return {
     kind: route ? 'fresh' : 'rejected',
     drawnLength,

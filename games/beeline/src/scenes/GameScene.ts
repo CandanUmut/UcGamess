@@ -27,7 +27,7 @@ import {
   evaluateDay,
 } from '../game/DayCycle.ts';
 import { deriveStats } from '../game/Upgrades.ts';
-import { modifiersFor, PROVISIONS } from '../game/Provisions.ts';
+import { modifiersFor } from '../game/Items.ts';
 import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import { computeOffline, formatAway } from '../game/Offline.ts';
@@ -249,16 +249,10 @@ export class GameScene extends BaseGameplayScene {
     const features = featuresForDay(this.day);
     const patchCount = patchesForDay(this.day) + this.save.levels.bloom;
 
-    // A provision is spent the moment the day it was bought for begins, and
-    // persisted immediately. Consuming it here rather than when the night
-    // screen closes means a player who reloads mid-transition gets the item
-    // they paid for exactly once.
-    const provision = this.save.provision;
-    const modifiers = modifiersFor(provision);
-    if (provision) {
-      this.save.provision = null;
-      this.persist();
-    }
+    // The run's items are read fresh every dawn and never consumed. That is
+    // the whole difference from the provisions they replace: a purchase is
+    // something the hive now *is*, for as long as the run lasts.
+    const modifiers = modifiersFor(this.save.items);
 
     this.field.setStats(deriveStats(this.save.levels));
     this.field.beginDay(this.day, features, patchCount, 1, modifiers);
@@ -270,14 +264,8 @@ export class GameScene extends BaseGameplayScene {
     this.hud.setVisible(true);
     this.hud.update(this.day, 0, dayQuota(this.day), this.secondsLeft);
 
-    // The day's own introduction outranks the provision note: a new element is
-    // the more important thing to read, and two banners at once is neither.
     const intro = dayIntroduction(this.day);
     if (intro) this.hud.showBanner(intro);
-    else if (provision)
-      this.hud.showBanner(
-        `${PROVISIONS[provision].name} — ${PROVISIONS[provision].blurb}`,
-      );
 
     this.idleSeconds = 0;
     this.sfx.startHum();
@@ -315,7 +303,17 @@ export class GameScene extends BaseGameplayScene {
       this.save.day = this.day + 1;
     } else {
       this.save.day = 1;
+      // The run's items go with the run. Keeping them would collapse the two
+      // tracks into one and take the roguelite shape out of the shop: what
+      // makes a night interesting is that this hive is not last hive.
+      this.save.items = [];
     }
+
+    // A fresh table every night, and the reroll price starts over. Stored
+    // rather than rolled in the night scene so a reload does not hand the
+    // player a free reroll.
+    this.save.offer = [];
+    this.save.rerolls = 0;
     this.persist();
 
     this.hud.setVisible(false);
@@ -651,9 +649,23 @@ export class GameScene extends BaseGameplayScene {
       this.tutorialText.setText(this.tutorial.current?.text ?? '');
 
       const building = this.field.countBuilders();
-      this.hud.setSwarm(this.field.bees.length - building, building);
+      this.hud.setSwarm(this.field.bees.length - building, building, this.field.beesLost);
       this.hud.setUnfound(
         this.field.patches.filter((p) => p.alive && !p.discovered).length,
+      );
+
+      // Three states, in the order that matters most: being robbed right now
+      // beats an incoming raid, which beats wasps still crossing the field.
+      const crossing = this.field.wasps.filter((w) => w.state === 'approaching').length;
+      this.hud.setAlert(
+        this.field.underAttack
+          ? 'The hive is being robbed!'
+          : this.field.raidWarningAt
+            ? 'Wasps incoming'
+            : crossing > 0
+              ? `${crossing} wasp${crossing > 1 ? 's' : ''} closing in`
+              : null,
+        seconds,
       );
     }
   }
@@ -697,6 +709,60 @@ export class GameScene extends BaseGameplayScene {
     // one-off in the game: a burst, a rising chime, and the honey it holds
     // floating up off it.
     for (const found of events.found) this.showDiscovery(found.x, found.y, found.honey);
+
+    if (events.raidWarning) {
+      this.sfx.playVaried('wasp', 0.34, 90);
+      this.hud.showBanner(
+        events.raidWarning.size > 1
+          ? `${events.raidWarning.size} wasps incoming — draw a line at them`
+          : 'A wasp is coming — draw a line at it',
+      );
+    }
+
+    for (const hit of events.struck) this.juice.scatter(hit.x, hit.y);
+    if (events.struck.length > 0) this.sfx.playVaried('draw', 0.22, 400);
+
+    for (const down of events.waspDown) {
+      for (let i = 0; i < 8; i += 1) this.juice.scatter(down.x, down.y);
+      this.sfx.play('upgrade', 0.3);
+    }
+
+    // Honey draining out of the hive is the one loss the player must never
+    // have to infer from a number going down.
+    if (events.stolen > 0) {
+      this.juice.scatter(this.field.hiveX, this.field.hiveY);
+    }
+
+    for (const lost of events.beesLost) {
+      this.showLoss(lost.x, lost.y, 'bee lost');
+      this.sfx.playVaried('wasp', 0.24);
+    }
+
+    for (const lost of events.pollenLost) this.showLoss(lost.x, lost.y, 'pollen!');
+  }
+
+  /** A small red word where something was taken from the player. */
+  private showLoss(x: number, y: number, text: string): void {
+    this.juice.scatter(x, y);
+    const label = this.add
+      .text(x, y - 26, text, {
+        fontFamily: FONT,
+        fontSize: '17px',
+        color: '#ff8a70',
+        stroke: '#12100c',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(DEPTH.juice);
+
+    this.tweens.add({
+      targets: label,
+      y: label.y - 26,
+      alpha: 0,
+      duration: 780,
+      ease: 'Quad.easeOut',
+      onComplete: () => label.destroy(),
+    });
   }
 
   private drawPreview(): void {
@@ -773,6 +839,11 @@ export class GameScene extends BaseGameplayScene {
           kind: p.kind,
         })),
       builders: () => this.field.countBuilders(),
+      beeStates: () => {
+        const out: Record<string, number> = {};
+        for (const b of this.field.bees) out[b.state] = (out[b.state] ?? 0) + 1;
+        return out;
+      },
       maze: () => ({
         cols: this.field.maze.cols,
         rows: this.field.maze.rows,
@@ -806,6 +877,7 @@ export class GameScene extends BaseGameplayScene {
           tipY: Math.round(r.tipY),
           strength: Number(r.strength.toFixed(2)),
           connected: r.reachesTarget(),
+          wasp: r.targetWasp ? 1 : 0,
         })),
       day: () => ({
         day: this.day,
@@ -815,6 +887,16 @@ export class GameScene extends BaseGameplayScene {
         phase: this.phase,
       }),
       save: () => this.save,
+      // Lands a raid on demand. The clock is deliberately random, so without
+      // this a harness check of the raid would be a check of the dice.
+      raidNow: () => this.field.spawnRaidNow().length,
+      wasps: () =>
+        this.field.wasps.map((w) => ({
+          x: Math.round(w.x),
+          y: Math.round(w.y),
+          state: w.state,
+          health: w.health,
+        })),
       endDayNow: () => {
         this.secondsLeft = 0.01;
       },

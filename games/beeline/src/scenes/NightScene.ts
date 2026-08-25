@@ -16,11 +16,14 @@ import {
   type UpgradeId,
 } from '../game/Upgrades.ts';
 import {
-  PROVISIONS,
-  provisionCost,
-  provisionsFor,
-  type ProvisionId,
-} from '../game/Provisions.ts';
+  ITEMS,
+  inventoryLines,
+  itemCost,
+  rerollCost,
+  rollOffer,
+  type ItemId,
+  type Rarity,
+} from '../game/Items.ts';
 import type { BeelineSave } from '../game/SaveState.ts';
 import { Button } from '../ui/Button.ts';
 import type { Sfx } from '../audio/Sfx.ts';
@@ -30,6 +33,16 @@ import type { Sfx } from '../audio/Sfx.ts';
 // deliberately small, so a glyph it lacks — the play triangle, the arrow — is
 // drawn by the next family along.
 const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+/**
+ * Rarity read as colour, which is the only way four cards can be compared at a
+ * glance on a screen the player is trying to get through quickly.
+ */
+const RARITY_TINT: Record<Rarity, number> = {
+  common: 0x9bb4c9,
+  rare: 0xc084fc,
+  epic: 0xffb443,
+};
 
 export interface NightData {
   result: DayResult;
@@ -58,10 +71,12 @@ export interface NightData {
  */
 export class NightScene extends BaseScene {
   private nightData!: NightData;
-  /** Kept separate from the provision shelf so refreshing one cannot index into the other. */
+  /** Kept separate from the shop row so refreshing one cannot index into the other. */
   private upgradeButtons: Button[] = [];
-  private provisionButtons: Button[] = [];
-  private offered: ProvisionId[] = [];
+  private itemButtons: Button[] = [];
+  private rerollButton: Button | null = null;
+  private inventoryText!: Phaser.GameObjects.Text;
+  private offered: ItemId[] = [];
   private honeyText!: Phaser.GameObjects.Text;
   private busy = false;
   private rewardTaken = false;
@@ -75,7 +90,8 @@ export class NightScene extends BaseScene {
     this.busy = false;
     this.rewardTaken = false;
     this.upgradeButtons = [];
-    this.provisionButtons = [];
+    this.itemButtons = [];
+    this.rerollButton = null;
     this.offered = [];
   }
 
@@ -160,7 +176,7 @@ export class NightScene extends BaseScene {
 
     this.buildUpgrades();
     this.buildForecast();
-    this.buildProvisions();
+    this.buildShop();
     this.buildActions();
   }
 
@@ -207,9 +223,9 @@ export class NightScene extends BaseScene {
    * night screen shows the next unlock two or three days ahead, so there is
    * always a visible reason to start another day" — and it was never built.
    *
-   * It earns its place twice over now that provisions exist. Buying smoke is a
-   * coin flip unless the player can see there are wasps tomorrow, and shears
-   * are wasted honey on a day with no thorns. The forecast turns the shelf from
+   * It earns its place twice over now that the shop is random. Buying smoke is
+   * a coin flip unless the player can see there are wasps tomorrow, and shears
+   * are wasted honey on a day with no brambles. The forecast turns the row from
    * a gamble into a read, which is the difference between a purchase the player
    * regrets and one they feel clever about.
    */
@@ -218,7 +234,7 @@ export class NightScene extends BaseScene {
     const parts = forecastFor(day);
 
     this.add
-      .text(DESIGN_WIDTH / 2, 404, `Tomorrow · Day ${day} · quota ${dayQuota(day)}`, {
+      .text(DESIGN_WIDTH / 2, 392, `Tomorrow · Day ${day} · quota ${dayQuota(day)}`, {
         fontFamily: FONT,
         fontSize: '20px',
         color: COLORS.text,
@@ -229,7 +245,7 @@ export class NightScene extends BaseScene {
     const trailer = ahead ? `      ·      day ${ahead.day}: ${ahead.what}` : '';
 
     this.add
-      .text(DESIGN_WIDTH / 2, 432, parts.join('  ·  ') + trailer, {
+      .text(DESIGN_WIDTH / 2, 418, parts.join('  ·  ') + trailer, {
         fontFamily: FONT,
         fontSize: '17px',
         color: COLORS.dim,
@@ -238,102 +254,182 @@ export class NightScene extends BaseScene {
   }
 
   /**
-   * The provision shelf: one-use items spent on tomorrow.
+   * The shop: four random items, a reroll, and everything the run has bought.
    *
-   * Exactly one can be carried. That cap is the design, not a limitation of it
-   * — a stackable inventory needs quantities, a screen to manage them, and
-   * balance against every combination, and it would turn the night screen into
-   * bookkeeping. One slot keeps the question small and sharp: given what the
-   * forecast says, what is the single thing that would help most?
+   * The provision shelf it replaces offered the same five things every night
+   * and threw the purchase away at dusk, which is exactly why the playtest said
+   * spending honey "don't feel like it adds much value". Nothing accumulated,
+   * so nothing was ever being built.
    *
-   * Clicking the carried item puts it back at full price. Nothing here should
-   * be a decision a misplaced thumb makes permanent.
+   * Random offers make each night a fresh question, stacking makes a purchase
+   * permanent for the run, and the reroll is the release valve for a table with
+   * nothing on it — priced to double each time, so it is an escape hatch and
+   * not a way to fish the pool for the one item you wanted.
    */
-  private buildProvisions(): void {
-    this.offered = provisionsFor(featuresForDay(this.nextDay));
-    if (this.offered.length === 0) return;
+  private buildShop(): void {
+    const save = this.nightData.save;
+    if (save.offer.length === 0) {
+      save.offer = rollOffer(this.nextDay, featuresForDay(this.nextDay));
+      this.nightData.onChanged();
+    }
+    this.offered = save.offer;
 
-    const cardWidth = 240;
+    this.add
+      .text(DESIGN_WIDTH / 2 - 150, 460, 'Tonight\u2019s wares — kept for the run', {
+        fontFamily: FONT,
+        fontSize: '17px',
+        color: COLORS.dim,
+      })
+      .setOrigin(0.5);
+
+    // Deliberately a single-line button. With a sublabel it is 74 units tall,
+    // which is exactly enough to collide with the row of cards below it.
+    this.rerollButton = new Button(this, {
+      x: DESIGN_WIDTH / 2 + 200,
+      y: 460,
+      width: 230,
+      label: `Reroll · ${rerollCost(this.nextDay, save.rerolls)}`,
+      tint: 0xf0a04b,
+      enabled: this.canReroll(),
+      onClick: () => this.reroll(),
+    });
+
+    const cardWidth = 288;
     const gapX = 10;
     const startX =
       DESIGN_WIDTH / 2 - ((this.offered.length - 1) * (cardWidth + gapX)) / 2;
 
-    this.add
-      .text(DESIGN_WIDTH / 2, 466, 'Pack one for tomorrow', {
-        fontFamily: FONT,
-        fontSize: '17px',
-        color: COLORS.dim,
-      })
-      .setOrigin(0.5);
-
     this.offered.forEach((id, index) => {
-      this.provisionButtons.push(
+      this.itemButtons.push(
         new Button(this, {
           x: startX + index * (cardWidth + gapX),
-          y: 516,
+          y: 528,
           width: cardWidth,
-          label: PROVISIONS[id].name,
-          sublabel: this.provisionSublabel(id),
-          tint: this.isPacked(id) ? 0x7fd1ae : 0xc084fc,
-          enabled: this.canPack(id),
-          onClick: () => this.togglePack(id),
+          label: ITEMS[id].name,
+          sublabel: this.itemSublabel(id),
+          tint: RARITY_TINT[ITEMS[id].rarity],
+          enabled: this.canBuyItem(id),
+          onClick: () => this.buyItem(id),
         }),
       );
     });
-  }
 
-  private isPacked(id: ProvisionId): boolean {
-    return this.nightData.save.provision === id;
-  }
-
-  private provisionSublabel(id: ProvisionId): string {
-    if (this.isPacked(id)) return 'packed · tap to remove';
-    return `${PROVISIONS[id].effect}  ·  ${provisionCost(id, this.nextDay)}`;
+    this.inventoryText = this.add
+      .text(DESIGN_WIDTH / 2, 574, this.inventorySummary(), {
+        fontFamily: FONT,
+        fontSize: '15px',
+        color: COLORS.dim,
+        align: 'center',
+      })
+      .setOrigin(0.5, 0);
   }
 
   /**
-   * Affordable *after* refunding whatever is currently packed.
+   * The run so far, on one line.
    *
-   * Without that, packing a cheap provision first would grey out an expensive
-   * one the player can perfectly well afford by swapping — a shelf that
-   * punishes looking at it in the wrong order.
+   * Without it the items are invisible the moment they are bought, and an
+   * effect the player cannot see is an effect they will not believe in — which
+   * was half of what was wrong with the provisions.
    */
-  private canPack(id: ProvisionId): boolean {
-    if (this.isPacked(id)) return true;
-    return this.availableHoney() >= provisionCost(id, this.nextDay);
+  private inventorySummary(): string {
+    const lines = inventoryLines(this.nightData.save.items);
+    if (lines.length === 0) return 'Carrying nothing yet';
+
+    // Kept to one line on purpose. Wrapping a long late-run inventory pushes it
+    // straight into the buttons below, and this is a reminder of what the run
+    // is rather than an inventory screen.
+    const text = `Carrying: ${lines.join('  ·  ')}`;
+    return text.length > 118 ? `${text.slice(0, 115)}…` : text;
   }
 
-  private availableHoney(): number {
-    const { save } = this.nightData;
-    const packed = save.provision;
-    return save.honey + (packed ? provisionCost(packed, this.nextDay) : 0);
+  private itemSublabel(id: ItemId): string {
+    return `${ITEMS[id].effect}  ·  ${itemCost(id, this.nextDay)}`;
   }
 
-  private togglePack(id: ProvisionId): void {
+  private canBuyItem(id: ItemId): boolean {
+    return this.nightData.save.honey >= itemCost(id, this.nextDay);
+  }
+
+  private canReroll(): boolean {
+    const save = this.nightData.save;
+    return save.honey >= rerollCost(this.nextDay, save.rerolls);
+  }
+
+  private buyItem(id: ItemId): void {
+    if (this.busy || !this.canBuyItem(id)) return;
     const { save, sfx } = this.nightData;
-    const day = this.nextDay;
 
-    // Refund first, so swapping is a single decision rather than a sequence
-    // the player has to get in the right order.
-    if (save.provision) {
-      save.honey += provisionCost(save.provision, day);
-      const wasPacked = save.provision;
-      save.provision = null;
-      if (wasPacked === id) {
-        this.nightData.onChanged();
-        this.refresh();
-        return;
-      }
-    }
-
-    const cost = provisionCost(id, day);
-    if (save.honey >= cost) {
-      save.honey -= cost;
-      save.provision = id;
-      sfx.play('collect', 0.4);
-    }
+    save.honey -= itemCost(id, this.nextDay);
+    save.items.push(id);
+    // The card goes, the row does not refill. Buying is meant to cost you the
+    // rest of the table's attention, not open a slot.
+    save.offer = save.offer.filter((offered) => offered !== id);
+    sfx.play('upgrade', 0.4);
 
     this.nightData.onChanged();
+    this.rebuildShop();
+  }
+
+  private reroll(): void {
+    if (this.busy || !this.canReroll()) return;
+    const { save, sfx } = this.nightData;
+
+    save.honey -= rerollCost(this.nextDay, save.rerolls);
+    save.rerolls += 1;
+    save.offer = rollOffer(this.nextDay, featuresForDay(this.nextDay));
+    sfx.play('draw', 0.3);
+
+    this.nightData.onChanged();
+    this.rebuildShop();
+  }
+
+  /**
+   * Tears the row down and lays it out again.
+   *
+   * Rebuilt rather than relabelled because the number of cards changes — a
+   * bought item leaves the table — and a stale button pooled against a shorter
+   * offer list is how a shop starts selling the wrong thing.
+   */
+  private rebuildShop(): void {
+    for (const button of this.itemButtons) button.destroy();
+    this.itemButtons = [];
+    this.rerollButton?.destroy();
+    this.rerollButton = null;
+
+    const save = this.nightData.save;
+    const cardWidth = 288;
+    const gapX = 10;
+    const startX = DESIGN_WIDTH / 2 - ((save.offer.length - 1) * (cardWidth + gapX)) / 2;
+
+    this.offered = save.offer;
+    this.offered.forEach((id, index) => {
+      this.itemButtons.push(
+        new Button(this, {
+          x: startX + index * (cardWidth + gapX),
+          y: 528,
+          width: cardWidth,
+          label: ITEMS[id].name,
+          sublabel: this.itemSublabel(id),
+          tint: RARITY_TINT[ITEMS[id].rarity],
+          enabled: this.canBuyItem(id),
+          onClick: () => this.buyItem(id),
+        }),
+      );
+    });
+
+    // Deliberately a single-line button. With a sublabel it is 74 units tall,
+    // which is exactly enough to collide with the row of cards below it.
+    this.rerollButton = new Button(this, {
+      x: DESIGN_WIDTH / 2 + 200,
+      y: 460,
+      width: 230,
+      label: `Reroll · ${rerollCost(this.nextDay, save.rerolls)}`,
+      tint: 0xf0a04b,
+      enabled: this.canReroll(),
+      onClick: () => this.reroll(),
+    });
+
+    this.inventoryText.setText(this.inventorySummary());
     this.refresh();
   }
 
@@ -376,12 +472,11 @@ export class NightScene extends BaseScene {
     });
 
     this.offered.forEach((id, index) => {
-      const button = this.provisionButtons[index];
+      const button = this.itemButtons[index];
       if (!button) return;
-      button.setLabel(PROVISIONS[id].name, this.provisionSublabel(id));
-      button.setTint(this.isPacked(id) ? 0x7fd1ae : 0xc084fc);
-      button.setEnabled(this.canPack(id));
+      button.setEnabled(this.canBuyItem(id));
     });
+    this.rerollButton?.setEnabled(this.canReroll());
   }
 
   private buildActions(): void {
