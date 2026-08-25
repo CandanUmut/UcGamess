@@ -15,6 +15,18 @@ import { FLOWER_TEX, TEX } from './textures.ts';
  * anything else about them is read, so they keep a fixed colour rather than
  * drawing from the species palette. Ordinary flowers get a species.
  */
+/**
+ * How much taller the wall drawing is than the wall it depicts.
+ *
+ * Measured off the art, not chosen: the solid body is 45 of its 87 pixels.
+ */
+const WALL_ART_RATIO = 87 / 45;
+/**
+ * How far the drawn body sits off the centre of its own image, as a fraction
+ * of the image height. Also measured — 6.5 of 87.
+ */
+const WALL_ART_OFFSET = 6.5 / 87;
+
 const KIND_TINT: Record<string, number> = {
   normal: COLORS.patch,
   rich: 0xffb454,
@@ -69,6 +81,19 @@ export class FieldRenderer {
    * already the same meadow green, so the board simply looks plainer.
    */
   private readonly ground: Phaser.GameObjects.TileSprite | null;
+  /** The hive itself, drawn over its glow. Null if the file never arrived. */
+  private readonly hiveSprite: Phaser.GameObjects.Image | null;
+  /** One per wasp, reused. There are never more than a couple. */
+  private wasps: Phaser.GameObjects.Image[] = [];
+  /**
+   * One per visible wall bar, reused.
+   *
+   * The maze tops out at (cols+1)*rows + cols*(rows+1) edges, so the pool has
+   * a hard ceiling and settles within the first day rather than growing.
+   */
+  private wallBars: Phaser.GameObjects.Image[] = [];
+  /** How many pooled bars are in use this frame. */
+  private wallBarCount = 0;
 
   constructor(scene: Phaser.Scene, field: Field, depth: number) {
     this.scene = scene;
@@ -84,6 +109,12 @@ export class FieldRenderer {
           .tileSprite(0, 0, PLAYFIELD_WIDTH, PLAYFIELD_HEIGHT, TEX.meadow)
           .setOrigin(0, 0)
           .setDepth(depth - 5)
+      : null;
+    this.hiveSprite = scene.textures.exists(TEX.hive)
+      ? scene.add
+          .image(field.hiveX, field.hiveY, TEX.hive)
+          .setOrigin(0.5, 0.62)
+          .setDepth(depth + 2)
       : null;
     this.waspGfx = scene.add.graphics().setDepth(depth + 3);
     this.wallGfx = scene.add.graphics().setDepth(depth + 4);
@@ -147,6 +178,9 @@ export class FieldRenderer {
 
     const pulse = 1 + Math.sin(field.time * 2) * 0.04;
     this.hiveGlow.setScale(1.6 * pulse);
+    // The skep breathes with the same pulse as its glow, but far less of it —
+    // a building that visibly inflates reads as a balloon.
+    this.hiveSprite?.setScale(0.86 + (pulse - 1) * 0.35);
 
     this.drawWasps(field, alpha);
   }
@@ -329,6 +363,7 @@ export class FieldRenderer {
   private drawWalls(field: Field): void {
     const g = this.wallGfx;
     g.clear();
+    this.wallBarCount = 0;
 
     const { maze } = field;
     const thickness = TUNING.maze.wallThickness;
@@ -361,8 +396,25 @@ export class FieldRenderer {
         this.drawWallBar(g, x, y - half, maze.cellWidth, thickness);
       }
     }
+
+    this.hideUnusedWallBars();
   }
 
+  /**
+   * One length of bramble wall.
+   *
+   * The drawing is a horizontal bar whose thorns stick out well past the part
+   * that actually blocks: the solid body is 45 of its 87 pixels, so the sprite
+   * is drawn `WALL_ART_RATIO` taller than the wall's real thickness and the
+   * spikes overhang into the corridor. That overhang is the point — thorns
+   * reaching over the edge say "do not touch" far better than a flat bar, and
+   * they cost nothing, because what a route actually collides with is the maze
+   * grid and not this picture.
+   *
+   * The body is not centred in the source either, so the sprite is nudged back
+   * by `WALL_ART_OFFSET` of its height; without that the thorns are visibly
+   * lopsided, heavier on one side of every wall in the maze.
+   */
   private drawWallBar(
     g: Phaser.GameObjects.Graphics,
     x: number,
@@ -370,36 +422,103 @@ export class FieldRenderer {
     width: number,
     height: number,
   ): void {
-    // A soft dark halo so the edge does not read as a hard cut-out, and so the
-    // boundary a route stops at is visible slightly before it is reached.
-    g.fillStyle(COLORS.wallThorn, 0.3);
-    g.fillRoundedRect(x - 3, y - 3, width + 6, height + 6, 8);
+    const sprite = this.takeWallBar();
 
-    g.fillStyle(COLORS.wall, 0.97);
-    g.fillRoundedRect(x, y, width, height, 6);
+    if (!sprite) {
+      // No art: the primitive bar, exactly as it was.
+      g.fillStyle(COLORS.wallThorn, 0.3);
+      g.fillRoundedRect(x - 3, y - 3, width + 6, height + 6, 8);
+      g.fillStyle(COLORS.wall, 0.97);
+      g.fillRoundedRect(x, y, width, height, 6);
+      g.lineStyle(1.5, COLORS.wallThorn, 0.5);
+      g.strokeRoundedRect(x, y, width, height, 6);
+      return;
+    }
 
-    g.lineStyle(1.5, COLORS.wallThorn, 0.5);
-    g.strokeRoundedRect(x, y, width, height, 6);
+    const vertical = height > width;
+    const span = vertical ? height : width;
+    const thick = vertical ? width : height;
+    const art = thick * WALL_ART_RATIO;
+    const nudge = art * WALL_ART_OFFSET;
+
+    sprite.setVisible(true);
+    // Display size is applied before rotation, so a vertical bar is the same
+    // horizontal picture turned a quarter turn.
+    sprite.setDisplaySize(span, art);
+    sprite.setRotation(vertical ? Math.PI / 2 : 0);
+    sprite.setPosition(
+      x + width / 2 + (vertical ? nudge : 0),
+      y + height / 2 - (vertical ? 0 : nudge),
+    );
+  }
+
+  /** Next free pooled wall image, or null when there is no wall art. */
+  private takeWallBar(): Phaser.GameObjects.Image | null {
+    if (!this.scene.textures.exists(TEX.wall)) return null;
+
+    if (this.wallBarCount >= this.wallBars.length) {
+      this.wallBars.push(
+        this.scene.add
+          .image(0, 0, TEX.wall)
+          .setOrigin(0.5)
+          .setDepth(this.depth + 4),
+      );
+    }
+    const sprite = this.wallBars[this.wallBarCount];
+    this.wallBarCount += 1;
+    return sprite ?? null;
+  }
+
+  /** Hides pooled bars left over from a frame with more walls on screen. */
+  private hideUnusedWallBars(): void {
+    for (let i = this.wallBarCount; i < this.wallBars.length; i += 1) {
+      this.wallBars[i]?.setVisible(false);
+    }
   }
 
   private drawWasps(field: Field, alpha: number): void {
     const g = this.waspGfx;
     g.clear();
-    if (field.wasps.length === 0) return;
 
-    for (const wasp of field.wasps) {
+    while (this.wasps.length < field.wasps.length) {
+      const sprite = this.scene.add
+        .image(0, 0, this.scene.textures.exists(TEX.wasp) ? TEX.wasp : TEX.glow)
+        .setOrigin(0.5)
+        .setDepth(this.depth + 3);
+      this.wasps.push(sprite);
+    }
+    for (let i = field.wasps.length; i < this.wasps.length; i += 1) {
+      this.wasps[i]?.setVisible(false);
+    }
+
+    for (let i = 0; i < field.wasps.length; i += 1) {
+      const wasp = field.wasps[i];
+      const sprite = this.wasps[i];
+      if (!wasp || !sprite) continue;
+
       const x = wasp.prevX + (wasp.x - wasp.prevX) * alpha;
       const y = wasp.prevY + (wasp.y - wasp.prevY) * alpha;
 
       // Threat radius drawn faintly — the player needs to judge whether a route
       // passes through danger, and guessing at an invisible radius is unfair.
-      g.fillStyle(0xff5252, 0.08);
+      g.fillStyle(0xd23b2a, 0.09);
       g.fillCircle(x, y, TUNING.wasp.interceptRadius * 1.6);
 
-      g.fillStyle(0x1b1b1b, 0.9);
-      g.fillCircle(x, y, 9);
-      g.fillStyle(0xff7043, 1);
-      g.fillCircle(x, y, 5);
+      sprite.setVisible(true);
+      sprite.setPosition(x, y);
+      sprite.setDisplaySize(46, 46 * (43 / 72));
+
+      // Mirrored rather than spun, for the same reason the bees are: the wasp
+      // is drawn in profile and rotating it by heading would fly it upside
+      // down half the time.
+      const dx = wasp.x - wasp.prevX;
+      const dy = wasp.y - wasp.prevY;
+      if (dx * dx + dy * dy > 0.01) {
+        const facingLeft = dx < 0;
+        sprite.setFlipX(facingLeft);
+        const tilt = Math.max(-0.4, Math.min(0.4, Math.atan2(dy, Math.abs(dx))));
+        sprite.setRotation(facingLeft ? -tilt : tilt);
+      }
     }
   }
 
@@ -414,6 +533,11 @@ export class FieldRenderer {
     for (const flower of this.flowers) flower.destroy();
     this.flowers = [];
     this.ground?.destroy();
+    this.hiveSprite?.destroy();
+    for (const wasp of this.wasps) wasp.destroy();
+    this.wasps = [];
+    for (const bar of this.wallBars) bar.destroy();
+    this.wallBars = [];
   }
 }
 

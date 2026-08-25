@@ -1,13 +1,14 @@
-import { TUNING } from '../config/tuning.ts';
+import { TUNING, UNCAPPED } from '../config/tuning.ts';
 
 export type UpgradeId =
-  'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore';
+  'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'combWax';
 
 export const UPGRADE_ORDER: readonly UpgradeId[] = [
   'routePersistence',
   'swarmSize',
   'beeSpeed',
   'bloom',
+  'combWax',
   'honeyStore',
 ];
 
@@ -62,6 +63,12 @@ export const UPGRADES: Record<UpgradeId, UpgradeInfo> = {
     format: (level) =>
       `${TUNING.offline.baseCapHoney + level * upgradeStep('honeyStore')} max`,
   },
+  combWax: {
+    id: 'combWax',
+    name: 'Comb Wax',
+    blurb: 'Every delivery is worth more honey',
+    format: (level) => `+${Math.round(level * upgradeStep('combWax') * 100)}% honey`,
+  },
 };
 
 function upgradeStep(id: UpgradeId): number {
@@ -77,6 +84,7 @@ export function emptyLevels(): UpgradeLevels {
     routePersistence: 0,
     bloom: 0,
     honeyStore: 0,
+    combWax: 0,
   };
 }
 
@@ -89,6 +97,17 @@ export function upgradeCost(id: UpgradeId, level: number): number | null {
 
 export function maxLevel(id: UpgradeId): number {
   return TUNING.upgrades[id].levels;
+}
+
+/**
+ * Whether this line has a ceiling a player will ever reach.
+ *
+ * The night screen uses it to say "Maxed" only where that is actually true —
+ * telling a player they have finished Comb Wax would be a lie, and it is the
+ * one line whose whole job is to never finish.
+ */
+export function isCapped(id: UpgradeId): boolean {
+  return TUNING.upgrades[id].levels < UNCAPPED;
 }
 
 /**
@@ -105,6 +124,8 @@ export interface DerivedStats {
   patchCount: number;
   offlineCapHoney: number;
   offlineWindowHours: number;
+  /** Multiplier on honey banked per delivery. 1 at level zero. */
+  honeyMultiplier: number;
 }
 
 export function deriveStats(levels: UpgradeLevels): DerivedStats {
@@ -119,5 +140,6 @@ export function deriveStats(levels: UpgradeLevels): DerivedStats {
       TUNING.offline.baseCapHoney + levels.honeyStore * u.honeyStore.perLevel,
     // Fixed: the cap is the limit the upgrade moves. See TUNING.offline.
     offlineWindowHours: TUNING.offline.baseWindowHours,
+    honeyMultiplier: 1 + levels.combWax * u.combWax.perLevel,
   };
 }

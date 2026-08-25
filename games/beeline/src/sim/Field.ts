@@ -410,11 +410,28 @@ export class Field {
     // run, and the inner edge never moves.
     const outward = Math.min(6, 1 + Math.floor((this.day - 1) / 2));
     if (kind === 'rich') return { min: Math.max(3, outward), max: 99 };
-    // Wide enough that the spacing rule always has somewhere in-band to put the
-    // next flower. Too tight and the last flower of the day falls through to
-    // "anywhere free", which lands it far out — so a tight early band made the
-    // *early* days darker than the later ones, exactly backwards.
-    return { min: 1, max: outward + 1 };
+
+    // The band *widens* rather than marching outward.
+    //
+    // The report was that flowers are usually too close, and the cause was the
+    // ceiling rather than the floor: with `max` at outward+1 the band topped
+    // out around six steps on a board whose far corner is eleven, so the outer
+    // half was decoration and every flower was drawn from the near half.
+    //
+    // Pushing the *floor* out was the obvious fix and the wrong one — a play
+    // simulation showed it cost enough travel time to drop the mid-game clear
+    // rate by half, because every flower got further away rather than the
+    // choice of flowers getting wider. Raising the ceiling instead keeps a near
+    // flower on offer and puts genuinely distant ones next to it, which is the
+    // near-versus-far decision the distance multiplier exists to price.
+    //
+    // The widening itself comes in over the first few days rather than landing
+    // at once. Day one's flowers have to spawn inside the hive's own light or
+    // the first-time player opens to a dark board with nothing for the hint
+    // line to point at — the whole onboarding budget spent on nothing. A wide
+    // band on day one put them out past it, which a test caught.
+    const spread = Math.min(4, Math.max(1, this.day - 1));
+    return { min: 1, max: outward + spread };
   }
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
@@ -1056,7 +1073,10 @@ export class Field {
 
   private deposit(bee: Bee): void {
     if (bee.carrying <= 0) return;
-    this.honey += bee.carrying;
+    // Comb Wax is paid here, at the hive, rather than at the flower: what it
+    // buys is a better yield from honey the swarm has actually brought home,
+    // so nectar lost to a wasp on the way back is not paid for.
+    this.honey += bee.carrying * this.stats.honeyMultiplier;
     this.events.deposited += bee.carrying;
     bee.carrying = 0;
   }
