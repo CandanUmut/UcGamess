@@ -195,7 +195,16 @@ describe('drawing into a maze wall', () => {
     // drag from the hive at a flower crosses walls on almost every seed; what
     // matters is that what comes back is a working route rather than the stub
     // the old rule left behind.
+    //
+    // Stated as two separate claims, because "always longer than the clip" is
+    // not actually true and asserting it made this test flaky. A drag that
+    // meets a wall dead-on, with no component along it, has nothing to slide
+    // on — correctly, the wall is solid — so on those seeds the route is
+    // exactly the length the clip would have produced, down to the last bit of
+    // Float32 noise. The honest pair of claims is that sliding is *never worse*
+    // than clipping, and that it is *usually much better*.
     let blockedBoards = 0;
+    let improved = 0;
 
     for (let trial = 0; trial < 60; trial += 1) {
       const field = newDay(8);
@@ -227,14 +236,24 @@ describe('drawing into a maze wall', () => {
         `trial ${trial} committed a blocked route`,
       ).toBe(Number.POSITIVE_INFINITY);
 
-      // And it kept meaningfully more than clipping at the wall would have.
-      expect(route.poly.length, `trial ${trial} was no better than a clip`)
-        .toBeGreaterThan(cutAt);
+      // Never worse than clipping. The tolerance is float noise, not slack:
+      // `cutAt` is measured off a Float32-backed polyline and the route length
+      // off another, so the dead-on case lands within an ulp either way.
+      expect(
+        route.poly.length,
+        `trial ${trial} came back shorter than a clip`,
+      ).toBeGreaterThanOrEqual(cutAt - 0.01);
+
+      if (route.poly.length > cutAt * 1.05) improved += 1;
     }
 
     // If no board ever blocked the straight line the assertions above never
     // ran, and this test would be passing vacuously.
     expect(blockedBoards).toBeGreaterThan(10);
+
+    // And the change has to actually do something on most boards, or "never
+    // worse" would be satisfied by doing nothing at all.
+    expect(improved / blockedBoards).toBeGreaterThan(0.5);
   });
 
   it('never leaves a live route that the next step would cut', () => {

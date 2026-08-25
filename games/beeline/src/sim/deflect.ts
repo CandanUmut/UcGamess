@@ -53,7 +53,13 @@ export interface WallSlide {
  * Expressed in cells because that is what the maze knows: `canStep` answers for
  * a pair of adjacent cells, and any movement inside a single cell is free.
  */
-function canReach(maze: Maze, fromX: number, fromY: number, toX: number, toY: number): boolean {
+function canReach(
+  maze: Maze,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+): boolean {
   const fromCol = maze.colAt(fromX);
   const fromRow = maze.rowAt(fromY);
   const toCol = maze.colAt(toX);

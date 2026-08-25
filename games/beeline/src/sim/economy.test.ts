@@ -59,6 +59,21 @@ describe('drawing costs workers', () => {
 
   it('never conscripts a bee that is already outbound or on a flower', () => {
     const field = newDay();
+
+    // Put a flower exactly where the test's fixed 300px line ends.
+    //
+    // Without it this test was quietly at the mercy of random flower
+    // placement: on the seeds where nothing happened to sit near the tip, the
+    // swarm flew out, found nothing, went confused and idled, and the
+    // assertion below failed through no fault of the behaviour under test. It
+    // is about conscription, not about whether the day dealt a reachable
+    // flower — measured at roughly a 2% failure rate before this line, which
+    // over a repo's worth of CI runs is a test that cries wolf.
+    const target = new Patch(field.hiveX + 300, field.hiveY, 500);
+    target.bloomT = 1;
+    target.discovered = true;
+    field.patches = [target];
+
     const route = field.createRoute(line(field, 300));
     field.dispatchBuilders(route!, 300);
 

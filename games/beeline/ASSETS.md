@@ -10,14 +10,14 @@ not to be worked around.
 
 Measured on the production build, not estimated:
 
-| File | Brotli | What it is |
-| --- | --- | --- |
-| `sprites/meadow.jpg` | 43.3 KB | Seamless grass, tiled as the ground |
-| `fonts/nunito.woff2` | 18.1 KB | Variable UI face, subsetted |
-| `sprites/flower-*.png` | 11.7 KB × 6 | One daisy per species |
-| `audio/meadow.webm` | ~13 KB | Ambient loop, Opus (Safari gets the `.m4a`) |
-| `sprites/bee.png` | ~5 KB | Top-down honeybee |
-| `particles/*.png` | ~5 KB | Two starbursts |
+| File                   | Brotli      | What it is                                  |
+| ---------------------- | ----------- | ------------------------------------------- |
+| `sprites/meadow.jpg`   | 43.3 KB     | Seamless grass, tiled as the ground         |
+| `fonts/nunito.woff2`   | 18.1 KB     | Variable UI face, subsetted                 |
+| `sprites/flower-*.png` | 11.7 KB × 6 | One daisy per species                       |
+| `audio/meadow.webm`    | ~13 KB      | Ambient loop, Opus (Safari gets the `.m4a`) |
+| `sprites/bee.png`      | ~5 KB       | Top-down honeybee                           |
+| `particles/*.png`      | ~5 KB       | Two starbursts                              |
 
 Total initial download **746 KB** against a 5 MB warn threshold, of which Phaser
 is still 275 KB. Every file is CC0 or OFL; see `assets/LICENSES.md` for the
