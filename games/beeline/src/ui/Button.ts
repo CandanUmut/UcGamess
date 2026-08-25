@@ -74,7 +74,7 @@ export class Button {
       .text(options.x, options.y + (options.sublabel ? -11 : 0), options.label, {
         fontFamily: FONT,
         fontSize: '24px',
-        color: '#f4f4f8',
+        color: '#3c3524',
       })
       .setOrigin(0.5);
 
@@ -83,7 +83,7 @@ export class Button {
         .text(options.x, options.y + 15, options.sublabel, {
           fontFamily: FONT,
           fontSize: '17px',
-          color: '#8a8aa0',
+          color: '#7b7358',
         })
         .setOrigin(0.5);
     }
@@ -121,8 +121,8 @@ export class Button {
     this.enabled = enabled;
     this.bg.setFillStyle(this.tint, enabled ? 0.14 : 0.05);
     this.bg.setStrokeStyle(2, this.tint, enabled ? 0.8 : 0.25);
-    this.labelText.setColor(enabled ? '#f4f4f8' : '#5a5a68');
-    this.subText?.setColor(enabled ? '#8a8aa0' : '#4a4a55');
+    this.labelText.setColor(enabled ? '#3c3524' : '#a49a80');
+    this.subText?.setColor(enabled ? '#7b7358' : '#b0a893');
   }
 
   setLabel(label: string, sublabel?: string): void {
