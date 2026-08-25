@@ -27,6 +27,12 @@ export const TEX = {
   glint: 'glint',
   /** Seamless meadow ground, tiled under the whole board. */
   meadow: 'meadow',
+  /** The studio's own drawings for the three things left as primitives. */
+  hive: 'hive',
+  wasp: 'wasp',
+  wall: 'wall',
+  /** A pollen grain, for the moment a bee picks one up. */
+  pollen: 'pollen',
 } as const;
 
 /**
@@ -48,6 +54,10 @@ export const FLOWER_TEX = [
 export const TEX_FILES: ReadonlyArray<readonly [key: string, path: string]> = [
   [TEX.bee, 'sprites/bee.png'],
   [TEX.meadow, 'sprites/meadow.jpg'],
+  [TEX.hive, 'sprites/hive.png'],
+  [TEX.wasp, 'sprites/wasp.png'],
+  [TEX.wall, 'sprites/wall.png'],
+  [TEX.pollen, 'sprites/pollen.png'],
   [TEX.sparkle, 'particles/sparkle.png'],
   [TEX.glint, 'particles/glint.png'],
   ...FLOWER_TEX.map((key) => [key, `sprites/${key}.png`] as const),

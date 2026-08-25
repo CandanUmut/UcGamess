@@ -57,6 +57,14 @@ const DEPTH = {
 // drawn by the next family along.
 const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
+/**
+ * Shortest gap between two collection notes, in seconds.
+ *
+ * The collection sound is the one the player hears most, so its *rate* matters
+ * as much as its timbre — see `Sfx.collectBlip`.
+ */
+const COLLECT_NOTE_GAP = 0.09;
+
 /** How long a finger must rest on a route to erase it. */
 const ERASE_HOLD_SECONDS = 0.75;
 /** Movement beyond this cancels the hold and treats the gesture as a draw. */
@@ -104,6 +112,9 @@ export class GameScene extends BaseGameplayScene {
   private holdSeconds = 0;
   private pressX = 0;
   private pressY = 0;
+
+  /** Sim time of the last collection note, for the rate limit. */
+  private lastCollectNote = -1;
 
   private externallyPaused = false;
 
@@ -464,7 +475,7 @@ export class GameScene extends BaseGameplayScene {
     if (route) this.field.dispatchBuilders(route, result.drawnLength);
     this.routesDrawn += 1;
 
-    if (result.connected) this.sfx.playVaried('collect', 0.18, 400);
+    if (result.connected) this.sfx.playNote('collect', 0.2);
   }
 
   /**
@@ -654,9 +665,20 @@ export class GameScene extends BaseGameplayScene {
     for (const hit of events.collected) {
       this.juice.collect(hit.x, hit.y, hit.amount);
     }
-    // One sound per frame regardless of how many bees collected, or a large
-    // swarm becomes a wall of noise.
-    if (events.collected.length > 0) this.sfx.playVaried('collect', 0.16);
+    // At most one note every COLLECT_NOTE_GAP seconds, however many bees
+    // collected.
+    //
+    // One per *frame* was the old rule and it is not enough: at sixty frames a
+    // second a working swarm turns a pleasant note into a drone, and the nicer
+    // the note the more it drones. Roughly eleven a second is the point where
+    // the ear still hears individual notes and reads them as a phrase.
+    if (
+      events.collected.length > 0 &&
+      this.field.time - this.lastCollectNote >= COLLECT_NOTE_GAP
+    ) {
+      this.lastCollectNote = this.field.time;
+      this.sfx.playNote('collect', 0.15);
+    }
 
     if (events.deposited > 0) {
       this.juice.deposit(this.field.hiveX, this.field.hiveY);

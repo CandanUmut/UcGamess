@@ -5,6 +5,14 @@ export type SfxKey =
 
 const SAMPLE_RATE = 22_050;
 
+/**
+ * Semitone offsets of a major pentatonic scale, spanning just over an octave.
+ *
+ * 0-2-4-7-9 is the pattern; no two of these are a semitone or a tritone
+ * apart, which is what makes any sequence of them sound intentional.
+ */
+const PENTATONIC = [0, 2, 4, 7, 9, 12, 14] as const;
+
 /** Phaser cache key for the shipped background loop. */
 export const MUSIC_KEY = 'meadow-music';
 
@@ -63,7 +71,7 @@ export class Sfx {
     }
 
     try {
-      this.addBuffer(ctx, 'collect', 0.09, collectBlip);
+      this.addBuffer(ctx, 'collect', 0.38, collectBlip);
       this.addBuffer(ctx, 'deposit', 0.13, depositThunk);
       this.addBuffer(ctx, 'draw', 0.22, drawWhoosh);
       this.addBuffer(ctx, 'dayEnd', 0.75, dayEndChime);
@@ -113,6 +121,29 @@ export class Sfx {
   /** Pitch-varied one-shot, for sounds that repeat constantly. */
   playVaried(key: SfxKey, volume = 0.5, spreadCents = 250): void {
     this.play(key, volume, (Math.random() * 2 - 1) * spreadCents);
+  }
+
+  /**
+   * Plays a one-shot on a note of the pentatonic scale rather than at a random
+   * detune.
+   *
+   * `playVaried` scatters pitch continuously, which is right for a whoosh and
+   * wrong for a tone: two collections a few milliseconds apart land a random
+   * interval from each other, and most random intervals are dissonant. Across
+   * hundreds of pickups a day that is the difference between a game that
+   * chimes and a game that jangles.
+   *
+   * A major pentatonic has no semitones and no tritone in it, so **every pair
+   * of notes in the set is consonant**. Whatever order the swarm happens to
+   * collect in, the result is musical — the scale is doing the work that no
+   * amount of tuning a single blip could.
+   *
+   * Weighted toward the lower notes, because the swarm delivers in clusters and
+   * a cluster that keeps landing up high is the fatiguing case all over again.
+   */
+  playNote(key: SfxKey, volume = 0.5): void {
+    const note = PENTATONIC[Math.floor(Math.random() ** 1.7 * PENTATONIC.length)] ?? 0;
+    this.play(key, volume, note * 100);
   }
 
   startHum(): void {
@@ -179,11 +210,35 @@ function attack(t: number, ms = 0.004): number {
 }
 
 function collectBlip(t: number): number {
-  // Rising two-tone ping — reads as "picked something up".
-  const pitch = 880 + 420 * Math.min(1, t / 0.05);
-  const tone = Math.sin(2 * Math.PI * pitch * t);
-  const shimmer = 0.3 * Math.sin(2 * Math.PI * pitch * 2.02 * t);
-  return (tone + shimmer) * decay(t, 34) * attack(t) * 0.5;
+  // A soft wooden note, like a kalimba tine.
+  //
+  // This is the most-played sound in the game by a wide margin — hundreds of
+  // times in a ninety-second day — and the first version was built like a
+  // one-shot reward: a ping rising from 880Hz to 1300Hz with a hard attack and
+  // a fast decay. Three separate things made that tiring:
+  //
+  //  - **The band.** 1-4kHz is where hearing is most sensitive and where ear
+  //    fatigue sets in fastest. The fundamental is now 440Hz, an octave and a
+  //    half down, which is present without being sharp.
+  //  - **The attack.** A 4ms attack is a click, and a click repeated is a
+  //    rattle. 18ms keeps the note distinct while removing the edge.
+  //  - **The partials.** The old "shimmer" sat at 2.02x the fundamental — a
+  //    deliberately detuned octave, which beats against the tone. Beating is
+  //    what makes a sound feel *urgent*; exactly wrong here. The partials below
+  //    are a clean octave and a twelfth, at low amplitude, which is roughly how
+  //    a struck wooden bar behaves.
+  //
+  // The pitch no longer rises, either. A rising blip is a "collected!" cue and
+  // insists on being noticed; a struck note simply happens and lets the ear
+  // move on, which is what a sound repeated this often has to do.
+  const f = 440;
+  const body = Math.sin(2 * Math.PI * f * t);
+  const octave = 0.28 * Math.sin(2 * Math.PI * f * 2 * t);
+  const twelfth = 0.1 * Math.sin(2 * Math.PI * f * 3 * t);
+  // The upper partials fade faster than the fundamental, which is what makes a
+  // note read as struck wood rather than as a synth tone held flat.
+  const timbre = body + octave * decay(t, 26) + twelfth * decay(t, 44);
+  return timbre * decay(t, 11) * attack(t, 0.018) * 0.5;
 }
 
 function depositThunk(t: number): number {

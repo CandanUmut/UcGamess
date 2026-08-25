@@ -58,6 +58,54 @@ pieces still waiting on hand-drawn art.
   This one replaced a CC0 Openclipart bee (`simple bee from above`, id 174161)
   that was never a good fit; nothing of it remains in the build.
 
+### hive.png, wasp.png, wall.png
+
+- **File:** `sprites/hive.png`
+- **File:** `sprites/wasp.png`
+- **File:** `sprites/wall.png`
+- **Source:** Original work — drawn by hand by the studio
+  (`beehive.png`, `wasp.png`, `walls.png`)
+- **Author:** Umut Candan (UC Games)
+- **License:** Owned outright by the studio; all rights reserved
+- **URL:** n/a — not published anywhere; the source files live outside the repo
+- **Added:** 2026-08-24
+- **AI:** No. Drawn by hand.
+- **Notes:** Processed, not redrawn, by the same route as `bee.png`: cropped to
+  the drawing, white background removed by flood-filling inward from the border
+  rather than by keying every white pixel, anti-aliased edges feathered to
+  partial alpha, then trimmed and scaled. Sizes 117x128, 72x43 and 256x87.
+
+  The **wasp faces nose-right (+x)**, the same convention the bee follows, and
+  is mirrored rather than rotated for the same reason — it is a profile drawing
+  and spinning it by heading would fly it upside down.
+
+  The **wall** is drawn as a horizontal length whose thorns overhang the part
+  that actually blocks: the solid body is 45 of its 87 pixels, and the body sits
+  6.5px below the image centre. Both numbers are measured in
+  `FieldRenderer.drawWallBar` — a replacement drawing with different proportions
+  needs those two constants updated or every wall in the maze will sit crooked.
+
+  These three replaced the last of the Phaser primitives on the board.
+
+### pollen.png
+
+- **File:** `sprites/pollen.png`
+- **Source:** Openclipart, "pollen 2" (id 252934)
+- **Author:** Uploaded to Openclipart by `rejon`
+- **License:** CC0 1.0 Universal (all Openclipart submissions are released CC0)
+- **URL:** https://openclipart.org/detail/252934/pollen-2
+- **Added:** 2026-08-24
+- **AI:** No
+- **Notes:** Squared and downscaled to 48x48; not otherwise modified. Drawn
+  untinted in the collection pop, because the grain already has its own colour
+  and multiplying amber over amber only muddies it.
+
+  Worth noting the source appears to be a rendered illustration rather than a
+  vector drawing. Openclipart's terms release every submission as CC0 and that
+  is what the entry records, but it is a second-hand assurance rather than one
+  verified at the origin — `TODO: verify against the uploader if this ever ships
+  commercially`.
+
 ### flower-*.png
 
 - **File:** `sprites/flower-pink.png`
