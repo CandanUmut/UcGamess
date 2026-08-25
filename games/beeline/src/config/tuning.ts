@@ -192,44 +192,36 @@ export interface WaspTuning {
   scatterSeconds: number;
 }
 
-export interface BrambleTuning {
-  /** First day thorns appear at all. */
+export interface MazeTuning {
+  /** Grid the board is carved into. Cells are the corridors. */
+  cols: number;
+  rows: number;
+  /**
+   * How thick a wall is drawn, in design units.
+   *
+   * Purely cosmetic — collision is "did the line cross a closed edge", so the
+   * bar is drawn centred on that edge. Thick enough to read as terrain at phone
+   * scale, thin enough that it never looks like it is eating the corridor it
+   * borders.
+   */
+  wallThickness: number;
+  /**
+   * How open the board is, 0..1. The single difficulty knob.
+   *
+   * 1 removes every interior wall and gives back the open field the game had
+   * before; 0 is a perfect maze with exactly one route to each flower. The ramp
+   * between them is the escalation.
+   *
+   * It never reaches 0. A perfect maze is a puzzle with one answer, and the
+   * decision worth having is *which* way round — the short winding path, or the
+   * long open one that is quicker to redraw when it decays.
+   */
+  opennessDay1: number;
+  opennessFloor: number;
+  /** Days taken to fall from the opening board to the tightest one. */
+  tighteningDays: number;
+  /** First day any wall appears at all. */
   startDay: number;
-  /** Radius of a fresh thicket, before the per-day term. */
-  baseRadius: number;
-  radiusPerDay: number;
-  maxRadius: number;
-  /** Hard ceiling on how many can be on the field at once. */
-  maxCount: number;
-  /**
-   * How fast a thicket spreads, in px/s.
-   *
-   * Small on purpose: over a 90-second day this is about +30px, which is enough
-   * to close a gap the player was relying on without ever feeling like the
-   * field moved under them. It is the same shape of pressure as flowers running
-   * dry — the board gets harder as the day goes on, so a route that was right
-   * at dawn is not automatically right at dusk.
-   */
-  growthPerSecond: number;
-  /** How much larger a thicket can get than the size it was placed at. */
-  growthFactor: number;
-  /** Fraction along the hive→flower line where a thicket is placed. */
-  minLineFraction: number;
-  maxLineFraction: number;
-  /** Clearance kept from the hive ring, a flower's reach ring, and each other. */
-  hiveClearance: number;
-  patchClearance: number;
-  siblingClearance: number;
-  /**
-   * How much of a flower's reach ring must stay clear of thorns.
-   *
-   * Not all of it. A thicket may bite into the outer edge of a ring — the
-   * player simply approaches from the open side, which is the puzzle working as
-   * intended. Demanding the whole ring stay clear was the difference between a
-   * field with thorns on it and a field with almost none: at five flowers, a
-   * point far enough from every ring barely exists.
-   */
-  patchRingFraction: number;
 }
 
 export interface ProvisionTuning {
@@ -261,7 +253,7 @@ export interface Tuning {
     /** Radius the Scout Bees provision lights around the hive at dawn. */
     scoutRadius: number;
   };
-  bramble: BrambleTuning;
+  maze: MazeTuning;
   provisions: Record<
     'scoutBees' | 'pruningShears' | 'smokePot' | 'waxedTrails' | 'earlyRise',
     ProvisionTuning
@@ -382,7 +374,11 @@ export const TUNING: Tuning = {
     // whole map would have been decoration.
     distanceYieldMax: 3.8,
     richMinRadius: 700,
-    richYieldMultiplier: 3,
+    // Dropped from 3 once yield started following the path through the maze
+    // rather than the crow-flies distance. Stacked on a 3.8x distance
+    // multiplier it put 10,000 honey on a single flower against a day quota of
+    // 1,900, which made the quota look like a rounding error.
+    richYieldMultiplier: 2,
     nightBloomMultiplier: 4,
     nightBloomWindowSeconds: 12,
   },
@@ -402,7 +398,7 @@ export const TUNING: Tuning = {
     // honey, which made the late game look unclearable when the real problem
     // was that the model was not buying anything. A player who under-invests
     // now stalls around day eight, which is the meta-progression working.
-    quotas: [60, 110, 260, 470, 540, 630, 750, 920, 1120, 1400, 1650, 1900],
+    quotas: [60, 110, 460, 700, 860, 1050, 1300, 1550, 1750, 2050, 2300, 2500],
     quotaGrowthAfterTable: 1.22,
   },
 
@@ -441,33 +437,22 @@ export const TUNING: Tuning = {
   },
 
   /**
-   * Thorn thickets. See sim/Bramble.ts for why the game needed them.
+   * The bramble maze. See sim/Maze.ts for why the scattered thorns became one.
    *
-   * Sized against the field the flowers actually sit in: a thicket is roughly
-   * two and a half flower-reach-rings across, big enough that going around it
-   * is a real detour and small enough that the detour is one flick of a thumb
-   * rather than a scenic tour of the canvas.
+   * An 8x5 grid over the playfield gives corridors 160 x 122 design units
+   * across — over 45 CSS pixels on a phone in landscape. That width is the
+   * constraint everything else bends to: the interesting part of a maze has to
+   * be its topology, never its precision, because a tight corridor cannot be
+   * traced with a thumb.
    */
-  bramble: {
+  maze: {
+    cols: 8,
+    rows: 5,
+    wallThickness: 20,
+    opennessDay1: 1,
+    opennessFloor: 0.28,
+    tighteningDays: 10,
     startDay: 3,
-    // Sized against the corridor a thicket actually has to fit inside. Between
-    // the hive draw ring and a flower's reach ring there is only
-    // `distance - 110 - 85` of usable line, and both ends have to stay clear at
-    // the thicket's *grown* size. At 58px growing to 1.35x the corridor came out
-    // at 412-487px, wider than most flowers are far — and every placement was
-    // silently rejected, so the field shipped with no thorns on it at all.
-    baseRadius: 48,
-    radiusPerDay: 3,
-    maxRadius: 72,
-    maxCount: 3,
-    growthPerSecond: 0.35,
-    growthFactor: 1.22,
-    minLineFraction: 0.28,
-    maxLineFraction: 0.78,
-    hiveClearance: 10,
-    patchClearance: 12,
-    siblingClearance: 24,
-    patchRingFraction: 0.6,
   },
 
   /**
@@ -531,8 +516,8 @@ export const COLORS = {
   beeLaden: 0xffa726,
   patch: 0x7fd1ae,
   patchDry: 0x4a5750,
-  bramble: 0x3a2f22,
-  brambleThorn: 0x6b5a3e,
+  wall: 0x3a2f22,
+  wallThorn: 0x6b5a3e,
   route: 0xffe08a,
   /** Text colours are CSS strings; Phaser text styles do not take hex numbers. */
   text: '#f4f4f8',

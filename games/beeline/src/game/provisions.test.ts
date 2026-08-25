@@ -23,7 +23,7 @@ describe('the provision shelf', () => {
     expect(dayOne).not.toContain('smokePot');
     expect(dayOne).not.toContain('pruningShears');
 
-    expect(provisionsFor(featuresForDay(TUNING.bramble.startDay))).toContain(
+    expect(provisionsFor(featuresForDay(TUNING.maze.startDay))).toContain(
       'pruningShears',
     );
     expect(provisionsFor(featuresForDay(TUNING.wasp.startDay))).toContain('smokePot');
@@ -145,17 +145,33 @@ describe('provision effects', () => {
     expect(field.routeHoldSeconds).toBe(base);
   });
 
-  it('starts thickets smaller for Pruning Shears', () => {
-    const field = new Field();
-    field.beginDay(10, featuresForDay(10), 4, 1, modifiersFor('pruningShears'));
-    const trimmed = field.brambles;
+  it('cuts extra gaps in the maze for Pruning Shears', () => {
+    // Averaged, because both boards are carved at random and a single pair can
+    // come out either way.
+    const openEdges = (field: Field): number => {
+      const m = field.maze;
+      let open = 0;
+      for (let r = 0; r < m.rows; r += 1) {
+        for (let c = 1; c < m.cols; c += 1) if (!m.wallLeft(c, r)) open += 1;
+      }
+      for (let r = 1; r < m.rows; r += 1) {
+        for (let c = 0; c < m.cols; c += 1) if (!m.wallAbove(c, r)) open += 1;
+      }
+      return open;
+    };
 
-    const plain = new Field();
-    plain.beginDay(10, featuresForDay(10), 4, 1);
+    let trimmed = 0;
+    let plain = 0;
+    for (let trial = 0; trial < 30; trial += 1) {
+      const cut = new Field();
+      cut.beginDay(12, featuresForDay(12), 4, 1, modifiersFor('pruningShears'));
+      trimmed += openEdges(cut);
 
-    if (trimmed.length > 0 && plain.brambles.length > 0) {
-      expect(trimmed[0]?.radius).toBeLessThan(plain.brambles[0]?.radius ?? 0);
+      const untouched = new Field();
+      untouched.beginDay(12, featuresForDay(12), 4, 1);
+      plain += openEdges(untouched);
     }
+    expect(trimmed).toBeGreaterThan(plain);
   });
 });
 

@@ -25,6 +25,8 @@ export interface BeelineSave {
    * A single slot rather than an inventory, deliberately. See Provisions.ts.
    */
   provision: ProvisionId | null;
+  /** Whether the first-run tutorial has been played through. */
+  tutorialDone: boolean;
 }
 
 export function newSave(): BeelineSave {
@@ -37,6 +39,7 @@ export function newSave(): BeelineSave {
     bestRunDay: 0,
     lastPlayedAt: Date.now(),
     provision: null,
+    tutorialDone: false,
   };
 }
 
@@ -80,6 +83,7 @@ export function coerceSave(raw: unknown): BeelineSave {
     // An unknown id — a provision renamed or removed between versions — becomes
     // "none" rather than crashing the lookup at dawn.
     provision: isProvisionId(data.provision) ? data.provision : null,
+    tutorialDone: data.tutorialDone === true,
   };
 }
 

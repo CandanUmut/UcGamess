@@ -55,7 +55,7 @@ describe('escalation schedule', () => {
     expect(features).toEqual({
       wind: false,
       wasps: 0,
-      brambles: 0,
+      mazeOpenness: 1,
       richPatches: false,
       nightBloom: false,
     });
@@ -69,13 +69,13 @@ describe('escalation schedule', () => {
     let previous = featuresForDay(1);
     for (let day = 2; day <= 16; day += 1) {
       const current = featuresForDay(day);
-      // Only the *first* thorn thicket counts as an introduction. Later days
-      // place more of them, but a second thicket is intensity, not a new thing
-      // to learn — the same reason a third flower has never counted either.
+      // Only the day the brambles first appear counts as an introduction. The
+      // maze tightening a little each day after that is intensity, not a new
+      // thing to learn — the same reason a third flower has never counted.
       const additions =
         (current.wind && !previous.wind ? 1 : 0) +
         (current.wasps > previous.wasps ? 1 : 0) +
-        (current.brambles > 0 && previous.brambles === 0 ? 1 : 0) +
+        (current.mazeOpenness < 1 && previous.mazeOpenness >= 1 ? 1 : 0) +
         (current.richPatches && !previous.richPatches ? 1 : 0) +
         (current.nightBloom && !previous.nightBloom ? 1 : 0);
       expect(additions, `day ${day} introduced ${additions} things`).toBeLessThanOrEqual(

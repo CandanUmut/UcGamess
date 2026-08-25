@@ -410,6 +410,63 @@ is players quitting after a failed run rather than starting another.
 
 ---
 
+## Considered while replacing thorns with a maze (2026-08-25)
+
+The playtest verdict was that the game had no skill in it and that the thorns
+were not real blocks. Built: a generated bramble maze, a title screen, a
+tutorial, and a start-over button (see `games/beeline/DESIGN.md` §24). These
+were weighed and left out.
+
+### Routes that block each other
+
+Proposed as the primary skill mechanic — your own lines cannot cross, so every
+route narrows the space for the next.
+
+**Why cut:** the playtest killed it correctly. With the hive in a corner and
+flowers scattered outward, routes are near-radial and almost never cross, so the
+constraint would have fired perhaps once a run. A rule the player never meets is
+not a mechanic.
+
+**Build when:** only if the hive ever moves to the middle of a board where
+routes genuinely have to share space.
+
+### Hand-authored levels
+
+The natural home for a labyrinth, and the most art-friendly structure.
+
+**Why cut:** the studio rules forbid a level editor, and hand-authoring boards
+is a content cost that never ends. A generator gets the same spatial problem
+with none of the pipeline — and the playtest chose to keep the endless-days
+structure rather than move to levels.
+
+**Build when:** if generated boards turn out to be samey in a way tuning cannot
+fix.
+
+### A finite wax budget
+
+A total length of line per day, so every pixel is a decision.
+
+**Why deferred:** a good idea, and a _second_ constraint on top of the maze. The
+maze is the one being tested; adding two at once is exactly how the last three
+passes went wrong.
+
+**Build when:** if the maze proves to be interesting but not demanding enough.
+This is the first multiplier to try on it.
+
+### Moving hazards
+
+Spikes and predators sweeping the board, drawn around live.
+
+**Why cut:** rewards twitch over planning, and the maze is a planning mechanic.
+The two fight each other.
+
+### A minimap
+
+**Why cut:** it would quietly undo the fog. The value of a dark maze is that the
+player holds it in their head; a minimap holds it for them.
+
+---
+
 ## How to add to this list
 
 Anything you were tempted to build but did not. Include what would change your

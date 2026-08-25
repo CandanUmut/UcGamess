@@ -216,25 +216,32 @@ describe('distance pays', () => {
     expect(patch.honeyLeft).toBeCloseTo(475, 5);
   });
 
-  it('never spawns a flower nearer than its band allows', () => {
-    // The guard that was missing. Placement falls back when rejection sampling
-    // runs out of attempts, and the old fallback clamped a far point onto the
-    // board edge — which, with the hive in a corner, put it back next to the
-    // hive. A rich flower worth 2200 honey turned up seventy pixels from home.
-    //
-    // Distance is the one property that must hold, because yield, pool value
-    // and the whole near-versus-far decision are derived from it.
+  it('never spawns a flower on top of the hive, or off the board', () => {
+    // Distance is what yield, honey value and the whole near-versus-far
+    // decision are derived from, so a flower in the hive's own cell is not a
+    // slightly-off flower, it is a broken one. And the reach ring is the thing
+    // the player aims at — one running off the edge is unaimable at exactly the
+    // moment it matters.
+    const margin = TUNING.patch.reachRadius;
     for (let day = 1; day <= 14; day += 1) {
       for (let trial = 0; trial < 30; trial += 1) {
         const field = newDay(day);
+        const hiveCol = field.maze.colAt(field.hiveX);
+        const hiveRow = field.maze.rowAt(field.hiveY);
+
         for (const patch of field.patches) {
-          const distance = Math.hypot(patch.x - field.hiveX, patch.y - field.hiveY);
-          const floor =
-            patch.kind === 'rich' ? TUNING.patch.richMinRadius : TUNING.patch.minRadius;
           expect(
-            distance,
-            `day ${day}: a ${patch.kind} flower spawned ${Math.round(distance)}px out`,
-          ).toBeGreaterThanOrEqual(Math.min(floor, 1000) * 0.9);
+            field.maze.colAt(patch.x) === hiveCol &&
+              field.maze.rowAt(patch.y) === hiveRow,
+            `day ${day}: a flower spawned in the hive's own cell`,
+          ).toBe(false);
+
+          // The whole reach ring stays on the board: it is the thing the
+          // player aims at, and one running off the edge is unaimable at
+          // exactly the moment it matters.
+          expect(patch.x - margin).toBeGreaterThan(-1);
+          expect(patch.x + margin).toBeLessThan(WORLD_WIDTH + 1);
+          expect(patch.y + margin).toBeLessThan(WORLD_HEIGHT + 1);
         }
       }
     }

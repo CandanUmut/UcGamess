@@ -25,10 +25,13 @@ export interface DayModifiers {
   patchPool: number;
   /** Radius the map is lit to around the hive at dawn. 0 for none. */
   scoutRadius: number;
-  /** Multiplier on the starting size of every thicket. */
-  brambleScale: number;
-  /** Whether thickets spread through the day. */
-  brambleGrows: boolean;
+  /**
+   * Extra openness carved into the maze at dawn, 0..1.
+   *
+   * Added to the day's own openness, so it opens gaps rather than removing the
+   * board — a cleared path is still a path through brambles.
+   */
+  mazeOpennessBonus: number;
   /** Multiplier on a wasp's intercept radius. */
   waspIntercept: number;
   /** Multiplier on the safe radius around the hive. */
@@ -43,8 +46,7 @@ export function noModifiers(): DayModifiers {
   return {
     patchPool: 1,
     scoutRadius: 0,
-    brambleScale: 1,
-    brambleGrows: true,
+    mazeOpennessBonus: 0,
     waspIntercept: 1,
     waspSafeRadius: 1,
     extraHoldSeconds: 0,
@@ -108,12 +110,11 @@ export const PROVISIONS: Record<ProvisionId, ProvisionInfo> = {
   pruningShears: {
     id: 'pruningShears',
     name: 'Pruning Shears',
-    effect: 'thorns halved',
-    blurb: 'thorns start small and do not spread',
-    relevant: (features) => features.brambles > 0,
+    effect: 'wider paths',
+    blurb: 'the brambles are cut back overnight',
+    relevant: (features) => features.mazeOpenness < 1,
     apply: (m) => {
-      m.brambleScale = 0.5;
-      m.brambleGrows = false;
+      m.mazeOpennessBonus = 0.25;
     },
   },
   smokePot: {

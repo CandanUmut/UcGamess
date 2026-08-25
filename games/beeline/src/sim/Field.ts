@@ -3,11 +3,11 @@ import { Bee } from './Bee.ts';
 import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp } from './Wasp.ts';
-import { Bramble, blockedDistanceAlong, segmentBlocked } from './Bramble.ts';
+import { Maze } from './Maze.ts';
 import { Fog } from './Fog.ts';
 import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
 import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
-import { brambleRadiusForDay, type DayFeatures } from '../game/DayCycle.ts';
+import type { DayFeatures } from '../game/DayCycle.ts';
 import { noModifiers, type DayModifiers } from '../game/Provisions.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -25,6 +25,29 @@ export const WORLD_WIDTH = 1280;
 export const WORLD_HEIGHT = 720;
 /** Top strip reserved for the HUD; nothing spawns under it. */
 const HUD_MARGIN = 110;
+/**
+ * Gap between the maze and the edge of the board.
+ *
+ * Sized so a cell centre always has room for a flower's whole reach ring. The
+ * ring is what the player aims at, and one running off the edge is unaimable at
+ * exactly the moment it matters — with the maze flush to the board, the
+ * outermost cell centres sat 80px in and the ring needed 85.
+ */
+const MAZE_INSET = 30;
+
+/**
+ * How far from the hive its own dawn light actually *discovers*, not merely
+ * brightens.
+ *
+ * Reveal falls off linearly to `fog.edgeReveal` at the rim while discovery
+ * needs `fog.discoverAt`, so the useful radius is meaningfully smaller than the
+ * sight radius — 330 against 420 at the current tuning. Getting these two
+ * confused is what once shipped a completely dark day one.
+ */
+function hiveDiscoveryRadius(): number {
+  const { discoverAt, edgeReveal } = TUNING.fog;
+  return TUNING.hive.sightRadius * ((1 - discoverAt) / (1 - edgeReveal));
+}
 
 export interface FieldStats {
   honey: number;
@@ -53,7 +76,7 @@ export interface FieldEvents {
 const NO_FEATURES: DayFeatures = {
   wind: false,
   wasps: 0,
-  brambles: 0,
+  mazeOpenness: 1,
   richPatches: false,
   nightBloom: false,
 };
@@ -75,7 +98,25 @@ export class Field {
   patches: Patch[] = [];
   bees: Bee[] = [];
   wasps: Wasp[] = [];
-  brambles: Bramble[] = [];
+  /**
+   * The bramble maze the board is carved into.
+   *
+   * Replaces the scattered thorn circles. See sim/Maze.ts — the short version
+   * is that a few obstacles on an open board leave the straight line correct
+   * almost every time, so the shape the player draws almost never matters, and
+   * that is fatal for a game whose only verb is drawing a shape.
+   */
+  readonly maze = new Maze(
+    MAZE_INSET,
+    HUD_MARGIN,
+    WORLD_WIDTH - MAZE_INSET * 2,
+    WORLD_HEIGHT - HUD_MARGIN - MAZE_INSET,
+    TUNING.maze.cols,
+    TUNING.maze.rows,
+  );
+
+  /** Steps through the maze from the hive's cell to every other. */
+  private cellSteps: Int32Array = new Int32Array(0);
   /** What the player has seen of the board today. */
   readonly fog = new Fog(WORLD_WIDTH, WORLD_HEIGHT);
 
@@ -156,10 +197,19 @@ export class Field {
     this.clearRoutes();
     this.patches = [];
     this.wasps = [];
-    this.brambles = [];
 
     this.patchPool = Math.round(
       (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
+    );
+
+    // The maze is carved *before* the flowers, because a flower's position is
+    // chosen by how many corridors away it is, and its yield is derived from
+    // that. This is the reverse of the old thorn field, where obstacles were
+    // placed relative to flowers that already existed.
+    this.maze.generate(Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus));
+    this.cellSteps = this.maze.distancesFrom(
+      this.maze.colAt(this.hiveX),
+      this.maze.rowAt(this.hiveY),
     );
 
     for (let i = 0; i < patchCount; i += 1) {
@@ -167,10 +217,6 @@ export class Field {
         features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
       this.spawnPatch(kind);
     }
-
-    // Thorns go down after the flowers, because every thicket is placed
-    // relative to a flower it is meant to complicate.
-    this.spawnBrambles(day, features.brambles);
 
     this.windStrength = features.wind
       ? Math.min(
@@ -221,11 +267,6 @@ export class Field {
         honey: Math.round(patch.honeyLeft),
       });
     }
-
-    for (const bramble of this.brambles) {
-      if (bramble.discovered) continue;
-      if (this.fog.isDiscovered(bramble.x, bramble.y)) bramble.discovered = true;
-    }
   }
 
   // ---------------------------------------------------------------- swarm
@@ -250,99 +291,124 @@ export class Field {
 
   // ---------------------------------------------------------------- patches
 
+  /**
+   * A spot for a flower, chosen by how far it is **through the maze**.
+   *
+   * On a maze board the straight-line distance and the flown distance are very
+   * different numbers, and the one that matters is the one the bees actually
+   * have to cover. Placing by BFS steps means a flower two corridors away is
+   * genuinely two corridors away, whatever the crow-flies distance says.
+   *
+   * Flowers sit near the centre of a cell, jittered slightly so a board does
+   * not read as a grid of dots. Never in the hive's own cell, and never twice
+   * in the same cell.
+   */
   private randomPatchPosition(kind: PatchKind): { x: number; y: number } {
-    // The hive sits in a corner, so "further out" is most of the board rather
-    // than a ring around the middle. That is where the extra map came from: the
-    // longest route went from about 560px to about 1100 without the camera
-    // moving or anything on screen getting smaller.
-    // Only the outer edge moves with the day. Keeping the inner edge fixed
-    // means a near flower is always available as a fallback, so choosing
-    // between a cheap short route and a lucrative long one is a decision on
-    // every day of a run rather than only the late ones.
-    const maxRadius = Math.min(
-      TUNING.patch.maxRadius + (this.day - 1) * TUNING.patch.radiusPerDay,
-      1120,
-    );
-    const minRadius =
-      kind === 'rich'
-        ? Math.min(TUNING.patch.richMinRadius, maxRadius * 0.75)
-        : TUNING.patch.minRadius;
+    const { maze } = this;
+    const hiveCol = maze.colAt(this.hiveX);
+    const hiveRow = maze.rowAt(this.hiveY);
 
-    // Bounds leave room for the reach ring, which is the thing the player aims
-    // at — a flower whose ring runs off the edge is unaimable at exactly the
-    // moment it matters. The top margin also clears the HUD.
-    const margin = TUNING.patch.reachRadius + 20;
-    const minX = margin;
-    const maxX = WORLD_WIDTH - margin;
-    const minY = HUD_MARGIN + margin;
-    const maxY = WORLD_HEIGHT - margin;
+    // The band of maze-steps a flower may sit in. Only the outer edge moves
+    // with the day, so a near flower is always available to fall back on and
+    // the near-versus-far decision is live on every day of a run.
+    const reach = this.stepsBandForDay(kind);
 
-    // Rejection-sample the whole board rather than sampling an angle and a
-    // radius. With the hive in a corner most of a circle around it is off the
-    // board, so polar sampling would pile flowers along the two edges the
-    // circle still intersects.
-    const sample = (): { x: number; y: number; distance: number } => {
-      const x = minX + Math.random() * (maxX - minX);
-      const y = minY + Math.random() * (maxY - minY);
-      return { x, y, distance: Math.hypot(x - this.hiveX, y - this.hiveY) };
+    // Block out the cells around each existing flower, not just the cell it
+    // sits in. Two flowers in neighbouring cells put their reach rings on top
+    // of each other, which reads as one confusing blob and makes aiming
+    // ambiguous — the old field rejected spots within 170px for exactly this
+    // reason and the rule was lost in the move to cells.
+    const taken = new Set<number>();
+    const block = (col: number, row: number, spread: number): void => {
+      for (let dr = -spread; dr <= spread; dr += 1) {
+        for (let dc = -spread; dc <= spread; dc += 1) {
+          const c = col + dc;
+          const r = row + dr;
+          if (maze.inside(c, r)) taken.add(r * maze.cols + c);
+        }
+      }
     };
 
-    // Overlapping bloom circles read as one confusing blob and make aiming
-    // ambiguous, so spacing is preferred — but it is the first thing given up.
-    const spaced = (x: number, y: number): boolean =>
-      !this.patches.some((p) => p.alive && Math.hypot(p.x - x, p.y - y) < 170);
-
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const spot = sample();
-      if (spot.distance < minRadius || spot.distance > maxRadius) continue;
-      if (spaced(spot.x, spot.y)) return { x: spot.x, y: spot.y };
+    for (const patch of this.patches) {
+      if (!patch.alive) continue;
+      block(maze.colAt(patch.x), maze.rowAt(patch.y), 1);
     }
+    // Only the hive's own cell, not its neighbours. Day one's flowers are
+    // deliberately one corridor out so they sit inside the hive's light, and
+    // blocking the ring around the hive would push them straight back out of
+    // it and leave the tutorial with nothing to point at.
+    taken.add(hiveRow * maze.cols + hiveCol);
 
-    // Crowded board: keep the band, drop the spacing.
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const spot = sample();
-      if (spot.distance >= minRadius && spot.distance <= maxRadius) {
-        return { x: spot.x, y: spot.y };
+    // Spaced and in band; then spaced at any distance; then merely not on top
+    // of something. Giving up entirely is never an option — a day short of a
+    // flower is recoverable, a flower in the hive is not.
+    const inBand: number[] = [];
+    const spaced: number[] = [];
+    const anywhere: number[] = [];
+
+    for (let index = 0; index < this.cellSteps.length; index += 1) {
+      const steps = this.cellSteps[index] ?? -1;
+      if (steps < 1) continue;
+
+      const col = index % maze.cols;
+      const row = Math.floor(index / maze.cols);
+      const onTop =
+        this.patches.some(
+          (p) => p.alive && maze.colAt(p.x) === col && maze.rowAt(p.y) === row,
+        ) ||
+        (col === hiveCol && row === hiveRow);
+      if (onTop) continue;
+
+      anywhere.push(index);
+      if (taken.has(index)) continue;
+      spaced.push(index);
+      if (steps < reach.min || steps > reach.max) continue;
+
+      // On the teaching days every flower must start lit, or the hint line has
+      // nothing to point at and a first-time player gets a black screen. Making
+      // it a placement rule rather than a happy consequence of the numbers is
+      // the difference between a guarantee and a coincidence.
+      if (this.day < TUNING.maze.startDay) {
+        const centre = maze.centreOf(col, row);
+        const reachable = Math.hypot(centre.x - this.hiveX, centre.y - this.hiveY);
+        if (reachable > hiveDiscoveryRadius()) continue;
       }
+
+      inBand.push(index);
     }
 
-    // Still nothing. Give up the *outer* bound and take the spot closest to it,
-    // never the inner one.
-    //
-    // Which bound is negotiable is the whole point. Distance is what yield,
-    // honey value and the entire near-versus-far decision are derived from, so
-    // a flower inside its floor is not a slightly-off flower, it is a broken
-    // one — a rich patch worth 2200 honey once landed seventy pixels from the
-    // hive because the old fallback clamped a far point onto the board edge.
-    // Overshooting the ceiling only ever makes a flower a longer trip away.
-    let best: { x: number; y: number } | null = null;
-    let bestError = Number.POSITIVE_INFINITY;
+    const pool = inBand.length > 0 ? inBand : spaced.length > 0 ? spaced : anywhere;
+    if (pool.length === 0) return { x: this.hiveX, y: this.hiveY };
 
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      const spot = sample();
-      if (spot.distance < minRadius) continue;
-      const error = Math.abs(spot.distance - maxRadius);
-      if (error >= bestError) continue;
-      bestError = error;
-      best = { x: spot.x, y: spot.y };
-    }
-    if (best) return best;
+    const index = pool[Math.floor(Math.random() * pool.length)] ?? 0;
+    const col = index % maze.cols;
+    const row = Math.floor(index / maze.cols);
+    const centre = maze.centreOf(col, row);
 
-    // Nowhere on the board is far enough: take the furthest point there is.
-    let furthest = { x: maxX, y: minY };
-    let furthestDistance = Math.hypot(maxX - this.hiveX, minY - this.hiveY);
-    for (const corner of [
-      { x: minX, y: minY },
-      { x: maxX, y: maxY },
-      { x: minX, y: maxY },
-    ]) {
-      const distance = Math.hypot(corner.x - this.hiveX, corner.y - this.hiveY);
-      if (distance > furthestDistance) {
-        furthestDistance = distance;
-        furthest = corner;
-      }
-    }
-    return furthest;
+    const jitterX = (Math.random() * 2 - 1) * maze.cellWidth * 0.14;
+    const jitterY = (Math.random() * 2 - 1) * maze.cellHeight * 0.14;
+
+    // The maze is inset far enough that a cell centre always has room for the
+    // whole reach ring, so this only has to catch the jitter.
+    const margin = TUNING.patch.reachRadius;
+    return {
+      x: clamp(centre.x + jitterX, margin, WORLD_WIDTH - margin),
+      y: clamp(centre.y + jitterY, HUD_MARGIN + margin, WORLD_HEIGHT - margin),
+    };
+  }
+
+  /** How many maze-steps out a flower of this kind may be placed, for the day. */
+  private stepsBandForDay(kind: PatchKind): { min: number; max: number } {
+    // Expressed in steps rather than pixels because the maze is what a bee has
+    // to fly. Grows slowly: the outer edge of the field is what opens up over a
+    // run, and the inner edge never moves.
+    const outward = Math.min(6, 1 + Math.floor((this.day - 1) / 2));
+    if (kind === 'rich') return { min: Math.max(3, outward), max: 99 };
+    // Wide enough that the spacing rule always has somewhere in-band to put the
+    // next flower. Too tight and the last flower of the day falls through to
+    // "anywhere free", which lands it far out — so a tight early band made the
+    // *early* days darker than the later ones, exactly backwards.
+    return { min: 1, max: outward + 1 };
   }
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
@@ -362,7 +428,13 @@ export class Field {
    */
   distanceMultiplierAt(x: number, y: number): number {
     const { distanceYieldNear, distanceYieldFar, distanceYieldMax } = TUNING.patch;
-    const distance = Math.hypot(x - this.hiveX, y - this.hiveY);
+    // Through the maze, not across it. A flower behind three hedges is a long
+    // trip however close it looks, and paying by crow-flies distance would make
+    // the most awkward flowers on the board also the worst value.
+    const distance = Math.max(
+      this.pathDistanceTo(x, y),
+      Math.hypot(x - this.hiveX, y - this.hiveY),
+    );
     const span = Math.max(1, distanceYieldFar - distanceYieldNear);
     const t = (distance - distanceYieldNear) / span;
     return 1 + Math.min(1, Math.max(0, t)) * (distanceYieldMax - 1);
@@ -414,283 +486,48 @@ export class Field {
     return this.patches.filter((p) => p.alive && p.discovered);
   }
 
-  // ---------------------------------------------------------------- brambles
+  // ---------------------------------------------------------------- maze
 
   /**
-   * Places thorn thickets across the field.
-   *
-   * Placement is the whole design here, not decoration. A thicket dropped at
-   * random is usually somewhere nobody was going to fly, so it changes nothing
-   * and reads as scenery. Each one is instead placed **on the line between the
-   * hive and a flower**, pushed sideways by up to two thirds of its own radius,
-   * so it blocks the lazy straight line without walling the flower off. Every
-   * flower ends up asking a routing question, and the answer is always a curve
-   * that exists.
-   *
-   * Three clearances are enforced and none of them is optional:
-   *
-   *  - away from the hive draw ring, so a route can always be started;
-   *  - away from every flower's reach ring, so a route can always be finished;
-   *  - away from other thickets, so two never fuse into a wall.
-   *
-   * A spot that cannot satisfy all three is simply skipped. Fewer thorns is a
-   * fine outcome; an unplayable field is not.
-   */
-  private spawnBrambles(day: number, count: number): void {
-    if (count <= 0) return;
-
-    const radius = brambleRadiusForDay(day) * this.modifiers.brambleScale;
-    if (radius <= 1) return;
-
-    const growth = this.modifiers.brambleGrows ? TUNING.bramble.growthPerSecond : 0;
-
-    // Furthest flowers first. A thicket needs a corridor of roughly the hive
-    // ring plus the flower ring plus twice its own grown radius to sit between
-    // them, and only the long routes have that much room — which is exactly
-    // where thorns belong. Distance is already the risk axis of this game, and
-    // this sharpens it rather than adding a second one. The short flower stays
-    // clean, so there is always a safe option to fall back to.
-    const targets = this.patches
-      .filter((p) => p.alive)
-      .sort(
-        (a, b) =>
-          Math.hypot(b.x - this.hiveX, b.y - this.hiveY) -
-          Math.hypot(a.x - this.hiveX, a.y - this.hiveY),
-      );
-    if (targets.length === 0) return;
-
-    const grown = radius * TUNING.bramble.growthFactor;
-    const { hiveClearance, patchClearance, minLineFraction, maxLineFraction } =
-      TUNING.bramble;
-
-    // The band of the line a thicket can legally sit on, worked out rather than
-    // guessed at. It has to clear the hive draw ring at one end and the
-    // flower's reach ring at the other, both at its grown size, which leaves
-    // only `span - 195 - 2 × grown` of usable line. Sampling a fixed 0.34-0.7
-    // of the line and hoping found the legal band about one try in ten, so most
-    // slots quietly went unfilled and the field came out nearly bare.
-    const minFromHive = TUNING.hive.drawRadius + grown + hiveClearance;
-    const minFromPatch =
-      TUNING.patch.reachRadius * TUNING.bramble.patchRingFraction +
-      grown +
-      patchClearance;
-
-    for (let slot = 0; slot < count; slot += 1) {
-      let placed = false;
-
-      // Walk the whole flower list for each slot rather than giving up on the
-      // one flower this slot was offered. A short line genuinely has no room,
-      // and abandoning the slot there is how the field ends up bare.
-      for (let step = 0; step < targets.length && !placed; step += 1) {
-        const patch = targets[(slot + step) % targets.length];
-        if (!patch) continue;
-
-        const dx = patch.x - this.hiveX;
-        const dy = patch.y - this.hiveY;
-        const span = Math.hypot(dx, dy) || 1;
-
-        const lo = Math.max(minLineFraction, minFromHive / span);
-        const hi = Math.min(maxLineFraction, 1 - minFromPatch / span);
-        if (lo >= hi) continue; // this flower is simply too near the hive
-
-        const nx = -dy / span;
-        const ny = dx / span;
-
-        for (let attempt = 0; attempt < 8; attempt += 1) {
-          const along = lo + Math.random() * (hi - lo);
-          // The sideways nudge only ever increases distance from both rings, so
-          // it can loosen the placement but never break it.
-          const offset = (Math.random() * 2 - 1) * radius * 0.6;
-          const x = this.hiveX + dx * along + nx * offset;
-          const y = this.hiveY + dy * along + ny * offset;
-
-          if (!this.brambleSpotIsClear(x, y, radius)) continue;
-
-          this.brambles.push(new Bramble(x, y, radius, growth));
-          placed = true;
-          break;
-        }
-      }
-
-      // No flower line had room. Fall back to anywhere legal on the field:
-      // thorns are terrain, and a thicket that does not sit on a particular
-      // line still shapes the curves the player can draw around it. Without
-      // this the late field tops out at about two thickets no matter what the
-      // schedule asks for, because only the two longest routes have the span to
-      // host one.
-      if (!placed) this.placeFreeBramble(radius, growth);
-    }
-
-    this.pruneUnreachableBrambles();
-  }
-
-  /**
-   * Removes any thicket that leaves a flower with no way in.
-   *
-   * The clearance rules make this rare rather than impossible: they keep each
-   * thicket off the hive ring and off the heart of every reach ring, but two
-   * thickets placed legally can still box a flower against the edge of the
-   * board — which the corner hive made more likely, because flowers now spawn
-   * much closer to the corners.
-   *
-   * A walled-off flower is not difficulty, it is a flower the player wastes a
-   * drag on and cannot ever use. Checking after placement and dropping the
-   * offender makes the guarantee structural rather than a statistical property
-   * we hope holds, and it costs one sweep a day.
-   */
-  private pruneUnreachableBrambles(): void {
-    for (const patch of this.patches) {
-      if (!patch.alive) continue;
-
-      let guard = 0;
-      while (!this.hasClearApproach(patch.x, patch.y) && guard < this.brambles.length) {
-        guard += 1;
-
-        // Drop the thicket nearest the straight line in, which is the one most
-        // likely to be doing the boxing in.
-        let worst = -1;
-        let worstDistance = Number.POSITIVE_INFINITY;
-        for (let i = 0; i < this.brambles.length; i += 1) {
-          const bramble = this.brambles[i];
-          if (!bramble) continue;
-          const distance = Math.hypot(bramble.x - patch.x, bramble.y - patch.y);
-          if (distance < worstDistance) {
-            worstDistance = distance;
-            worst = i;
-          }
-        }
-        if (worst < 0) break;
-        this.brambles.splice(worst, 1);
-      }
-    }
-  }
-
-  /**
-   * Whether a flower can be reached by a single dog-leg through one waypoint.
-   *
-   * Deliberately a modest bar: one bend is one flick of a thumb. A flower that
-   * needed an elaborate serpentine would technically pass a looser check and
-   * still feel unfair.
-   */
-  hasClearApproach(px: number, py: number): boolean {
-    if (!this.pathBlocked(this.hiveX, this.hiveY, px, py)) return true;
-
-    const dx = px - this.hiveX;
-    const dy = py - this.hiveY;
-    const span = Math.hypot(dx, dy) || 1;
-    const nx = -dy / span;
-    const ny = dx / span;
-
-    // Offsets scale with the route: a 190px sidestep is a sharp dodge on a
-    // 300px line and barely a lean on a 900px one, and the board now has both.
-    for (const fraction of [0.14, 0.22, 0.3, 0.4, 0.5]) {
-      const offset = Math.max(90, span * fraction);
-      for (const side of [-1, 1]) {
-        for (const along of [0.35, 0.5, 0.65]) {
-          const wx = this.hiveX + dx * along + nx * offset * side;
-          const wy = this.hiveY + dy * along + ny * offset * side;
-          if (
-            !this.pathBlocked(this.hiveX, this.hiveY, wx, wy) &&
-            !this.pathBlocked(wx, wy, px, py)
-          ) {
-            return true;
-          }
-        }
-      }
-    }
-    return false;
-  }
-
-  private placeFreeBramble(radius: number, growth: number): void {
-    // Rejection-sample the whole board rather than a ring around the hive. With
-    // the hive in a corner most of such a ring is off the board, which is how
-    // this quietly stopped placing anything when the map changed shape.
-    const margin = radius * TUNING.bramble.growthFactor;
-    const minX = margin;
-    const maxX = WORLD_WIDTH - margin;
-    const minY = HUD_MARGIN + margin;
-    const maxY = WORLD_HEIGHT - margin;
-
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const x = minX + Math.random() * (maxX - minX);
-      const y = minY + Math.random() * (maxY - minY);
-      if (!this.brambleSpotIsClear(x, y, radius)) continue;
-
-      this.brambles.push(new Bramble(x, y, radius, growth));
-      return;
-    }
-  }
-
-  private brambleSpotIsClear(x: number, y: number, radius: number): boolean {
-    const { hiveClearance, patchClearance, siblingClearance } = TUNING.bramble;
-    // A thicket grows, so every clearance is checked against the size it will
-    // reach, not the size it starts at. Otherwise the field is legal at dawn
-    // and illegal by mid-afternoon.
-    const grown = radius * TUNING.bramble.growthFactor;
-
-    if (
-      Math.hypot(x - this.hiveX, y - this.hiveY) <
-      TUNING.hive.drawRadius + grown + hiveClearance
-    ) {
-      return false;
-    }
-
-    // Stay inside the canvas, or half a thicket sits off-screen and the gap it
-    // leaves is one the player cannot see to aim at.
-    if (x < grown || x > 1280 - grown || y < 110 + grown || y > 720 - grown) return false;
-
-    for (const other of this.patches) {
-      if (!other.alive) continue;
-      const gap =
-        TUNING.patch.reachRadius * TUNING.bramble.patchRingFraction +
-        grown +
-        patchClearance;
-      if (Math.hypot(other.x - x, other.y - y) < gap) return false;
-    }
-
-    for (const other of this.brambles) {
-      if (
-        Math.hypot(other.x - x, other.y - y) <
-        other.maxRadius + grown + siblingClearance
-      ) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Where a path first meets thorns, measured from the start of the path.
+   * Where a path first meets a wall, measured from the start of the path.
    *
    * `Infinity` when it is clear. Everything that needs to know "can bees get
    * along this line" — committing a drag, aim assist, and the per-step recheck
-   * that catches wind bending a route into a thicket — goes through here.
+   * that catches wind bending a route into a hedge — goes through here.
    */
   blockedDistance(poly: Polyline, limit: number): number {
-    return blockedDistanceAlong(poly, limit, this.brambles);
+    return this.maze.blockedDistanceAlong(poly, limit);
+  }
+
+  /** Whether a straight hop from a to b crosses a wall. */
+  pathBlocked(ax: number, ay: number, bx: number, by: number): boolean {
+    return this.maze.segmentBlocked(ax, ay, bx, by);
   }
 
   /**
-   * Whether a straight hop from a to b passes through thorns.
+   * Whether a flower can be reached at all.
    *
-   * `knownOnly` distinguishes the two callers. Aim assist must reason from what
-   * the player can see, so it asks about discovered thickets — refusing to snap
-   * because of an invisible one would look like a bug. The route clip asks
-   * about all of them, because an unseen thicket is still there, and being cut
-   * by it is how the player finds out.
+   * Always true by construction — the maze is carved from a spanning tree, so
+   * every cell reaches every other. Kept as a named check because the guarantee
+   * is the load-bearing one and a test that asserts it should have something to
+   * ask.
    */
-  pathBlocked(
-    ax: number,
-    ay: number,
-    bx: number,
-    by: number,
-    knownOnly = false,
-  ): boolean {
-    const obstacles = knownOnly
-      ? this.brambles.filter((b) => b.discovered)
-      : this.brambles;
-    return segmentBlocked(ax, ay, bx, by, obstacles);
+  hasClearApproach(px: number, py: number): boolean {
+    const col = this.maze.colAt(px);
+    const row = this.maze.rowAt(py);
+    if (!this.maze.inside(col, row)) return false;
+    return (this.cellSteps[row * this.maze.cols + col] ?? -1) >= 0;
+  }
+
+  /** How far a point is from the hive *through the maze*, in design units. */
+  pathDistanceTo(x: number, y: number): number {
+    const col = this.maze.colAt(x);
+    const row = this.maze.rowAt(y);
+    if (!this.maze.inside(col, row)) return 0;
+
+    const steps = this.cellSteps[row * this.maze.cols + col] ?? 0;
+    const cell = (this.maze.cellWidth + this.maze.cellHeight) / 2;
+    return Math.max(0, steps) * cell;
   }
 
   // ---------------------------------------------------------------- routes
@@ -874,7 +711,6 @@ export class Field {
     this.elapsed += dt;
 
     for (const patch of this.patches) patch.step(dt);
-    for (const bramble of this.brambles) bramble.step(dt);
 
     if (this.windStrength > 0) this.stepWind(dt);
 
@@ -954,21 +790,17 @@ export class Field {
   }
 
   /**
-   * Cuts a route back to where it now meets thorns.
+   * Cuts a route back to where it now meets a wall.
    *
-   * Checked every step rather than only on commit, because two things move
-   * under a route the player already drew: the wind bows it sideways, and
-   * thickets spread. A line that was clear at dawn can be in the brambles by
-   * mid-afternoon, and the honest answer is that it stops working there.
-   *
-   * That interaction was free — wind and growing thorns were built for their
-   * own reasons and produce it between them — and it is the best pressure in
-   * the game, because it makes a route something you maintain rather than
-   * something you place.
+   * Checked every step rather than only on commit, because the wind bows a
+   * drawn line sideways over time — a route threaded neatly down a corridor at
+   * dawn can be pressed into the hedge beside it by mid-afternoon. That
+   * interaction was free: wind and the maze were built for their own reasons
+   * and produce it between them, and it is the best pressure in the game
+   * because it makes a route something you maintain rather than something you
+   * place.
    */
   private clipRouteAtThorns(route: Route): void {
-    if (this.brambles.length === 0) return;
-
     const hit = this.blockedDistance(route.poly, route.liveLength);
     if (!Number.isFinite(hit) || hit >= route.liveLength) return;
 
@@ -1263,4 +1095,8 @@ export class Field {
       collecting,
     };
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value;
 }

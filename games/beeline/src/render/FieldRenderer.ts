@@ -2,7 +2,6 @@ import type Phaser from 'phaser';
 import { COLORS, TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
 import type { Patch } from '../sim/Patch.ts';
-import type { Bramble } from '../sim/Bramble.ts';
 import {
   WORLD_HEIGHT as PLAYFIELD_HEIGHT,
   WORLD_WIDTH as PLAYFIELD_WIDTH,
@@ -21,13 +20,13 @@ export class FieldRenderer {
   private readonly hiveGlow: Phaser.GameObjects.Image;
   private readonly waspGfx: Phaser.GameObjects.Graphics;
   /**
-   * Thorns get their own layer beneath the routes.
+   * The maze gets its own layer beneath the routes.
    *
-   * A route drawn *over* a thicket would look like it passes through, which is
+   * A route drawn *over* a hedge would look like it passes through, which is
    * exactly the thing that cannot be true. Under the route layer, a line that
-   * ends at a thicket reads as stopped by it.
+   * ends at a wall reads as stopped by it.
    */
-  private readonly brambleGfx: Phaser.GameObjects.Graphics;
+  private readonly wallGfx: Phaser.GameObjects.Graphics;
   /**
    * The area outside the 1280x720 playfield, on devices whose canvas is a
    * different shape.
@@ -53,7 +52,7 @@ export class FieldRenderer {
       .setTint(COLORS.hive)
       .setScale(1.6);
     this.waspGfx = scene.add.graphics().setDepth(depth + 3);
-    this.brambleGfx = scene.add.graphics().setDepth(depth + 4);
+    this.wallGfx = scene.add.graphics().setDepth(depth + 4);
     this.surroundGfx = scene.add.graphics().setDepth(depth + 60);
   }
 
@@ -100,7 +99,7 @@ export class FieldRenderer {
       this.drawPatch(g, patch, field.time);
     }
     this.drawLabels(field);
-    this.drawBrambles(field);
+    this.drawWalls(field);
 
     // The area a new route can start from. Brightening it while the player is
     // mid-drag is the only chrome the playfield has.
@@ -214,49 +213,71 @@ export class FieldRenderer {
   }
 
   /**
-   * Thorn thickets: a dark mass with a spiked rim.
+   * The bramble walls, drawn only where the player has been.
    *
-   * Drawn dark and matte against a field of glowing flowers and a glowing hive,
-   * because the one thing the player has to read instantly is "nothing of mine
-   * goes there". The spikes are a fixed shape per thicket and only the radius
-   * animates, so growth reads as growth rather than as noise.
+   * A wall is drawn as a rounded bar centred on the cell edge it closes, which
+   * is exactly where the collision test puts it — so a line that stops against
+   * a hedge stops where the hedge looks like it is.
+   *
+   * Fog gates it per wall rather than per board: an unexplored corridor stays
+   * black, and learning the layout by flying it is the point. A wall is shown
+   * once either of the cells it divides has been seen, because a hedge you have
+   * stood next to is a hedge you know about.
    */
-  private drawBrambles(field: Field): void {
-    const g = this.brambleGfx;
+  private drawWalls(field: Field): void {
+    const g = this.wallGfx;
     g.clear();
-    if (field.brambles.length === 0) return;
 
-    for (const bramble of field.brambles) {
-      if (!bramble.discovered) continue;
-      this.drawBramble(g, bramble);
+    const { maze } = field;
+    const thickness = TUNING.maze.wallThickness;
+    const half = thickness / 2;
+
+    const seen = (col: number, row: number): boolean =>
+      maze.inside(col, row) &&
+      field.fog.isDiscovered(maze.centreOf(col, row).x, maze.centreOf(col, row).y);
+
+    // Vertical edges: the wall to the left of each cell.
+    for (let row = 0; row < maze.rows; row += 1) {
+      for (let col = 0; col <= maze.cols; col += 1) {
+        if (!maze.wallLeft(col, row)) continue;
+        if (!seen(col, row) && !seen(col - 1, row)) continue;
+
+        const x = maze.originX + col * maze.cellWidth;
+        const y = maze.originY + row * maze.cellHeight;
+        this.drawWallBar(g, x - half, y, thickness, maze.cellHeight);
+      }
+    }
+
+    // Horizontal edges: the wall above each cell.
+    for (let row = 0; row <= maze.rows; row += 1) {
+      for (let col = 0; col < maze.cols; col += 1) {
+        if (!maze.wallAbove(col, row)) continue;
+        if (!seen(col, row) && !seen(col, row - 1)) continue;
+
+        const x = maze.originX + col * maze.cellWidth;
+        const y = maze.originY + row * maze.cellHeight;
+        this.drawWallBar(g, x, y - half, maze.cellWidth, thickness);
+      }
     }
   }
 
-  private drawBramble(g: Phaser.GameObjects.Graphics, bramble: Bramble): void {
-    const { x, y, radius, spikes } = bramble;
+  private drawWallBar(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): void {
+    // A soft dark halo so the edge does not read as a hard cut-out, and so the
+    // boundary a route stops at is visible slightly before it is reached.
+    g.fillStyle(0x000000, 0.4);
+    g.fillRoundedRect(x - 3, y - 3, width + 6, height + 6, 8);
 
-    // A soft dark halo so the edge does not look like a hard cut-out, and so
-    // the boundary the route stops at is visible slightly before it is reached.
-    g.fillStyle(0x000000, 0.32);
-    g.fillCircle(x, y, radius * 1.12);
+    g.fillStyle(COLORS.wall, 0.97);
+    g.fillRoundedRect(x, y, width, height, 6);
 
-    g.fillStyle(COLORS.bramble, 0.96);
-    g.fillCircle(x, y, radius);
-
-    g.lineStyle(2, COLORS.brambleThorn, 0.75);
-    for (let i = 0; i < spikes.length; i += 2) {
-      const angle = spikes[i] ?? 0;
-      const reach = spikes[i + 1] ?? 1;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      g.beginPath();
-      g.moveTo(x + cos * radius * 0.55, y + sin * radius * 0.55);
-      g.lineTo(x + cos * radius * reach, y + sin * radius * reach);
-      g.strokePath();
-    }
-
-    g.lineStyle(2, COLORS.brambleThorn, 0.5);
-    g.strokeCircle(x, y, radius);
+    g.lineStyle(1.5, COLORS.wallThorn, 0.5);
+    g.strokeRoundedRect(x, y, width, height, 6);
   }
 
   private drawWasps(field: Field, alpha: number): void {
@@ -284,7 +305,7 @@ export class FieldRenderer {
     this.gfx.destroy();
     this.hiveGlow.destroy();
     this.waspGfx.destroy();
-    this.brambleGfx.destroy();
+    this.wallGfx.destroy();
     this.surroundGfx.destroy();
     for (const label of this.labels) label.destroy();
     this.labels = [];
