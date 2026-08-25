@@ -105,6 +105,15 @@ export interface RouteTuning {
   strengthKeptOnRedraw: number;
   /** Seconds at full length before the far end starts retreating. */
   holdSeconds: number;
+  /**
+   * How long a route stays "pinched" after the wind presses it into a wall.
+   *
+   * Longer than a fixed step so the hazard is something a player can see and
+   * react to rather than a coin flip resolved between frames.
+   */
+  pinchSeconds: number;
+  /** How near the pinch a laden bee has to pass to lose its load. */
+  pinchRadius: number;
   /** Retreat speed in px/s once decay begins. */
   decaySpeed: number;
   /** Below this live length the route dies. */
@@ -185,11 +194,34 @@ export interface WindTuning {
 
 export interface WaspTuning {
   startDay: number;
-  secondWaspDay: number;
   speed: number;
   safeRadius: number;
   interceptRadius: number;
   scatterSeconds: number;
+  /** Bee hits to bring one down. */
+  health: number;
+  /** Honey a wasp drains per second once it reaches the hive. */
+  stealPerSecond: number;
+  /** Seconds between a raiding wasp driving off one more bee. */
+  beeLossInterval: number;
+  /** How long a wasp lingers at the hive before leaving on its own. */
+  raidSeconds: number;
+  /** Damage one arriving bee does. */
+  beeDamage: number;
+  /** How close a route's tip must be for its bees to reach the wasp. */
+  reachRadius: number;
+  /** How close a wasp must get to the hive to start robbing it. */
+  arriveRadius: number;
+}
+
+export interface RaidTuning {
+  minGapSeconds: number;
+  maxGapSeconds: number;
+  firstRaidEarliest: number;
+  warningSeconds: number;
+  baseSize: number;
+  sizeEveryDays: number;
+  maxSize: number;
 }
 
 export interface MazeTuning {
@@ -255,6 +287,7 @@ export interface Tuning {
   day: DayTuning;
   wind: WindTuning;
   wasp: WaspTuning;
+  raid: RaidTuning;
   fog: {
     cellSize: number;
     /** Reveal at the edge of a sight radius, rising to 1 at its centre. */
@@ -354,6 +387,13 @@ export const TUNING: Tuning = {
     strengthSpeedBonus: 0.35,
     strengthKeptOnRedraw: 0.5,
     holdSeconds: 12.0,
+    // What finally gives the wind teeth. A route the player drew is always
+    // clear of the walls; only the wind can press a live one into a hedge, and
+    // while it is pressed the bees crossing that point lose what they carry.
+    // So the punishment lands on neglect, never on an imprecise thumb — which
+    // is the distinction the whole maze design rests on.
+    pinchSeconds: 0.8,
+    pinchRadius: 30,
     decaySpeed: 26,
     minLength: 40,
     refreshSnapRadius: 160,
@@ -452,13 +492,57 @@ export const TUNING: Tuning = {
     rotationSpeed: 0.12,
   },
 
+  /**
+   * Wasps, and the raids they come in.
+   *
+   * They used to drift about scattering the odd bee, which the playtest called
+   * out as doing "almost nothing". They now come for the hive itself.
+   *
+   * Timing is deliberately **random inside a range** rather than on a fixed
+   * interval. A metronome is something you learn once and then stop looking at;
+   * an unpredictable arrival keeps you watching the board, which is the whole
+   * point of putting an enemy on it. The warning is what keeps that fair —
+   * surprise about *when*, never about *whether you had a chance*.
+   */
   wasp: {
     startDay: 7,
-    secondWaspDay: 11,
     speed: 95,
     safeRadius: 160,
     interceptRadius: 34,
     scatterSeconds: 1.2,
+    /** Bee hits to bring one down. */
+    health: 5,
+    /** Honey a wasp drains per second once it reaches the hive. */
+    stealPerSecond: 14,
+    /** Seconds between a raiding wasp driving off one more bee. */
+    beeLossInterval: 2.2,
+    /** How long a wasp lingers at the hive before leaving on its own. */
+    raidSeconds: 12,
+    /** Damage one arriving bee does. */
+    beeDamage: 1,
+    /** How close a route's tip must be for its bees to reach the wasp. */
+    reachRadius: 74,
+    /** How close a wasp must get to the hive to start robbing it. */
+    arriveRadius: 70,
+  },
+
+  raid: {
+    /** Gap between raids, sampled uniformly. Never a metronome. */
+    minGapSeconds: 16,
+    maxGapSeconds: 38,
+    /** Quiet opening so the first raid never lands before the day has started. */
+    firstRaidEarliest: 18,
+    /**
+     * Seconds of warning before wasps appear.
+     *
+     * The whole fairness budget. Long enough to break off what you were doing
+     * and draw a defence, short enough that the surprise survives.
+     */
+    warningSeconds: 2.6,
+    /** Wasps per raid: base, plus one more every `sizeEveryDays`. */
+    baseSize: 1,
+    sizeEveryDays: 3,
+    maxSize: 4,
   },
 
   /**

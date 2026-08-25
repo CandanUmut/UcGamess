@@ -7,6 +7,13 @@ import { TUNING } from '../config/tuning.ts';
  * magic `8` in three places is how a schedule drifts out of sync with itself.
  */
 const RICH_PATCH_DAY = 9;
+/**
+ * The first day a raid brings more than one wasp.
+ *
+ * Derived from the raid tuning rather than written down twice, so the
+ * announcement always names the day the size actually changes.
+ */
+const SECOND_WASP_DAY = TUNING.wasp.startDay + TUNING.raid.sizeEveryDays;
 const NIGHT_BLOOM_DAY = 12;
 
 /** Seconds a given day runs for. Grows early, then flattens. */
@@ -84,7 +91,13 @@ export function mazeOpennessForDay(day: number): number {
 
 export interface DayFeatures {
   wind: boolean;
-  wasps: number;
+  /**
+   * Wasps in a single raid, or 0 on a day with no raids.
+   *
+   * Not "wasps on the board": raids arrive, do their damage and end, so the
+   * number that matters is how many turn up at once.
+   */
+  raidSize: number;
   /** 1 is an open field, lower is a tighter maze. */
   mazeOpenness: number;
   richPatches: boolean;
@@ -98,10 +111,18 @@ export interface DayFeatures {
  * each introduction so the last addition has room to be understood. Day one is
  * deliberately empty of everything.
  */
+export function raidSizeForDay(day: number): number {
+  const { startDay } = TUNING.wasp;
+  if (day < startDay) return 0;
+  const { baseSize, sizeEveryDays, maxSize } = TUNING.raid;
+  const extra = Math.floor((day - startDay) / Math.max(1, sizeEveryDays));
+  return Math.min(maxSize, baseSize + extra);
+}
+
 export function featuresForDay(day: number): DayFeatures {
   return {
     wind: day >= TUNING.wind.startDay,
-    wasps: day >= TUNING.wasp.secondWaspDay ? 2 : day >= TUNING.wasp.startDay ? 1 : 0,
+    raidSize: raidSizeForDay(day),
     mazeOpenness: mazeOpennessForDay(day),
     richPatches: day >= RICH_PATCH_DAY,
     nightBloom: day >= NIGHT_BLOOM_DAY,
@@ -118,11 +139,11 @@ export function dayIntroduction(day: number): string | null {
     case TUNING.wind.startDay:
       return 'Wind. Straight lines will bend.';
     case TUNING.wasp.startDay:
-      return 'Wasps. They hunt bees far from the hive.';
+      return 'Wasps raid the hive. Draw a line at one to send bees to fight.';
     case RICH_PATCH_DAY:
       return 'Rich patches bloom far away. Worth the distance?';
-    case TUNING.wasp.secondWaspDay:
-      return 'A second wasp.';
+    case SECOND_WASP_DAY:
+      return 'Raids come two at a time now.';
     case NIGHT_BLOOM_DAY:
       return 'Night bloom. Brief, and worth a lot.';
     default:
@@ -155,8 +176,8 @@ export function forecastFor(day: number): string[] {
     );
   }
   if (features.wind) out.push('wind');
-  if (features.wasps === 1) out.push('1 wasp');
-  else if (features.wasps > 1) out.push(`${features.wasps} wasps`);
+  if (features.raidSize === 1) out.push('wasp raids');
+  else if (features.raidSize > 1) out.push(`raids of ${features.raidSize}`);
   if (features.richPatches) out.push('rich blooms');
   if (features.nightBloom) out.push('night bloom');
 
@@ -175,9 +196,9 @@ export function nextUnlock(day: number): { day: number; what: string } | null {
 function unlockName(day: number): string | null {
   if (day === TUNING.maze.startDay) return 'brambles';
   if (day === TUNING.wind.startDay) return 'wind';
-  if (day === TUNING.wasp.startDay) return 'wasps';
+  if (day === TUNING.wasp.startDay) return 'wasp raids';
   if (day === RICH_PATCH_DAY) return 'rich blooms';
-  if (day === TUNING.wasp.secondWaspDay) return 'a second wasp';
+  if (day === SECOND_WASP_DAY) return 'bigger raids';
   if (day === NIGHT_BLOOM_DAY) return 'night bloom';
   return null;
 }

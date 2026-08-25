@@ -122,7 +122,7 @@ export const PROVISIONS: Record<ProvisionId, ProvisionInfo> = {
     name: 'Smoke Pot',
     effect: 'wasps kept back',
     blurb: 'wasps keep their distance',
-    relevant: (features) => features.wasps > 0,
+    relevant: (features) => features.raidSize > 0,
     apply: (m) => {
       m.waspIntercept = 0.45;
       m.waspSafeRadius = 1.9;

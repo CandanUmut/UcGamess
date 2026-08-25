@@ -7,6 +7,7 @@ import {
   type SamplePoint,
 } from './polyline.ts';
 import type { Patch } from './Patch.ts';
+import type { Wasp } from './Wasp.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -37,6 +38,14 @@ export class Route {
   holdRemaining: number;
   /** The patch this route was aimed at, if any. */
   target: Patch | null = null;
+  /**
+   * The wasp this route was aimed at, if any.
+   *
+   * A route has one job or the other, never both: bees flying it either bring
+   * nectar home or go and fight. That exclusivity *is* the cost of defending —
+   * every line you point at a wasp is a line that stopped earning.
+   */
+  targetWasp: Wasp | null = null;
   /** Bees currently assigned. Maintained by Field. */
   beeCount = 0;
   /**
@@ -60,6 +69,16 @@ export class Route {
    * rather than a choice — which is precisely why the game read as a toy.
    */
   strength = 0;
+
+  /**
+   * Where along the route the wind is currently crushing it into a wall, and
+   * for how much longer. `-1` when the road is clear.
+   *
+   * Held on the route rather than recomputed per bee because the contact is a
+   * property of the road's shape, and every bee on it wants the same answer.
+   */
+  pinchAt = -1;
+  pinchTimer = 0;
 
   constructor(coords: readonly number[], holdSeconds: number) {
     this.id = nextRouteId++;
@@ -127,6 +146,11 @@ export class Route {
       this.strength - this.strength * TUNING.route.strengthDecayPerSecond * dt,
     );
 
+    if (this.pinchTimer > 0) {
+      this.pinchTimer -= dt;
+      if (this.pinchTimer <= 0) this.pinchAt = -1;
+    }
+
     if (this.holdRemaining > 0) {
       this.holdRemaining -= dt;
     } else {
@@ -169,6 +193,17 @@ export class Route {
     }
 
     this.updateTip();
+  }
+
+  /** True while the wind has this road pressed into a hedge. */
+  get isPinched(): boolean {
+    return this.pinchTimer > 0 && this.pinchAt >= 0;
+  }
+
+  /** Records that a wall is currently biting the road at `s`. */
+  markPinch(s: number): void {
+    this.pinchAt = s;
+    this.pinchTimer = TUNING.route.pinchSeconds;
   }
 
   /** Whether the live tip still reaches `target`, so bees can collect. */

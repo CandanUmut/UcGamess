@@ -85,6 +85,7 @@ export class FieldRenderer {
   private readonly hiveSprite: Phaser.GameObjects.Image | null;
   /** One per wasp, reused. There are never more than a couple. */
   private wasps: Phaser.GameObjects.Image[] = [];
+  private warningPhase = 0;
   /**
    * One per visible wall bar, reused.
    *
@@ -480,6 +481,8 @@ export class FieldRenderer {
     const g = this.waspGfx;
     g.clear();
 
+    this.drawRaidWarning(field, g);
+
     while (this.wasps.length < field.wasps.length) {
       const sprite = this.scene.add
         .image(0, 0, this.scene.textures.exists(TEX.wasp) ? TEX.wasp : TEX.glow)
@@ -501,8 +504,35 @@ export class FieldRenderer {
 
       // Threat radius drawn faintly — the player needs to judge whether a route
       // passes through danger, and guessing at an invisible radius is unfair.
-      g.fillStyle(0xd23b2a, 0.09);
-      g.fillCircle(x, y, TUNING.wasp.interceptRadius * 1.6);
+      // Only while it is crossing the field: at the hive it is a target, not a
+      // no-go zone, and the ring would sit over the thing you must drag onto.
+      if (wasp.state === 'approaching') {
+        g.fillStyle(0xd23b2a, 0.09);
+        g.fillCircle(x, y, TUNING.wasp.interceptRadius * 1.6);
+      }
+
+      // The ring that says "draw at me": where a route's tip has to land for
+      // its bees to reach, and how much fight is left in the wasp. Damage is
+      // shown as an arc of the same ring rather than a bar, so it reads at a
+      // glance without adding a second piece of furniture to the board.
+      if (wasp.state !== 'fleeing') {
+        g.lineStyle(2, 0xffd25e, 0.28);
+        g.strokeCircle(x, y, TUNING.wasp.reachRadius);
+
+        const spent = 1 - wasp.vitality;
+        if (spent > 0) {
+          g.lineStyle(4, 0xffd25e, 0.85);
+          g.beginPath();
+          g.arc(
+            x,
+            y,
+            TUNING.wasp.reachRadius,
+            -Math.PI / 2,
+            -Math.PI / 2 + Math.PI * 2 * spent,
+          );
+          g.strokePath();
+        }
+      }
 
       sprite.setVisible(true);
       sprite.setPosition(x, y);
@@ -520,6 +550,38 @@ export class FieldRenderer {
         sprite.setRotation(facingLeft ? -tilt : tilt);
       }
     }
+  }
+
+  /**
+   * The marker that says where the announced raid is about to come in.
+   *
+   * Random timing only stays fair if the warning is specific, and a warning
+   * that says "somewhere" is not specific. This is drawn on the board rather
+   * than in the HUD for the same reason the wind arrow is: the player is
+   * looking at the field, and information about the field belongs on it.
+   */
+  private drawRaidWarning(field: Field, g: Phaser.GameObjects.Graphics): void {
+    const at = field.raidWarningAt;
+    if (!at) return;
+
+    this.warningPhase += 0.09;
+    const pulse = 0.5 + 0.5 * Math.sin(this.warningPhase);
+
+    g.fillStyle(0xd23b2a, 0.1 + 0.1 * pulse);
+    g.fillCircle(at.x, at.y, 54 + 22 * pulse);
+    g.lineStyle(3, 0xff7a5e, 0.55 + 0.35 * pulse);
+    g.strokeCircle(at.x, at.y, 54 + 22 * pulse);
+
+    // A stub pointing at the hive, so the marker reads as "coming from here"
+    // rather than "something is at this spot".
+    const dx = field.hiveX - at.x;
+    const dy = field.hiveY - at.y;
+    const len = Math.hypot(dx, dy) || 1;
+    g.lineStyle(4, 0xff7a5e, 0.4 + 0.3 * pulse);
+    g.beginPath();
+    g.moveTo(at.x + (dx / len) * 60, at.y + (dy / len) * 60);
+    g.lineTo(at.x + (dx / len) * 130, at.y + (dy / len) * 130);
+    g.strokePath();
   }
 
   destroy(): void {

@@ -83,6 +83,19 @@ export function applyAimAssist(
   const endY = out[out.length - 1];
   if (endX === undefined || endY === undefined) return { coords: out, connected: false };
 
+  // A wasp outranks a flower at the same distance.
+  //
+  // Defending is the reaction the game asks for under time pressure, and a
+  // panicked drag at a raider that landed on the marigold behind it would be
+  // the worst possible moment to be pedantic about where the thumb went.
+  const wasp = field.nearestWaspTo(endX, endY, TUNING.patch.aimAssistRadius);
+  if (wasp && !field.pathBlocked(endX, endY, wasp.x, wasp.y)) {
+    if (Math.hypot(wasp.x - endX, wasp.y - endY) > TUNING.wasp.reachRadius * 0.5) {
+      out.push(wasp.x, wasp.y);
+    }
+    return { coords: out, connected: true };
+  }
+
   // Only ever snaps to a flower the player has found. Assist exists to make a
   // drag mean what it looks like it means; pulling a line onto something
   // invisible would hand back the information the dark was there to take away.
@@ -143,7 +156,8 @@ export function commitDrag(
   const endY = coords[coords.length - 1] ?? 0;
   const connected =
     assisted.connected &&
-    field.nearestPatchTo(endX, endY, TUNING.patch.reachRadius) !== null;
+    (field.nearestPatchTo(endX, endY, TUNING.patch.reachRadius) !== null ||
+      field.nearestWaspTo(endX, endY, TUNING.wasp.reachRadius) !== null);
 
   if (intent.kind === 'extend') {
     const route = field.routeById(intent.routeId);
@@ -167,7 +181,9 @@ export function commitDrag(
   const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
 
   // Drawing again at a flower that already has a route tops that route up
-  // rather than spending one of the five slots on a duplicate.
+  // rather than spending one of the five slots on a duplicate. Wasps are
+  // deliberately excluded: piling a second line onto a raider is a legitimate
+  // thing to want, and it is how a big raid is actually beaten.
   const existing = patch ? field.routeTargeting(patch) : null;
   if (existing) {
     existing.replaceWith(coords, field.routeHoldSeconds);

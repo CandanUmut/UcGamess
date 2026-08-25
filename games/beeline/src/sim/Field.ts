@@ -3,6 +3,7 @@ import { Bee } from './Bee.ts';
 import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp } from './Wasp.ts';
+import { RaidClock } from './Raid.ts';
 import { Maze } from './Maze.ts';
 import { slideAlongWalls, type WallSlide } from './deflect.ts';
 import { Fog } from './Fog.ts';
@@ -42,6 +43,15 @@ const HUD_MARGIN = 110;
 const MAZE_INSET = 30;
 
 /**
+ * The swarm a raid can never take you below.
+ *
+ * Without a floor a long raid on a bad day leaves the hive with nothing to fly
+ * any route at all, and the player is left watching an empty board until dusk.
+ * A hive that is badly hurt still has to be a hive that can be played.
+ */
+const MIN_SWARM = 4;
+
+/**
  * How far from the hive its own dawn light actually *discovers*, not merely
  * brightens.
  *
@@ -77,11 +87,23 @@ export interface FieldEvents {
   deflected: Array<{ x: number; y: number }>;
   /** Flowers found this step. Discovery is the reward for exploring. */
   found: Array<{ x: number; y: number; honey: number }>;
+  /** A raid was announced this step, at the edge it will come from. */
+  raidWarning: { x: number; y: number; size: number } | null;
+  /** Bees landed a hit on a wasp here. */
+  struck: Array<{ x: number; y: number }>;
+  /** A wasp was beaten off here. */
+  waspDown: Array<{ x: number; y: number }>;
+  /** Honey taken by raiders this step. */
+  stolen: number;
+  /** Bees driven out of the swarm for the day. */
+  beesLost: Array<{ x: number; y: number }>;
+  /** Nectar shaken loose where the wind crushed a route into a wall. */
+  pollenLost: Array<{ x: number; y: number }>;
 }
 
 const NO_FEATURES: DayFeatures = {
   wind: false,
-  wasps: 0,
+  raidSize: 0,
   mazeOpenness: 1,
   richPatches: false,
   nightBloom: false,
@@ -145,7 +167,28 @@ export class Field {
     dispatched: 0,
     deflected: [],
     found: [],
+    raidWarning: null,
+    struck: [],
+    waspDown: [],
+    stolen: 0,
+    beesLost: [],
+    pollenLost: [],
   };
+
+  /** Decides when the next raid lands. See sim/Raid.ts. */
+  readonly raid = new RaidClock();
+  /**
+   * Bees driven out of the swarm by raiders, for today only.
+   *
+   * Held as a count rather than by removing them permanently: a raid that
+   * shrank the hive for the rest of the run would compound one bad day into an
+   * unrecoverable one, which is the failure mode the original wasp rules were
+   * written to avoid. Losing a third of your workers *this afternoon* is
+   * already a real blow.
+   */
+  beesLost = 0;
+  /** Where the next raid will come in, so the warning can point at it. */
+  private raidEntry: { x: number; y: number } | null = null;
 
   private elapsed = 0;
   private windAngle = Math.random() * Math.PI * 2;
@@ -174,7 +217,13 @@ export class Field {
   }
 
   private applyStats(): void {
-    this.setBeeCount(Math.round(this.stats.beeCount * this.swarmBoost));
+    const full = Math.round(this.stats.beeCount * this.swarmBoost);
+    this.setBeeCount(Math.max(MIN_SWARM, full - this.beesLost));
+  }
+
+  /** The swarm the hive would have today if no raid had landed. */
+  get fullSwarm(): number {
+    return Math.round(this.stats.beeCount * this.swarmBoost);
   }
 
   /**
@@ -203,6 +252,9 @@ export class Field {
     this.clearRoutes();
     this.patches = [];
     this.wasps = [];
+    this.beesLost = 0;
+    this.raidEntry = null;
+    this.raid.begin(features.raidSize);
 
     this.patchPool = Math.round(
       (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
@@ -231,11 +283,6 @@ export class Field {
           TUNING.wind.maxStrength,
         )
       : 0;
-
-    for (let i = 0; i < features.wasps; i += 1) {
-      const spot = this.randomPatchPosition('normal');
-      this.wasps.push(new Wasp(spot.x, spot.y));
-    }
 
     this.fog.clear();
     // The hive lights its own neighbourhood, and Scout Bees light a great deal
@@ -658,12 +705,29 @@ export class Field {
 
     const route = new Route(coords, this.routeHoldSeconds);
     route.updateTip();
-    route.target = this.nearestPatchTo(route.tipX, route.tipY);
+    this.retarget(route);
     this.routes.push(route);
     return route;
   }
 
+  /**
+   * Decides what a route is currently for, from where its tip is.
+   *
+   * A wasp wins over a flower, and not only because it is usually closer: the
+   * player who drags a line onto a raider has said something unambiguous, and
+   * a route that quietly reverted to nectar-gathering because a flower happened
+   * to sit behind the wasp would be the game ignoring them at the exact moment
+   * they were reacting to it.
+   */
   retarget(route: Route): void {
+    const wasp = this.nearestWaspTo(route.tipX, route.tipY, TUNING.wasp.reachRadius);
+    if (wasp) {
+      route.targetWasp = wasp;
+      route.target = null;
+      return;
+    }
+
+    route.targetWasp = null;
     route.target = this.nearestPatchTo(route.tipX, route.tipY);
   }
 
@@ -757,9 +821,7 @@ export class Field {
 
     if (this.windStrength > 0) this.stepWind(dt);
 
-    for (const wasp of this.wasps) {
-      wasp.step(dt, () => this.randomPatchPosition('normal'));
-    }
+    this.stepRaid(dt);
 
     for (const route of [...this.routes]) {
       if (this.decayEnabled) route.step(dt);
@@ -776,13 +838,251 @@ export class Field {
         continue;
       }
 
-      if (!route.target || !route.target.alive) this.retarget(route);
+      if (route.targetWasp) {
+        // A route pointed at a wasp follows it. The wasp is moving — usually
+        // straight at the hive — so a line that only knew where it *was* would
+        // be pointing at empty grass by the time the bees got there.
+        if (!route.targetWasp.alive || route.targetWasp.state === 'fleeing') {
+          this.retarget(route);
+        }
+      } else if (!route.target || !route.target.alive) {
+        this.retarget(route);
+      }
     }
 
     for (const bee of this.bees) this.stepBee(bee, dt);
 
     this.revealFromSwarm();
     this.updateDiscoveries();
+  }
+
+  // ---------------------------------------------------------------- raids
+
+  /**
+   * Advances the raid clock and everything already on the board.
+   *
+   * The order matters: the clock can spawn wasps this step, and a wasp that
+   * spawned this step should not also move this step — it should appear at the
+   * edge, be seen, and start crossing next step.
+   */
+  private stepRaid(dt: number): void {
+    const signal = this.raid.step(dt);
+
+    if (signal === 'warning') {
+      this.raidEntry = this.pickRaidEntry();
+      this.events.raidWarning = {
+        x: this.raidEntry.x,
+        y: this.raidEntry.y,
+        size: this.raid.size,
+      };
+    } else if (signal === 'arrive') {
+      this.spawnRaid();
+    }
+
+    for (const wasp of this.wasps) this.stepWasp(wasp, dt);
+
+    // Wasps are swept after stepping rather than during, so a wasp beaten off
+    // on the same step another one arrives is not skipped by the loop.
+    if (this.wasps.some((w) => !w.alive)) {
+      this.wasps = this.wasps.filter((w) => w.alive);
+      for (const route of this.routes) {
+        if (route.targetWasp && !route.targetWasp.alive) route.targetWasp = null;
+      }
+    }
+  }
+
+  /**
+   * Where a raid comes in from.
+   *
+   * The far rim of the maze, measured in corridors rather than pixels: the
+   * point of walking the wasps in through the labyrinth is that the maze is
+   * suddenly working *for* the player as well as against them, and a wasp that
+   * entered next door would never touch a wall.
+   */
+  private pickRaidEntry(): { x: number; y: number } {
+    const hiveCol = this.maze.colAt(this.hiveX);
+    const hiveRow = this.maze.rowAt(this.hiveY);
+
+    let best = { col: this.maze.cols - 1, row: 0 };
+    let bestSteps = -1;
+
+    for (let col = 0; col < this.maze.cols; col += 1) {
+      for (let row = 0; row < this.maze.rows; row += 1) {
+        const rim =
+          col === 0 || row === 0 || col === this.maze.cols - 1 || row === this.maze.rows - 1;
+        if (!rim) continue;
+        if (col === hiveCol && row === hiveRow) continue;
+
+        const steps = this.cellSteps[row * this.maze.cols + col] ?? -1;
+        // A rim cell the maze has walled off from the hive entirely is no
+        // entrance at all — a wasp starting there would never arrive.
+        if (steps < 0) continue;
+        // Ties broken at random so the raids do not all come from the same
+        // corner of a given maze.
+        if (steps > bestSteps || (steps === bestSteps && Math.random() < 0.4)) {
+          bestSteps = steps;
+          best = { col, row };
+        }
+      }
+    }
+
+    return this.maze.centreOf(best.col, best.row);
+  }
+
+  /**
+   * Lands a raid immediately, and reports what arrived.
+   *
+   * Exists so a test can exercise the crossing without waiting out a random
+   * clock — the alternative is a test that samples the same randomness the
+   * feature is built on and is therefore flaky by construction.
+   */
+  spawnRaidNow(): Wasp[] {
+    const before = this.wasps.length;
+    this.spawnRaid();
+    return this.wasps.slice(before);
+  }
+
+  private spawnRaid(): void {
+    const entry = this.raidEntry ?? this.pickRaidEntry();
+    this.raidEntry = null;
+
+    for (let i = 0; i < Math.max(1, this.raid.size); i += 1) {
+      // Spread inside the entry corridor, never outside it: a wasp nudged
+      // through a wall would start on the wrong side of the maze it is
+      // supposed to have to cross.
+      const spreadX = (Math.random() - 0.5) * this.maze.cellWidth * 0.5;
+      const spreadY = (Math.random() - 0.5) * this.maze.cellHeight * 0.5;
+      this.wasps.push(new Wasp(entry.x + spreadX, entry.y + spreadY));
+    }
+  }
+
+  private stepWasp(wasp: Wasp, dt: number): void {
+    wasp.beginStep();
+
+    switch (wasp.state) {
+      case 'approaching': {
+        const next = this.waspWaypoint(wasp);
+        wasp.moveToward(next.x, next.y, dt);
+        if (
+          Math.hypot(wasp.x - this.hiveX, wasp.y - this.hiveY) <= TUNING.wasp.arriveRadius
+        ) {
+          wasp.beginRaid();
+        }
+        return;
+      }
+
+      case 'raiding': {
+        wasp.hover(this.hiveX, this.hiveY, dt);
+
+        const take = Math.min(this.honey, TUNING.wasp.stealPerSecond * dt);
+        this.honey -= take;
+        this.events.stolen += take;
+
+        const driven = wasp.tickRaid(dt);
+        for (let i = 0; i < driven; i += 1) this.loseBee();
+        return;
+      }
+
+      case 'fleeing': {
+        wasp.moveToward(wasp.homeX, wasp.homeY, dt);
+        if (Math.hypot(wasp.x - wasp.homeX, wasp.y - wasp.homeY) < 24) {
+          wasp.state = 'gone';
+        }
+        return;
+      }
+
+      default:
+        return;
+    }
+  }
+
+  /**
+   * The next point an approaching wasp should fly to.
+   *
+   * Gradient descent over the same BFS distance field the flower placement
+   * uses, so wasps respect the walls without a pathfinder of their own. Once
+   * they are in the hive's own cell they make straight for it.
+   */
+  private waspWaypoint(wasp: Wasp): { x: number; y: number } {
+    const col = this.maze.colAt(wasp.x);
+    const row = this.maze.rowAt(wasp.y);
+    const here = this.cellSteps[row * this.maze.cols + col] ?? 0;
+    if (here <= 0) return { x: this.hiveX, y: this.hiveY };
+
+    const steps: Array<[number, number]> = [
+      [col - 1, row],
+      [col + 1, row],
+      [col, row - 1],
+      [col, row + 1],
+    ];
+
+    for (const [nc, nr] of steps) {
+      if (!this.maze.inside(nc, nr)) continue;
+      if (!this.maze.canStep(col, row, nc, nr)) continue;
+      const there = this.cellSteps[nr * this.maze.cols + nc] ?? -1;
+      if (there >= 0 && there < here) return this.maze.centreOf(nc, nr);
+    }
+
+    // Walled in — which the generator's spanning tree makes impossible, but a
+    // wasp frozen mid-board is a worse bug than one that cuts the corner.
+    return { x: this.hiveX, y: this.hiveY };
+  }
+
+  /**
+   * Drives one bee out of the day's swarm.
+   *
+   * Takes an idle bee where it can find one, so a raid does not preferentially
+   * strip the routes the player is actively working — the honey it steals is
+   * already the punishment for ignoring it, and losing the line you were
+   * halfway through drawing on top of that reads as spite.
+   */
+  private loseBee(): void {
+    if (this.bees.length <= MIN_SWARM) return;
+
+    let index = this.bees.findIndex((b) => b.state === 'idle' || b.state === 'queued');
+    if (index < 0) index = this.bees.length - 1;
+
+    const bee = this.bees[index];
+    if (!bee) return;
+
+    if (bee.routeId !== 0) {
+      const route = this.routeById(bee.routeId);
+      if (route) route.beeCount -= 1;
+    }
+    this.bees.splice(index, 1);
+    this.beesLost += 1;
+    this.events.beesLost.push({ x: bee.x, y: bee.y });
+  }
+
+  /** The nearest wasp worth pointing a route at. */
+  nearestWaspTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Wasp | null {
+    let best: Wasp | null = null;
+    let bestDist = limit;
+    for (const wasp of this.wasps) {
+      if (!wasp.alive || wasp.state === 'fleeing') continue;
+      const dist = Math.hypot(wasp.x - x, wasp.y - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = wasp;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Where the announced raid will come in, while the warning is up.
+   *
+   * The warning is the whole fairness budget for making raid timing random, so
+   * it has to say *where* as well as *when* — "wasps are coming" with no
+   * direction is not a chance to prepare, it is a chance to panic.
+   */
+  get raidWarningAt(): { x: number; y: number } | null {
+    return this.raid.incoming ? this.raidEntry : null;
+  }
+
+  /** True while at least one wasp is actually robbing the hive. */
+  get underAttack(): boolean {
+    return this.wasps.some((w) => w.isRaiding);
   }
 
   /**
@@ -852,6 +1152,7 @@ export class Field {
     if (!slid.contact) return;
 
     this.events.deflected.push(slid.contact);
+    route.markPinch(hit);
     route.deflectTo(slid.coords);
   }
 
@@ -916,6 +1217,34 @@ export class Field {
     const route = bee.routeId !== 0 ? this.routeById(bee.routeId) : undefined;
     const speed = this.stats.beeSpeed * bee.speedMul * (route?.speedMultiplier ?? 1);
 
+    // A bee flying a route aimed at a wasp strikes it the moment it gets
+    // close, anywhere along the line.
+    //
+    // Not at the tip. Wasps move — usually straight at the hive — so a rule
+    // that only fired where the player's finger stopped would mean the defence
+    // worked only against a target that stood still, which is the one thing a
+    // raider never does. Drawing a line *across a wasp's path* is the gesture,
+    // and interception is what makes it read as one.
+    const foe = route?.targetWasp;
+    if (
+      foe &&
+      foe.alive &&
+      foe.state !== 'fleeing' &&
+      (bee.state === 'outbound' || bee.state === 'building') &&
+      Math.hypot(bee.x - foe.x, bee.y - foe.y) <= TUNING.wasp.reachRadius
+    ) {
+      // One bee, one hit, and it goes home. It does not linger to fight: a
+      // swarm pinned in a brawl is a swarm the player can no longer redirect,
+      // and the whole cost of defending is meant to be the trips not taken.
+      const downed = foe.hit(TUNING.wasp.beeDamage);
+      this.events.struck.push({ x: foe.x, y: foe.y });
+      if (downed) this.events.waspDown.push({ x: foe.x, y: foe.y });
+      this.releaseBee(bee);
+      bee.carrying = 0;
+      bee.state = 'homing';
+      return;
+    }
+
     // Wasps only threaten bees that are actually out in the field.
     if (
       this.wasps.length > 0 &&
@@ -925,6 +1254,13 @@ export class Field {
         bee.state === 'building')
     ) {
       for (const wasp of this.wasps) {
+        // A bee sent to fight *this* wasp is not scattered by it.
+        //
+        // Without the exemption the defence gesture cannot work at all: the
+        // scatter radius is smaller than the strike radius, so every attacker
+        // would be turned back a moment before it could land a hit, and the
+        // wasp would be untouchable by the one answer the game offers.
+        if (route?.targetWasp === wasp) continue;
         if (
           !wasp.threatens(
             bee.x,
@@ -1037,6 +1373,21 @@ export class Field {
           }
         } else {
           bee.s -= speed * dt;
+
+          // Where the wind is crushing this road into a hedge, a laden bee
+          // loses what it is carrying. Only the wind can put a route in that
+          // state — a line the player drew is slid clear of the walls before
+          // it exists — so the tax is on neglecting a road, never on an
+          // imprecise thumb.
+          if (
+            bee.carrying > 0 &&
+            route.isPinched &&
+            Math.abs(bee.s - route.pinchAt) <= TUNING.route.pinchRadius
+          ) {
+            bee.carrying = 0;
+            this.events.pollenLost.push({ x: bee.x, y: bee.y });
+          }
+
           if (bee.s <= 0) {
             bee.s = 0;
             // A delivery beats the path in a little further. Only a laden
@@ -1137,6 +1488,12 @@ export class Field {
       dispatched: 0,
       deflected: [],
       found: [],
+      raidWarning: null,
+      struck: [],
+      waspDown: [],
+      stolen: 0,
+      beesLost: [],
+      pollenLost: [],
     };
     return out;
   }

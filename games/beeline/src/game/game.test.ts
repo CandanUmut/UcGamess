@@ -54,7 +54,7 @@ describe('escalation schedule', () => {
     const features = featuresForDay(1);
     expect(features).toEqual({
       wind: false,
-      wasps: 0,
+      raidSize: 0,
       mazeOpenness: 1,
       richPatches: false,
       nightBloom: false,
@@ -74,7 +74,7 @@ describe('escalation schedule', () => {
       // thing to learn — the same reason a third flower has never counted.
       const additions =
         (current.wind && !previous.wind ? 1 : 0) +
-        (current.wasps > previous.wasps ? 1 : 0) +
+        (current.raidSize > previous.raidSize ? 1 : 0) +
         (current.mazeOpenness < 1 && previous.mazeOpenness >= 1 ? 1 : 0) +
         (current.richPatches && !previous.richPatches ? 1 : 0) +
         (current.nightBloom && !previous.nightBloom ? 1 : 0);
