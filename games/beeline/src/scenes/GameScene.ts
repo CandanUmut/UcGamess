@@ -26,7 +26,7 @@ import {
   dayIntroduction,
   evaluateDay,
 } from '../game/DayCycle.ts';
-import { deriveStats, hiveGrowth } from '../game/Upgrades.ts';
+import { deriveStats } from '../game/Upgrades.ts';
 import { modifiersFor, PROVISIONS } from '../game/Provisions.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import { computeOffline, formatAway } from '../game/Offline.ts';
@@ -101,8 +101,6 @@ export class GameScene extends BaseGameplayScene {
   private pressY = 0;
 
   private externallyPaused = false;
-  /** What the last day boundary actually banked, so `+15s` can undo exactly it. */
-  private lastBanked = 0;
 
   // --- first-run teaching ----------------------------------------------
   private hintGfx!: Phaser.GameObjects.Graphics;
@@ -214,7 +212,6 @@ export class GameScene extends BaseGameplayScene {
 
     this.field.setStats(deriveStats(this.save.levels));
     this.field.beginDay(this.day, features, patchCount, 1, modifiers);
-    this.fieldRenderer.setGrowth(hiveGrowth(this.save.levels));
 
     this.secondsLeft = dayLength(this.day) + extraSeconds + modifiers.extraDaySeconds;
     this.beeRenderer.resize(this.field.bees.length);
@@ -248,15 +245,9 @@ export class GameScene extends BaseGameplayScene {
     this.sfx.play('dayEnd', 0.45);
     this.cameras.main.flash(220, 60, 50, 30);
 
-    const result = evaluateDay(
-      this.day,
-      this.field.honey,
-      this.save.bestDayHoney,
-      deriveStats(this.save.levels).upkeep,
-    );
+    const result = evaluateDay(this.day, this.field.honey, this.save.bestDayHoney);
 
-    this.save.honey += result.banked;
-    this.lastBanked = result.banked;
+    this.save.honey += Math.floor(result.honey);
     this.save.bestDayHoney = Math.max(this.save.bestDayHoney, Math.floor(result.honey));
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     this.save.lastPlayedAt = Date.now();
@@ -300,10 +291,8 @@ export class GameScene extends BaseGameplayScene {
     this.scene.stop('Night');
     this.scene.resume();
 
-    // Roll back the day-end bookkeeping, since the day is continuing. Banked,
-    // not gross: upkeep was already deducted, and subtracting the gross here
-    // would quietly charge the player the hive's bill twice.
-    this.save.honey -= this.lastBanked;
+    // Roll back the day-end bookkeeping, since the day is continuing.
+    this.save.honey -= Math.floor(this.field.honey);
     this.save.day = this.day;
     this.persist();
 

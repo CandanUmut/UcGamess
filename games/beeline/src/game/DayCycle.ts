@@ -178,38 +178,12 @@ export interface DayResult {
   /** True when the miss was close enough to be worth offering extra time. */
   nearMiss: boolean;
   isBest: boolean;
-  /** The hive's bill for the day, charged against the honey before banking. */
-  upkeep: number;
-  /** What actually reaches the store once the hive has been fed. */
-  banked: number;
 }
 
-/**
- * Whether the hive charges upkeep on a given day.
- *
- * Nothing is charged over the first couple of days, for the same reason
- * nothing else is: the opening has one job, and a bill is not it.
- */
-export function upkeepDueOn(day: number): boolean {
-  return day >= TUNING.hive.upkeepFromDay;
-}
-
-export function evaluateDay(
-  day: number,
-  honey: number,
-  bestSoFar: number,
-  dailyUpkeep = 0,
-): DayResult {
+export function evaluateDay(day: number, honey: number, bestSoFar: number): DayResult {
   const quota = dayQuota(day);
   const met = honey >= quota;
   const shortfall = (quota - honey) / quota;
-
-  // Upkeep is charged against the day's honey, never against the quota. The
-  // quota asks "did you work hard enough today"; upkeep asks "can you afford
-  // the hive you have built". Keeping them separate means a big swarm never
-  // makes the day itself harder to pass — it makes the *progress* cost more,
-  // which is the decision it is supposed to be.
-  const upkeep = upkeepDueOn(day) ? Math.min(dailyUpkeep, Math.floor(honey)) : 0;
 
   return {
     day,
@@ -220,7 +194,5 @@ export function evaluateDay(
     // a hopeless day reads as the game selling a rescue it knows will not work.
     nearMiss: !met && shortfall <= TUNING.ads.extendOfferMissThreshold,
     isBest: honey > bestSoFar,
-    upkeep,
-    banked: Math.max(0, Math.floor(honey) - upkeep),
   };
 }

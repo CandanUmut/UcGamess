@@ -14,23 +14,6 @@
 export interface HiveTuning {
   x: number;
   y: number;
-  /**
-   * Honey per day each bee **beyond the starting swarm** costs to keep.
-   *
-   * The hive you were given is free; the hive you build is not. This is what
-   * turns Brood Chamber from an auto-buy into a decision — six more bees is
-   * more throughput every day and a bill every day — and it is the pressure
-   * that replaces the route-refreshing busywork standing roads remove.
-   *
-   * Charged against the day's honey before it is banked, never against the
-   * quota. Quota asks "did you work hard enough today"; upkeep asks "can you
-   * afford the hive you have built".
-   */
-  upkeepPerBee: number;
-  /** First day the hive starts charging. Early days stay clean. */
-  upkeepFromDay: number;
-  /** Fraction of the bill each level of Deeper Comb waives. */
-  upkeepReliefPerComb: number;
   /** A route must start within this distance of the hive to be created. */
   drawRadius: number;
   depositSeconds: number;
@@ -111,20 +94,6 @@ export interface RouteTuning {
   strengthWindResist: number;
   /** At full strength, bees fly this much faster along it. */
   strengthSpeedBonus: number;
-  /**
-   * Strength at which a road stops decaying altogether and becomes permanent
-   * for the day.
-   *
-   * The payoff the whole strength system was building toward. A road you have
-   * genuinely committed the swarm to stops needing you, which turns a day from
-   * "re-draw the same three lines forever" into "build your arteries, then go
-   * and spend your hands on the frontier".
-   *
-   * Set so roughly one or two roads can stand at once, never all of them. If
-   * every route could stand there would be no decision left; if none could, the
-   * strength dial would have no destination.
-   */
-  standingStrength: number;
   /**
    * Fraction of strength kept when a route is redrawn from the hive rather than
    * refreshed from its tip.
@@ -298,7 +267,7 @@ export interface Tuning {
     ProvisionTuning
   > & { costGrowth: number; costCapMultiplier: number };
   upgrades: Record<
-    'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'comb',
+    'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore',
     UpgradeTuning
   >;
   offline: { baseCapHoney: number; baseWindowHours: number; honeyPerHour: number };
@@ -329,9 +298,6 @@ export const TUNING: Tuning = {
     y: 545,
     drawRadius: 110,
     depositSeconds: 0.15,
-    upkeepPerBee: 10,
-    upkeepFromDay: 3,
-    upkeepReliefPerComb: 0.12,
     // Sized against the *discovery* threshold, not the radius. Reveal falls off
     // linearly to `fog.edgeReveal` at the rim, so a flower only counts as found
     // inside about 0.79 of this — at 340 that was 267px, and day one's band
@@ -378,9 +344,8 @@ export const TUNING: Tuning = {
     // three half-roads; one route gives one real road. Choosing between them is
     // the question this game has been about since day two, and strength is the
     // first thing that pays out differently depending on the answer.
-    strengthPerDelivery: 0.018,
+    strengthPerDelivery: 0.0152,
     strengthDecayPerSecond: 0.1,
-    standingStrength: 0.8,
     strengthDecayResist: 0.75,
     strengthWindResist: 0.85,
     strengthSpeedBonus: 0.35,
@@ -437,12 +402,7 @@ export const TUNING: Tuning = {
     // honey, which made the late game look unclearable when the real problem
     // was that the model was not buying anything. A player who under-invests
     // now stalls around day eight, which is the meta-progression working.
-    //
-    // Tightened again once standing roads landed. They remove the busywork of
-    // holding a line open, so the difficulty had to move somewhere — it moved
-    // into the quota and into the hive's daily bill, which is the trade the
-    // whole management layer is built on: less thumb, more decision.
-    quotas: [60, 110, 300, 540, 600, 780, 880, 1000, 1220, 1450, 1650, 1900],
+    quotas: [60, 110, 260, 470, 540, 630, 750, 920, 1120, 1400, 1650, 1900],
     quotaGrowthAfterTable: 1.22,
   },
 
@@ -536,16 +496,6 @@ export const TUNING: Tuning = {
     routePersistence: { base: 140, growth: 1.75, levels: 5, perLevel: 2.0 },
     bloom: { base: 120, growth: 1.8, levels: 4, perLevel: 1 },
     honeyStore: { base: 70, growth: 1.5, levels: 5, perLevel: 300 },
-    /**
-     * The hive itself.
-     *
-     * Deliberately the one upgrade with no immediate effect on a day's honey:
-     * it cuts the standing bill and raises the ceiling on everything else. That
-     * makes the night screen a real allocation question — spend on output now,
-     * or on the hive that lets you afford more output later — which is the
-     * management layer the other five cards never had.
-     */
-    comb: { base: 150, growth: 1.7, levels: 5, perLevel: 1 },
   },
 
   /**

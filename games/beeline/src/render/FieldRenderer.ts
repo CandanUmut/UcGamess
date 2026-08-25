@@ -91,20 +91,6 @@ export class FieldRenderer {
     }
   }
 
-  /**
-   * How grown the hive looks, 0..1.
-   *
-   * Set from the player's total investment. The hive is the thing the whole run
-   * is about and it never changed appearance no matter how much was poured into
-   * it, so there was nothing on screen that said "this is bigger than it was" —
-   * which is most of what "growing a hive" means to a player.
-   */
-  private growth = 0;
-
-  setGrowth(value: number): void {
-    this.growth = Math.min(1, Math.max(0, value));
-  }
-
   draw(field: Field, alpha: number, drawingFromHive: boolean): void {
     const g = this.gfx;
     g.clear();
@@ -122,17 +108,7 @@ export class FieldRenderer {
     g.strokeCircle(field.hiveX, field.hiveY, TUNING.hive.drawRadius);
 
     const pulse = 1 + Math.sin(field.time * 2) * 0.04;
-    this.hiveGlow.setScale(1.6 * pulse * (1 + this.growth * 0.55));
-
-    // Comb rings, one per band of investment. A hive that has had everything
-    // spent on it is visibly a different object from the one the run started
-    // with, without needing a single new asset.
-    const rings = Math.floor(this.growth * 4 + 0.001);
-    for (let i = 1; i <= rings; i += 1) {
-      const radius = 26 + i * 13;
-      g.lineStyle(2, COLORS.hive, 0.5 - i * 0.07);
-      g.strokeCircle(field.hiveX, field.hiveY, radius);
-    }
+    this.hiveGlow.setScale(1.6 * pulse);
 
     this.drawWasps(field, alpha);
   }

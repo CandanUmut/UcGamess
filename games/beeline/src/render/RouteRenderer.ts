@@ -93,26 +93,6 @@ export class RouteRenderer {
     const colour =
       strength > 0.02 ? blend(COLORS.route, 0xfff3c4, strength) : COLORS.route;
 
-    // A standing road gets a hard bright edge along it — the one binary readout
-    // in a system of gradients, because "this one no longer needs you" is a
-    // binary fact and the player has to be able to see it at a glance to decide
-    // where their hands go next.
-    if (route.isStanding) {
-      g.lineStyle(2, 0xfffbe8, 0.9);
-      g.beginPath();
-      let first = true;
-      for (let s = 0; s <= live; s += SAMPLE_STEP) {
-        route.sample(s, scratch);
-        if (first) {
-          g.moveTo(scratch.x, scratch.y);
-          first = false;
-        } else {
-          g.lineTo(scratch.x, scratch.y);
-        }
-      }
-      g.strokePath();
-    }
-
     // A soft underlay beneath a mature road, so it reads as packed ground
     // rather than as a slightly fatter scribble.
     if (strength > 0.15) {

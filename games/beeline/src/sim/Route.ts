@@ -88,27 +88,8 @@ export class Route {
     this.tipY = scratch.y;
   }
 
-  /**
-   * Whether this road has been worked hard enough to hold itself open.
-   *
-   * A standing road does not retreat at all. It is the destination the strength
-   * dial was always pointing at: the reward for committing the swarm to a line
-   * is that the line stops asking for your hands, and you get to spend them on
-   * the dark instead.
-   *
-   * It is not permanent in the sense of being safe — strength still decays when
-   * traffic stops, so a road abandoned for a flower that has run dry drops back
-   * below the threshold and starts retreating like anything else. Nothing here
-   * needs a timer or a separate state machine; it falls out of the equilibrium
-   * that was already there.
-   */
-  get isStanding(): boolean {
-    return this.strength >= TUNING.route.standingStrength;
-  }
-
   /** Retreat speed right now, after the road's own resistance. */
   get decaySpeed(): number {
-    if (this.isStanding) return 0;
     return (
       TUNING.route.decaySpeed * (1 - this.strength * TUNING.route.strengthDecayResist)
     );

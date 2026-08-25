@@ -1211,7 +1211,69 @@ errors.
 
 ---
 
-## 21. Success criteria
+## 22. Rolling back the management layer
+
+§20's gameplay half is reverted. Playtest verdict, in full because every clause
+of it identifies a real fault:
+
+> _"it became really boring, the hive upgrade is not meaningful I don't
+> understand what it does, or how it is a growing, the lines we draw usually
+> just next to our hive and we just wait now, there is no talent, no
+> intelligence, no skills required, thorns are not a great blocks."_
+
+### What went wrong, specifically
+
+**Standing roads created a dominant degenerate strategy, and the tuning note
+said so out loud.** §20 recorded that the threshold was set so "a short line
+carrying the whole swarm pegs at full". That is not a tuning detail, it is a
+solved game: draw the shortest possible line, put everything on it, wait. The
+optimal play became the least interesting play, and it was written down as a
+feature.
+
+**Standing roads also deleted two other systems.** A standing road takes 85% less
+wind _and_ never retreats, so wind stopped being anything at all, and route
+decay — the mechanic the entire game was built on — stopped applying to the only
+route that mattered.
+
+**Deeper Comb was illegible.** "−24% keep" tells a player nothing about what
+they get, and an upgrade whose whole purpose is to raise a ceiling has no
+visible effect at the moment of purchase. An upgrade the player cannot feel is
+not a decision, it is a tax on their attention.
+
+**Upkeep made the game slower rather than harder.** It reduced what was banked
+without changing anything about how a day is played, so the only thing it
+touched was the rate of progression.
+
+### The lesson worth keeping
+
+Every pass since §15 has added a system, and each was individually defensible.
+The verdict is that the sum is _less_ engaging than the parts promised, which
+means the additions were not addressing the actual gap.
+
+**The actual gap: drawing a line to a visible target is not a skill.** Aim assist
+removes the execution challenge, the field is mostly empty so the shape of the
+line rarely matters, and there is no time pressure on the gesture. Adding
+economy on top of a verb that asks nothing of the player makes a spreadsheet,
+not a game — and that is what the last three passes did.
+
+The obstacles are the closest thing to a real answer the game has, and they are
+too sparse to bite: a handful of circles on an open board leaves the straight
+line correct most of the time. The playtest said this directly — _"thorns are
+not a great blocks, there could be paths we need to draw through like
+labyrinths."_
+
+### What is reverted, and what is kept
+
+Reverted: standing roads, hive upkeep, Deeper Comb, hive growth visuals, and the
+quota table that was tuned around them.
+
+Kept: the adaptive canvas from the same pass, which is unrelated to any of this
+and fixed a real bug — the game covered 63% of a landscape phone and now covers
+100%.
+
+---
+
+## 23. Success criteria
 
 Not submission-ready until all of these hold:
 
