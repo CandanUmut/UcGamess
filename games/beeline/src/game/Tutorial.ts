@@ -1,0 +1,106 @@
+/**
+ * The first-run tutorial, as a tiny state machine.
+ *
+ * Kept out of the scene deliberately. What the tutorial *is* — the steps, their
+ * order, and the condition that completes each one — is design, and design that
+ * lives inside a Phaser scene cannot be read or tested without booting a
+ * browser. The scene's only job is to draw whatever `current` says.
+ *
+ * Three rules, all learned the hard way from the hint line this replaces:
+ *
+ *  - **It never blocks.** No modal, no "tap to continue", no pause. Every step
+ *    completes by the player doing the thing, so a player who already knows how
+ *    to play never notices there was a tutorial.
+ *  - **It only ever runs once**, on the first run of a fresh save.
+ *  - **Each step waits for evidence**, not for a timer. Advancing on a timer
+ *    teaches the confident player nothing and abandons the hesitant one.
+ */
+export type TutorialStepId = 'draw' | 'watch' | 'refresh' | 'done';
+
+export interface TutorialStep {
+  id: TutorialStepId;
+  /** One line, in the player's terms. Shown near the top of the field. */
+  text: string;
+  /** Whether the hint line to the nearest flower should pulse. */
+  showHintLine: boolean;
+}
+
+const STEPS: readonly TutorialStep[] = [
+  {
+    id: 'draw',
+    text: 'Drag from the hive out to a flower',
+    showHintLine: true,
+  },
+  {
+    id: 'watch',
+    text: 'Your bees follow the line you drew',
+    showHintLine: false,
+  },
+  {
+    id: 'refresh',
+    text: 'The line fades from the far end — draw it again to keep it open',
+    showHintLine: false,
+  },
+];
+
+export interface TutorialProgress {
+  /** Routes the player has committed. */
+  routesDrawn: number;
+  /** Honey banked so far this day. */
+  honey: number;
+  /** Whether any live route has begun retreating. */
+  anyRouteRetreating: boolean;
+}
+
+/**
+ * Drives the tutorial from what the player has actually done.
+ *
+ * Deliberately holds no Phaser reference and no timers, so the whole thing can
+ * be stepped through in a unit test.
+ */
+export class Tutorial {
+  private index = 0;
+  private active: boolean;
+
+  constructor(enabled: boolean) {
+    this.active = enabled;
+  }
+
+  get current(): TutorialStep | null {
+    if (!this.active) return null;
+    return STEPS[this.index] ?? null;
+  }
+
+  get finished(): boolean {
+    return !this.active || this.index >= STEPS.length;
+  }
+
+  /** True while the pulsing hint line to the nearest flower should be drawn. */
+  get wantsHintLine(): boolean {
+    return this.current?.showHintLine ?? false;
+  }
+
+  /** Advances if the current step's evidence has arrived. */
+  update(progress: TutorialProgress): void {
+    const step = this.current;
+    if (!step) return;
+
+    const satisfied =
+      step.id === 'draw'
+        ? progress.routesDrawn >= 1
+        : step.id === 'watch'
+          ? progress.honey > 0
+          : // The refresh step waits for a route to actually start retreating
+            // *and* for the player to have drawn again since — otherwise it
+            // would clear itself the moment decay began, before they had a
+            // chance to do the thing it is asking for.
+            progress.anyRouteRetreating && progress.routesDrawn >= 2;
+
+    if (satisfied) this.index += 1;
+  }
+
+  /** Stops the tutorial for good, e.g. when the first day ends. */
+  dismiss(): void {
+    this.active = false;
+  }
+}

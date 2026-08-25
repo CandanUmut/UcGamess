@@ -25,6 +25,8 @@ export interface BeelineSave {
    * A single slot rather than an inventory, deliberately. See Provisions.ts.
    */
   provision: ProvisionId | null;
+  /** Whether the first-run tutorial has been played through. */
+  tutorialDone: boolean;
 }
 
 export function newSave(): BeelineSave {
@@ -37,6 +39,7 @@ export function newSave(): BeelineSave {
     bestRunDay: 0,
     lastPlayedAt: Date.now(),
     provision: null,
+    tutorialDone: false,
   };
 }
 
@@ -62,16 +65,10 @@ export function coerceSave(raw: unknown): BeelineSave {
   const storedLevels = data.levels;
   if (typeof storedLevels === 'object' && storedLevels !== null) {
     const source = storedLevels as Record<string, unknown>;
-
-    // Comb first, and on its own: it raises every other cap, so clamping the
-    // others against a comb level we have not read yet would silently demote a
-    // legitimately-bought level back down on load.
-    levels.comb = clampInt(source['comb'], 0, maxLevel('comb'));
     for (const id of UPGRADE_ORDER) {
-      if (id === 'comb') continue;
       // Clamp rather than trust: a level above the cap would index past the
       // cost table and produce NaN prices.
-      levels[id] = clampInt(source[id], 0, maxLevel(id, levels.comb));
+      levels[id] = clampInt(source[id], 0, maxLevel(id));
     }
   }
 
@@ -86,6 +83,7 @@ export function coerceSave(raw: unknown): BeelineSave {
     // An unknown id — a provision renamed or removed between versions — becomes
     // "none" rather than crashing the lookup at dawn.
     provision: isProvisionId(data.provision) ? data.provision : null,
+    tutorialDone: data.tutorialDone === true,
   };
 }
 

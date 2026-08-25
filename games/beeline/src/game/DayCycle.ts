@@ -50,35 +50,30 @@ export function patchesForDay(day: number): number {
 }
 
 /**
- * How many thorn thickets a given day places.
+ * How open the board is on a given day: 1 is an open field, lower is a tighter
+ * maze.
  *
- * Bumps on days 6 and 10, chosen to miss every day that introduces something.
- * The count is intensity, not a new thing to learn — the same reason patch
- * count grows without counting against the one-new-element-at-a-time rule.
- *
- * Capped at three because that is what the board can honestly hold. A thicket
- * needs a corridor between the hive ring and a flower ring to sit in, and on a
- * fixed 1280x720 field only two or three flowers are ever far enough out. A
- * schedule asking for five would have the night screen forecast thorns the day
- * could not deliver, which is worse than having fewer of them.
+ * The single knob that paces the labyrinth. Days one and two have no walls at
+ * all, so the opening thirty seconds are exactly the game they always were;
+ * from then on the board tightens a little each day until it settles at a real
+ * maze that still has more than one way round everything.
  */
-export function bramblesForDay(day: number): number {
-  if (day < TUNING.bramble.startDay) return 0;
-  if (day >= 10) return 3;
-  if (day >= 6) return 2;
-  return 1;
-}
+export function mazeOpennessForDay(day: number): number {
+  const { startDay, opennessDay1, opennessFloor, tighteningDays } = TUNING.maze;
+  if (day < startDay) return 1;
 
-/** Radius of a thicket placed on a given day, before any provision. */
-export function brambleRadiusForDay(day: number): number {
-  const { baseRadius, radiusPerDay, maxRadius, startDay } = TUNING.bramble;
-  return Math.min(baseRadius + Math.max(0, day - startDay) * radiusPerDay, maxRadius);
+  // `+ 1` so the day brambles are introduced already has some. Starting the
+  // ramp at zero meant the introduction day was still a completely open board,
+  // and the game announced a mechanic it had not yet placed.
+  const progress = Math.min(1, (day - startDay + 1) / Math.max(1, tighteningDays));
+  return opennessDay1 - (opennessDay1 - opennessFloor) * progress;
 }
 
 export interface DayFeatures {
   wind: boolean;
   wasps: number;
-  brambles: number;
+  /** 1 is an open field, lower is a tighter maze. */
+  mazeOpenness: number;
   richPatches: boolean;
   nightBloom: boolean;
 }
@@ -94,7 +89,7 @@ export function featuresForDay(day: number): DayFeatures {
   return {
     wind: day >= TUNING.wind.startDay,
     wasps: day >= TUNING.wasp.secondWaspDay ? 2 : day >= TUNING.wasp.startDay ? 1 : 0,
-    brambles: bramblesForDay(day),
+    mazeOpenness: mazeOpennessForDay(day),
     richPatches: day >= RICH_PATCH_DAY,
     nightBloom: day >= NIGHT_BLOOM_DAY,
   };
@@ -105,8 +100,8 @@ export function dayIntroduction(day: number): string | null {
   switch (day) {
     case 2:
       return 'A second patch. Your swarm splits between routes.';
-    case TUNING.bramble.startDay:
-      return 'Thorns. Routes cannot pass through them — draw around.';
+    case TUNING.maze.startDay:
+      return 'Brambles close in. Your lines cannot cross them — find a way round.';
     case TUNING.wind.startDay:
       return 'Wind. Straight lines will bend.';
     case TUNING.wasp.startDay:
@@ -135,9 +130,15 @@ export function forecastFor(day: number): string[] {
   const features = featuresForDay(day);
   const out: string[] = [`${patchesForDay(day)} flowers`];
 
-  if (features.brambles > 0) {
+  if (features.mazeOpenness < 1) {
+    // What the player cares about is how hard the board is to cross, not the
+    // number behind it.
     out.push(
-      features.brambles === 1 ? '1 thorn patch' : `${features.brambles} thorn patches`,
+      features.mazeOpenness > 0.7
+        ? 'scattered brambles'
+        : features.mazeOpenness > 0.45
+          ? 'a tangled field'
+          : 'a dense maze',
     );
   }
   if (features.wind) out.push('wind');
@@ -159,7 +160,7 @@ export function nextUnlock(day: number): { day: number; what: string } | null {
 }
 
 function unlockName(day: number): string | null {
-  if (day === TUNING.bramble.startDay) return 'thorns';
+  if (day === TUNING.maze.startDay) return 'brambles';
   if (day === TUNING.wind.startDay) return 'wind';
   if (day === TUNING.wasp.startDay) return 'wasps';
   if (day === RICH_PATCH_DAY) return 'rich blooms';
@@ -178,38 +179,12 @@ export interface DayResult {
   /** True when the miss was close enough to be worth offering extra time. */
   nearMiss: boolean;
   isBest: boolean;
-  /** The hive's bill for the day, charged against the honey before banking. */
-  upkeep: number;
-  /** What actually reaches the store once the hive has been fed. */
-  banked: number;
 }
 
-/**
- * Whether the hive charges upkeep on a given day.
- *
- * Nothing is charged over the first couple of days, for the same reason
- * nothing else is: the opening has one job, and a bill is not it.
- */
-export function upkeepDueOn(day: number): boolean {
-  return day >= TUNING.hive.upkeepFromDay;
-}
-
-export function evaluateDay(
-  day: number,
-  honey: number,
-  bestSoFar: number,
-  dailyUpkeep = 0,
-): DayResult {
+export function evaluateDay(day: number, honey: number, bestSoFar: number): DayResult {
   const quota = dayQuota(day);
   const met = honey >= quota;
   const shortfall = (quota - honey) / quota;
-
-  // Upkeep is charged against the day's honey, never against the quota. The
-  // quota asks "did you work hard enough today"; upkeep asks "can you afford
-  // the hive you have built". Keeping them separate means a big swarm never
-  // makes the day itself harder to pass — it makes the *progress* cost more,
-  // which is the decision it is supposed to be.
-  const upkeep = upkeepDueOn(day) ? Math.min(dailyUpkeep, Math.floor(honey)) : 0;
 
   return {
     day,
@@ -220,7 +195,5 @@ export function evaluateDay(
     // a hopeless day reads as the game selling a rescue it knows will not work.
     nearMiss: !met && shortfall <= TUNING.ads.extendOfferMissThreshold,
     isBest: honey > bestSoFar,
-    upkeep,
-    banked: Math.max(0, Math.floor(honey) - upkeep),
   };
 }

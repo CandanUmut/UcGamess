@@ -26,8 +26,9 @@ import {
   dayIntroduction,
   evaluateDay,
 } from '../game/DayCycle.ts';
-import { deriveStats, hiveGrowth } from '../game/Upgrades.ts';
+import { deriveStats } from '../game/Upgrades.ts';
 import { modifiersFor, PROVISIONS } from '../game/Provisions.ts';
+import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import { computeOffline, formatAway } from '../game/Offline.ts';
 import { commitDrag, resolveDragStart, type DragIntent } from '../game/RouteIntent.ts';
@@ -101,13 +102,14 @@ export class GameScene extends BaseGameplayScene {
   private pressY = 0;
 
   private externallyPaused = false;
-  /** What the last day boundary actually banked, so `+15s` can undo exactly it. */
-  private lastBanked = 0;
 
   // --- first-run teaching ----------------------------------------------
   private hintGfx!: Phaser.GameObjects.Graphics;
   private hasDrawnEver = false;
   private idleSeconds = 0;
+  private tutorial = new Tutorial(false);
+  private tutorialText!: Phaser.GameObjects.Text;
+  private routesDrawn = 0;
 
   constructor() {
     super({ key: 'Game' });
@@ -147,11 +149,28 @@ export class GameScene extends BaseGameplayScene {
     this.beeRenderer = createBeeRenderer(this, 'blitter', DEPTH.bee);
     this.juice = new Juice(this, DEPTH.juice);
     this.hud = new Hud(this, DEPTH.hud);
+    this.tutorialText = this.add
+      .text(DESIGN_WIDTH / 2, 96, '', {
+        fontFamily: FONT,
+        fontSize: '23px',
+        color: '#ffd966',
+        align: 'center',
+        stroke: '#12100c',
+        strokeThickness: 5,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.hud + 1);
     this.sfx = new Sfx(this);
 
     this.fieldRenderer.setViewRect(viewRect(this));
     this.hud.layout(this.safeArea);
     this.bindInput();
+
+    // Installed here rather than at boot: the harness handle reads live
+    // simulation state, and until this point there is no simulation to read.
+    // Removed before submission.
+    (window as unknown as Record<string, unknown>).__beeline = this.debugHandle();
 
     void this.bootstrap();
   }
@@ -179,6 +198,10 @@ export class GameScene extends BaseGameplayScene {
 
     this.save = coerceSave(this.context.save.get<unknown>(SAVE_KEY, null));
     this.day = this.save.day;
+
+    // Only ever on a genuinely fresh save. A returning player has already been
+    // taught, and being taught twice is worse than not being taught at all.
+    this.tutorial = new Tutorial(!this.save.tutorialDone && this.save.day === 1);
 
     this.claimOfflineHoney();
     this.beginDay();
@@ -214,7 +237,6 @@ export class GameScene extends BaseGameplayScene {
 
     this.field.setStats(deriveStats(this.save.levels));
     this.field.beginDay(this.day, features, patchCount, 1, modifiers);
-    this.fieldRenderer.setGrowth(hiveGrowth(this.save.levels));
 
     this.secondsLeft = dayLength(this.day) + extraSeconds + modifiers.extraDaySeconds;
     this.beeRenderer.resize(this.field.bees.length);
@@ -248,18 +270,15 @@ export class GameScene extends BaseGameplayScene {
     this.sfx.play('dayEnd', 0.45);
     this.cameras.main.flash(220, 60, 50, 30);
 
-    const result = evaluateDay(
-      this.day,
-      this.field.honey,
-      this.save.bestDayHoney,
-      deriveStats(this.save.levels).upkeep,
-    );
+    const result = evaluateDay(this.day, this.field.honey, this.save.bestDayHoney);
 
-    this.save.honey += result.banked;
-    this.lastBanked = result.banked;
+    this.save.honey += Math.floor(result.honey);
     this.save.bestDayHoney = Math.max(this.save.bestDayHoney, Math.floor(result.honey));
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     this.save.lastPlayedAt = Date.now();
+    if (this.tutorial.finished) this.save.tutorialDone = true;
+    this.tutorial.dismiss();
+    this.tutorialText.setText('');
 
     // Missing the quota ends the run, but never the progress. Upgrades and
     // unspent honey persist and the next run starts at day one — which is now
@@ -300,10 +319,8 @@ export class GameScene extends BaseGameplayScene {
     this.scene.stop('Night');
     this.scene.resume();
 
-    // Roll back the day-end bookkeeping, since the day is continuing. Banked,
-    // not gross: upkeep was already deducted, and subtracting the gross here
-    // would quietly charge the player the hive's bill twice.
-    this.save.honey -= this.lastBanked;
+    // Roll back the day-end bookkeeping, since the day is continuing.
+    this.save.honey -= Math.floor(this.field.honey);
     this.save.day = this.day;
     this.persist();
 
@@ -428,6 +445,7 @@ export class GameScene extends BaseGameplayScene {
     // Drawing costs workers, charged on what the gesture actually covered.
     const route = this.field.routeById(result.routeId);
     if (route) this.field.dispatchBuilders(route, result.drawnLength);
+    this.routesDrawn += 1;
 
     if (result.connected) this.sfx.playVaried('collect', 0.18, 400);
   }
@@ -589,6 +607,13 @@ export class GameScene extends BaseGameplayScene {
       const wind = this.field.windVector;
       this.hud.setWind(wind.x, wind.y, wind.strength);
 
+      this.tutorial.update({
+        routesDrawn: this.routesDrawn,
+        honey: this.field.honey,
+        anyRouteRetreating: this.field.routes.some((r) => r.isRetreating),
+      });
+      this.tutorialText.setText(this.tutorial.current?.text ?? '');
+
       const building = this.field.countBuilders();
       this.hud.setSwarm(this.field.bees.length - building, building);
       this.hud.setUnfound(
@@ -658,7 +683,7 @@ export class GameScene extends BaseGameplayScene {
     const g = this.hintGfx;
     g.clear();
 
-    const show = !this.hasDrawnEver && this.day === 1 && this.phase === 'playing';
+    const show = this.tutorial.wantsHintLine && this.phase === 'playing';
     if (!show) return;
 
     const patch = this.field.nearestPatchTo(
@@ -701,14 +726,28 @@ export class GameScene extends BaseGameplayScene {
           kind: p.kind,
         })),
       builders: () => this.field.countBuilders(),
-      brambles: () =>
-        this.field.brambles.map((b) => ({
-          x: Math.round(b.x),
-          y: Math.round(b.y),
-          radius: Math.round(b.radius),
-          discovered: b.discovered,
-        })),
+      maze: () => ({
+        cols: this.field.maze.cols,
+        rows: this.field.maze.rows,
+        openWalls: (() => {
+          const m = this.field.maze;
+          let open = 0;
+          for (let r = 0; r < m.rows; r += 1) {
+            for (let c = 1; c < m.cols; c += 1) if (!m.wallLeft(c, r)) open += 1;
+          }
+          for (let r = 1; r < m.rows; r += 1) {
+            for (let c = 0; c < m.cols; c += 1) if (!m.wallAbove(c, r)) open += 1;
+          }
+          return open;
+        })(),
+      }),
       explored: () => this.field.fog.exploredFraction(),
+      // Lights the whole board, for inspecting a generated maze without having
+      // to fly it. Part of the harness handle, removed before submission.
+      revealAll: () => {
+        this.field.fog.cells.fill(1);
+        this.field.fog.dirty = true;
+      },
       wind: () => this.field.windVector,
       stats: () => this.field.getStats(),
       routes: () =>

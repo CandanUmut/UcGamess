@@ -91,7 +91,7 @@ export function applyAimAssist(
   // Never snap through thorns. Assist exists to make a drag mean what it looks
   // like it means; hopping the line over a thicket the player can plainly see
   // would do the opposite — and the route would only be cut back there anyway.
-  if (field.pathBlocked(endX, endY, patch.x, patch.y, true)) {
+  if (field.pathBlocked(endX, endY, patch.x, patch.y)) {
     return { coords: out, connected: false };
   }
 

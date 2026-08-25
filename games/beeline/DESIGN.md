@@ -1211,7 +1211,199 @@ errors.
 
 ---
 
-## 21. Success criteria
+## 22. Rolling back the management layer
+
+§20's gameplay half is reverted. Playtest verdict, in full because every clause
+of it identifies a real fault:
+
+> _"it became really boring, the hive upgrade is not meaningful I don't
+> understand what it does, or how it is a growing, the lines we draw usually
+> just next to our hive and we just wait now, there is no talent, no
+> intelligence, no skills required, thorns are not a great blocks."_
+
+### What went wrong, specifically
+
+**Standing roads created a dominant degenerate strategy, and the tuning note
+said so out loud.** §20 recorded that the threshold was set so "a short line
+carrying the whole swarm pegs at full". That is not a tuning detail, it is a
+solved game: draw the shortest possible line, put everything on it, wait. The
+optimal play became the least interesting play, and it was written down as a
+feature.
+
+**Standing roads also deleted two other systems.** A standing road takes 85% less
+wind _and_ never retreats, so wind stopped being anything at all, and route
+decay — the mechanic the entire game was built on — stopped applying to the only
+route that mattered.
+
+**Deeper Comb was illegible.** "−24% keep" tells a player nothing about what
+they get, and an upgrade whose whole purpose is to raise a ceiling has no
+visible effect at the moment of purchase. An upgrade the player cannot feel is
+not a decision, it is a tax on their attention.
+
+**Upkeep made the game slower rather than harder.** It reduced what was banked
+without changing anything about how a day is played, so the only thing it
+touched was the rate of progression.
+
+### The lesson worth keeping
+
+Every pass since §15 has added a system, and each was individually defensible.
+The verdict is that the sum is _less_ engaging than the parts promised, which
+means the additions were not addressing the actual gap.
+
+**The actual gap: drawing a line to a visible target is not a skill.** Aim assist
+removes the execution challenge, the field is mostly empty so the shape of the
+line rarely matters, and there is no time pressure on the gesture. Adding
+economy on top of a verb that asks nothing of the player makes a spreadsheet,
+not a game — and that is what the last three passes did.
+
+The obstacles are the closest thing to a real answer the game has, and they are
+too sparse to bite: a handful of circles on an open board leaves the straight
+line correct most of the time. The playtest said this directly — _"thorns are
+not a great blocks, there could be paths we need to draw through like
+labyrinths."_
+
+### What is reverted, and what is kept
+
+Reverted: standing roads, hive upkeep, Deeper Comb, hive growth visuals, and the
+quota table that was tuned around them.
+
+Kept: the adaptive canvas from the same pass, which is unrelated to any of this
+and fixed a real bug — the game covered 63% of a landscape phone and now covers
+100%.
+
+---
+
+## 24. The maze, and a front door
+
+The rollback in §22 left the diagnosis: drawing a line to a visible target is
+not a skill while the board is empty enough that the line's shape rarely
+matters. This is the answer to that, and it came from the playtest rather than
+from me — _"there could be paths we need to draw through like labyrinths."_
+
+### One idea rejected first, and why
+
+I proposed making the player's own routes block each other, on the Flight
+Control model. The playtest killed it in one sentence: _"they already almost
+never crossed each other, it's usually just a straight line."_
+
+That is correct and it is worth recording. With the hive in a corner and flowers
+scattered outward, routes are near-radial — they diverge from a common origin,
+so they almost never intersect. A constraint that fires once a run is not a
+mechanic, it is a rule the player never meets. The idea was sound in the
+abstract and wrong for this board's geometry.
+
+### The maze
+
+The scattered thorn circles are gone. The board is now carved into an 8x5 grid
+of corridors with bramble walls on the edges between them.
+
+**Why a grid, and why wide.** Corridors are a whole cell across — 152 x 116
+design units, over 45 CSS pixels on a phone in landscape. That is the constraint
+everything else bends to: a tight maze cannot be traced with a thumb, so the
+interesting part has to be the _topology_ and never the precision. Difficulty
+comes from how many walls exist, not from how narrow the gaps are.
+
+**Why a spanning tree, then loops.** Generation carves a perfect maze and then
+re-opens a fraction of the remaining walls.
+
+The tree makes reachability **structural**: every cell reaches every other by
+construction. The old thorn field could only manage this with a prune pass that
+deleted obstacles after the fact, and even that was a statistical argument. The
+loops matter as much — a perfect maze has exactly one route to each flower,
+which is a puzzle with a single answer and therefore one that stops being a
+puzzle once solved. Loops mean the question becomes _which_ way: the short
+winding path, or the long open one that is quicker to redraw when it decays.
+
+`openness` is the single difficulty knob, and it is the whole escalation: 1 on
+days one and two (no walls at all, so the opening is exactly the game it was),
+falling to 0.28 by day twelve.
+
+**Collision is a cell-boundary crossing**, not a test against every wall. Cost
+is proportional to the length of a route rather than to how many walls exist,
+which is what keeps it cheap enough to run for every route on every fixed step.
+
+### What the maze changed underneath it
+
+- **Flowers are placed by maze steps, not by radius.** On a maze board the
+  straight-line distance and the flown distance are very different numbers, and
+  the one that matters is the one the bees have to cover.
+- **Yield follows the path too.** A flower behind three hedges is a long trip
+  however close it looks; paying by crow-flies distance would have made the most
+  awkward flowers on the board also the worst value.
+- **Rich patches dropped from 3x to 2x.** Stacked on a 3.8x distance multiplier
+  that now follows the path, they put 10,000 honey on one flower against a day
+  quota of 1,900, which made the quota look like a rounding error.
+- **Pruning Shears cuts extra gaps** instead of shrinking thickets, which is the
+  same fiction doing a better job.
+
+Two bugs worth keeping, both found by looking at the board rather than at a
+test:
+
+- **The maze was generated after the flowers were placed**, so placement read an
+  empty distance map and put a flower on the hive. The comment above the call
+  said "the maze is carved before the flowers" while the code did the opposite.
+- **Two flowers stacked on the same edge cell.** The old field rejected spots
+  within 170px of each other and the rule was lost in the move to cells; and
+  every edge-cell flower was clamped to the same coordinate. The maze is now
+  inset far enough that a cell centre always has room for a whole reach ring.
+
+### Measured
+
+A model that pathfinds the maze properly — BFS to the flower, then a polyline
+through the corridors on the way, which is what a player traces:
+
+| Day | Honey | Quota | Ratio |
+| --- | ----- | ----- | ----- |
+| 1   | 361   | 60    | 6.02  |
+| 3   | 724   | 460   | 1.57  |
+| 5   | 1268  | 860   | 1.47  |
+| 7   | 1888  | 1300  | 1.45  |
+| 9   | 2556  | 1750  | 1.46  |
+| 11  | 3278  | 2300  | 1.43  |
+| 12  | 2997  | 2500  | 1.20  |
+
+Every route the pathfinder drew reached its flower, across every day and every
+trial — so the connectivity guarantee holds in play, not only in the generator.
+
+Days one and two stay unmissable. **Every day from three on now sits between
+1.2x and 1.6x for a model that solves the maze perfectly**, which puts a human
+near or below quota — the tight, skill-dependent curve the playtest asked for.
+
+### A front door
+
+The playtest also said the game _"is not professional yet, still a prototype"_,
+and named the reasons: no menu, no tutorial, no way to start over.
+
+**A title screen.** The game used to boot straight into day one, on the argument
+that a menu is friction before the hook. That argument is real, so the screen is
+instant, nothing is preloaded, and a returning player's first tap continues
+their run. It costs one tap and buys the game an identity, somewhere for "start
+over" to live, and a tutorial that can be offered rather than inflicted.
+
+**Start over**, the explicit ask. Two taps, never one — wiping a run by
+mis-tapping a menu button would be unforgivable.
+
+**A real tutorial**, replacing the hint line. Three steps: draw a line, watch
+the bees follow it, refresh it as it fades. It lives in `game/Tutorial.ts` as a
+state machine with no Phaser reference, because what the tutorial _is_ — the
+steps and the evidence that completes each — is design, and design inside a
+scene cannot be read or tested without booting a browser.
+
+Three rules: it never blocks (no modal, no "tap to continue"), it runs once on a
+fresh save, and every step waits for the player to _do the thing_ rather than
+for a timer. Advancing on a timer teaches the confident player nothing and
+abandons the hesitant one.
+
+### What is still missing
+
+Art. Every sprite is still a generated dot or a rounded rectangle, and the maze
+is the first thing in this game that gives art somewhere to live — corridors,
+walls, a hive that sits in a place. That is the next thing, and it is the one
+thing here that cannot be done in code.
+
+---
+
+## 25. Success criteria
 
 Not submission-ready until all of these hold:
 
