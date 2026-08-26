@@ -1,4 +1,6 @@
-import type Phaser from 'phaser';
+// A value import, not a type-only one: `TintModes.FILL` is needed at runtime
+// for the hive's honey fill. Phaser is already in the bundle as a value.
+import Phaser from 'phaser';
 import { COLORS, TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
 import type { Patch } from '../sim/Patch.ts';
@@ -31,6 +33,34 @@ const WALL_ART_RATIO = 87 / 45;
  * of the image height. Also measured — 6.5 of 87.
  */
 const WALL_ART_OFFSET = 6.5 / 87;
+
+/** How the hive is drawn, and therefore how tall the honey inside it looks. */
+const HIVE_SCALE = 0.86;
+const HIVE_ORIGIN_Y = 0.62;
+
+/**
+ * The skep's half-width as a fraction of the drawing's, at the honey line.
+ *
+ * A skep is widest at its base and pinches into a dome, so the surface line has
+ * to narrow as the honey rises or it overhangs the building near the top. A
+ * straight taper between these two is close enough at this size; unlike the
+ * wall constants these are eyeballed, not measured, because there is no single
+ * edge to measure against.
+ */
+const SKEP_WIDTH_AT_BASE = 0.92;
+const SKEP_WIDTH_AT_BRIM = 0.37;
+
+/**
+ * Honey, and honey going over the brim.
+ *
+ * Brighter and more saturated than `COLORS.hive`, which is the skep's own
+ * brown. The point of the fill is contrast against the building it is inside,
+ * so it cannot be drawn in the building's colour.
+ */
+const HONEY_TINT = 0xffb61f;
+const HONEY_SURFACE = 0xfff0b0;
+const SPILL_TINT = 0xff6a2f;
+const SPILL_SURFACE = 0xffc0a0;
 
 const KIND_TINT: Record<string, number> = {
   normal: COLORS.patch,
@@ -88,6 +118,26 @@ export class FieldRenderer {
   private readonly ground: Phaser.GameObjects.TileSprite | null;
   /** The hive itself, drawn over its glow. Null if the file never arrived. */
   private readonly hiveSprite: Phaser.GameObjects.Image | null;
+  /**
+   * A gold copy of the hive, cropped to the honey line.
+   *
+   * The vessel the whole selling loop is a race against, drawn *as* the vessel.
+   * The first version of this was a bar in the corner of the HUD, which is the
+   * standard answer and the wrong one here: the hive is already on screen, it
+   * is already the thing filling up, and a separate gauge asks the player to
+   * watch two objects and mentally join them. Filling the building itself means
+   * the pressure and the picture are the same object.
+   */
+  private readonly hiveFill: Phaser.GameObjects.Image | null;
+  /** `honey/cap`, under the skep. The number the gauge used to carry. */
+  private readonly hiveLabel: Phaser.GameObjects.Text;
+  /** The honey line, over the skep and under everything else. */
+  private readonly hiveGfx: Phaser.GameObjects.Graphics;
+  /** Eased honey level, 0..1. Never snapped — see `drawHiveHoney`. */
+  private fillShown = 0;
+  private spillPhase = 0;
+  /** Field time at the last frame, for a delta the draw call is not given. */
+  private lastFieldTime = 0;
   /** One per wasp, reused. There are never more than a couple. */
   private wasps: Phaser.GameObjects.Image[] = [];
   private buyerLabels: Phaser.GameObjects.Text[] = [];
@@ -123,6 +173,32 @@ export class FieldRenderer {
           .setOrigin(0.5, 0.62)
           .setDepth(depth + 2)
       : null;
+    // Same texture, same origin, same scale as the skep, drawn a hair above it
+    // so the crop lines up with the drawing pixel for pixel.
+    this.hiveFill = scene.textures.exists(TEX.hive)
+      ? scene.add
+          .image(field.hiveX, field.hiveY, TEX.hive)
+          .setOrigin(0.5, HIVE_ORIGIN_Y)
+          .setDepth(depth + 2.5)
+          .setTint(HONEY_TINT)
+          .setTintMode(Phaser.TintModes.FILL)
+          .setAlpha(0)
+      : null;
+    this.hiveLabel = scene.add
+      .text(field.hiveX, field.hiveY + 46, '', {
+        fontFamily: FONT,
+        fontSize: '15px',
+        fontStyle: 'bold',
+        color: '#ffffff',
+        stroke: '#171208',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(depth + 5);
+    // Its own layer, between the gold fill and the wasps. The honey line has to
+    // sit *over* the skep, and the field's main graphics layer is underneath
+    // it — drawing the meniscus there would have hidden it inside the building.
+    this.hiveGfx = scene.add.graphics().setDepth(depth + 2.6);
     this.waspGfx = scene.add.graphics().setDepth(depth + 3);
     this.wallGfx = scene.add.graphics().setDepth(depth + 4);
     this.surroundGfx = scene.add.graphics().setDepth(depth + 60);
@@ -189,8 +265,94 @@ export class FieldRenderer {
     // a building that visibly inflates reads as a balloon.
     this.hiveSprite?.setScale(0.86 + (pulse - 1) * 0.35);
 
+    this.drawHiveHoney(field);
     this.drawBuyers(field);
     this.drawWasps(field, alpha);
+  }
+
+  /**
+   * Honey rising inside the skep, and the line it has reached.
+   *
+   * `setTintFill` rather than `setTint`: a multiply tint over a drawing that is
+   * already brown gives a slightly warmer brown, which is not a signal. Fill
+   * replaces the colour outright and keeps only the alpha, so what is drawn is
+   * the hive's *silhouette* in gold — held at partial alpha so the linework
+   * still reads through it. That is the contrast the multiply could not give.
+   *
+   * The crop takes the bottom `fullness` of the source image, so the gold
+   * climbs the building from its floor. A bright meniscus across the top of it
+   * is what makes the exact level readable at a glance rather than "somewhere
+   * around half"; without it a soft gold wash is surprisingly hard to measure.
+   */
+  private drawHiveHoney(field: Field): void {
+    this.hiveGfx.clear();
+    // The draw call is not handed a delta, and easing on a fixed per-frame
+    // constant would run at 2.4x on a 144Hz monitor — the same bug the fixed
+    // timestep exists to prevent, in its cosmetic form. Field time is the
+    // simulation's own clock, so this is correct at any refresh rate.
+    const dt = Math.max(0, Math.min(0.25, field.time - this.lastFieldTime));
+    this.lastFieldTime = field.time;
+
+    // Eased rather than snapped. Fast enough to feel responsive, slow enough
+    // that the last delivery before the brim reads as a rise, not a jump.
+    this.fillShown += (field.honeyFullness - this.fillShown) * Math.min(1, dt * 7);
+    const level = Math.max(0, Math.min(1, this.fillShown));
+
+    const spilling = field.isSpilling;
+    if (spilling) this.spillPhase += dt * 7;
+    else this.spillPhase = 0;
+
+    this.hiveLabel
+      .setText(
+        spilling
+          ? 'SPILLING'
+          : `${Math.round(field.honey)}/${Math.round(field.honeyCap)}`,
+      )
+      .setColor(spilling ? '#ff8a70' : '#ffffff');
+
+    const fill = this.hiveFill;
+    if (!fill) return;
+
+    if (level <= 0.001) {
+      fill.setAlpha(0);
+      return;
+    }
+
+    // Off the frame rather than off measured constants, so a redrawn hive of a
+    // different size cannot silently put the honey line in the wrong place.
+    // Crop coordinates are texture-space and Phaser scales them itself.
+    const texW = fill.frame.width;
+    const texH = fill.frame.height;
+    const cropH = texH * level;
+    fill.setCrop(0, texH - cropH, texW, cropH);
+    fill.setScale(this.hiveSprite?.scaleX ?? HIVE_SCALE);
+
+    if (spilling) {
+      // A brimming hive is an emergency, and it says so in the one colour the
+      // rest of the game reserves for losing something.
+      fill.setTint(SPILL_TINT);
+      fill.setAlpha(0.5 + 0.25 * Math.abs(Math.sin(this.spillPhase)));
+    } else {
+      fill.setTint(HONEY_TINT);
+      fill.setAlpha(0.62);
+    }
+
+    // The meniscus: one line across the surface of the honey. It is what makes
+    // the exact level readable — a soft gold wash on its own turns out to be
+    // surprisingly hard to measure at a glance.
+    const drawnH = texH * (this.hiveSprite?.scaleY ?? HIVE_SCALE);
+    const top = field.hiveY - drawnH * HIVE_ORIGIN_Y;
+    const surfaceY = top + drawnH * (1 - level);
+    // Narrows as the honey rises, because the skep does.
+    const width = SKEP_WIDTH_AT_BASE + (SKEP_WIDTH_AT_BRIM - SKEP_WIDTH_AT_BASE) * level;
+    const halfWidth = texW * (this.hiveSprite?.scaleX ?? HIVE_SCALE) * 0.5 * width;
+
+    const g = this.hiveGfx;
+    g.lineStyle(3, spilling ? SPILL_SURFACE : HONEY_SURFACE, 0.9);
+    g.beginPath();
+    g.moveTo(field.hiveX - halfWidth, surfaceY);
+    g.lineTo(field.hiveX + halfWidth, surfaceY);
+    g.strokePath();
   }
 
   /**
@@ -232,28 +394,37 @@ export class FieldRenderer {
 
       // A ring the size of the reach, so "how close does my line have to get"
       // is a thing you can see rather than a number you have to know.
-      g.fillStyle(tint, 0.12);
-      g.fillCircle(buyer.x, buyer.y, TUNING.honey.reachRadius);
-      g.lineStyle(isBest ? 4 : 2, tint, isBest ? 0.9 : 0.5);
-      g.strokeCircle(buyer.x, buyer.y, TUNING.honey.reachRadius);
+      //
+      // Ring, not disc. While the depots sat on the far edge of the board a
+      // filled circle was free decoration; standing among the corridors it
+      // shaded most of a cell, and two of them read as craters in the field
+      // rather than as buildings on it. The fill is now a faint wash under the
+      // building alone, and the reach is carried by the outline.
+      const reach = TUNING.honey.reachRadius;
+      g.fillStyle(tint, 0.07);
+      g.fillCircle(buyer.x, buyer.y, reach);
+      g.lineStyle(isBest ? 3 : 2, tint, isBest ? 0.85 : 0.4);
+      g.strokeCircle(buyer.x, buyer.y, reach);
 
       // The depot itself: a squat building with a roof, drawn rather than
-      // shipped for the same reason everything else here is.
-      g.fillStyle(tint, 0.9);
-      g.fillRect(buyer.x - 26, buyer.y - 12, 52, 34);
-      g.fillStyle(tint, 0.6);
+      // shipped for the same reason everything else here is. Sized to sit
+      // inside its own reach ring, so the landmark and the thing you have to
+      // touch are one shape instead of a building lost in a halo.
+      g.fillStyle(tint, 0.92);
+      g.fillRect(buyer.x - 19, buyer.y - 8, 38, 25);
+      g.fillStyle(tint, 0.62);
       g.beginPath();
-      g.moveTo(buyer.x - 34, buyer.y - 12);
-      g.lineTo(buyer.x, buyer.y - 34);
-      g.lineTo(buyer.x + 34, buyer.y - 12);
+      g.moveTo(buyer.x - 25, buyer.y - 8);
+      g.lineTo(buyer.x, buyer.y - 26);
+      g.lineTo(buyer.x + 25, buyer.y - 8);
       g.closePath();
       g.fillPath();
 
       const label = this.buyerLabels[index];
-      const arrow = buyer.trend > 0 ? '▲' : buyer.trend < 0 ? '▼' : '';
+      const arrow = buyer.trend > 0 ? '▲' : buyer.trend < 0 ? '▼' : '·';
       label
         ?.setText(`${buyer.price.toFixed(2)} ${arrow}`)
-        .setPosition(buyer.x, buyer.y + 40)
+        .setPosition(buyer.x, buyer.y + reach - 6)
         .setVisible(true);
     });
   }
@@ -673,6 +844,9 @@ export class FieldRenderer {
     this.flowers = [];
     this.ground?.destroy();
     this.hiveSprite?.destroy();
+    this.hiveFill?.destroy();
+    this.hiveLabel.destroy();
+    this.hiveGfx.destroy();
     for (const wasp of this.wasps) wasp.destroy();
     this.wasps = [];
     for (const label of this.buyerLabels) label.destroy();

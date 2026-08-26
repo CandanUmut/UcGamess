@@ -3,6 +3,16 @@ import { TUNING, type BuyerTuning } from '../config/tuning.ts';
 export type BuyerId = 'market' | 'apothecary';
 
 /**
+ * Seconds the trend reference lags the live price by.
+ *
+ * Long enough that the gap is comfortably bigger than the arrow's threshold
+ * while a price is genuinely moving; short enough that the arrow turns over
+ * within a second or so of a peak, which is while there is still time to act
+ * on it.
+ */
+const TREND_TAU = 1.2;
+
+/**
  * Somebody who buys honey, at a price that moves.
  *
  * This is the second half of the loop. Flowers make honey and the hive can only
@@ -51,7 +61,8 @@ export class Buyer {
   private phaseA = 0;
   private phaseB = 0;
   private elapsed = 0;
-  private lastPrice = 0;
+  /** A lagging copy of the price. The trend arrow is the gap between them. */
+  private priceEma = 0;
 
   constructor(id: BuyerId, x: number, y: number) {
     this.id = id;
@@ -67,7 +78,7 @@ export class Buyer {
     this.phaseB = random() * Math.PI * 2;
     this.saturation = 0;
     this.elapsed = 0;
-    this.lastPrice = this.price;
+    this.priceEma = this.price;
   }
 
   /** Money paid per unit of honey, right now. */
@@ -92,8 +103,20 @@ export class Buyer {
    * curve is a forecast.
    */
   get trend(): -1 | 0 | 1 {
-    const delta = this.price - this.lastPrice;
-    const threshold = this.tuning.basePrice * 0.004;
+    // Against a lagging copy of the price, not against last frame's.
+    //
+    // Comparing consecutive frames was a latent bug that hid behind a
+    // reasonable-looking line: one frame of a wave with a period measured in
+    // tens of seconds moves the price by well under a thousandth, so the delta
+    // never once cleared a threshold set at four thousandths and **both arrows
+    // were permanently blank**. Slowing the waves down would have buried it
+    // further.
+    //
+    // The EMA lags the price by roughly `TREND_TAU` seconds' worth of slope, so
+    // the gap is a real measure of which way things are going, at a size that
+    // does not depend on the frame rate or on how fast the wave happens to be.
+    const delta = this.price - this.priceEma;
+    const threshold = this.tuning.basePrice * 0.005;
     if (delta > threshold) return 1;
     if (delta < -threshold) return -1;
     return 0;
@@ -105,8 +128,8 @@ export class Buyer {
   }
 
   step(dt: number): void {
-    this.lastPrice = this.price;
     this.elapsed += dt;
+    this.priceEma += (this.price - this.priceEma) * Math.min(1, dt / TREND_TAU);
     this.saturation = Math.max(
       0,
       this.saturation - this.saturation * this.tuning.saturationRecovery * dt,

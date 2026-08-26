@@ -355,7 +355,7 @@ export class Field {
     // stays lit — the dark is there to hide what is *worth finding*, and a
     // building that has been there the whole run is not that.
     for (const buyer of this.buyers) {
-      this.fog.reveal(buyer.x, buyer.y, TUNING.honey.reachRadius * 2.2);
+      this.fog.reveal(buyer.x, buyer.y, TUNING.honey.revealRadius);
     }
     if (modifiers.scoutRadius > 0) {
       this.fog.reveal(this.hiveX, this.hiveY, modifiers.scoutRadius);
@@ -440,19 +440,38 @@ export class Field {
     // ambiguous — the old field rejected spots within 170px for exactly this
     // reason and the rule was lost in the move to cells.
     const taken = new Set<number>();
-    const block = (col: number, row: number, spread: number): void => {
+    const block = (into: Set<number>, col: number, row: number, spread: number): void => {
       for (let dr = -spread; dr <= spread; dr += 1) {
         for (let dc = -spread; dc <= spread; dc += 1) {
           const c = col + dc;
           const r = row + dr;
-          if (maze.inside(c, r)) taken.add(r * maze.cols + c);
+          if (maze.inside(c, r)) into.add(r * maze.cols + c);
         }
       }
     };
 
     for (const patch of this.patches) {
       if (!patch.alive) continue;
-      block(maze.colAt(patch.x), maze.rowAt(patch.y), 1);
+      block(taken, maze.colAt(patch.x), maze.rowAt(patch.y), 1);
+    }
+
+    // The ring around each depot is kept in its own set, and held to a harder
+    // rule than the flower rings above.
+    //
+    // Same reasoning — a flower's reach ring overlapping a buyer's makes it
+    // genuinely ambiguous which one a drag was aimed at, and the aim assist has
+    // to pick one — but the flower rule is allowed to give way under pressure
+    // and this one is not. `taken` is soft by design: on a crowded board a
+    // flower may land next to another flower rather than not spawn, which is
+    // untidy and costs nothing. Landing next to a *depot* costs the player a
+    // sell line they meant to draw, so it takes its own fallback tier below and
+    // only ever gives way when there is genuinely nowhere else on the board.
+    //
+    // None of this came up while the depots sat on the far edge, where nothing
+    // ever spawned within reach of one.
+    const nearBuyer = new Set<number>();
+    for (const buyer of this.buyers) {
+      block(nearBuyer, maze.colAt(buyer.x), maze.rowAt(buyer.y), 1);
     }
     // Only the hive's own cell, not its neighbours. Day one's flowers are
     // deliberately one corridor out so they sit inside the hive's light, and
@@ -466,6 +485,8 @@ export class Field {
     const inBand: number[] = [];
     const spaced: number[] = [];
     const anywhere: number[] = [];
+    /** Last resort: next door to a depot, but on the board and not on anything. */
+    const crowded: number[] = [];
 
     for (let index = 0; index < this.cellSteps.length; index += 1) {
       const steps = this.cellSteps[index] ?? -1;
@@ -473,12 +494,21 @@ export class Field {
 
       const col = index % maze.cols;
       const row = Math.floor(index / maze.cols);
+      // Never, at any fallback tier: a flower sharing a cell with the hive or
+      // with a depot is unaimable, and `anywhere` exists to stop a day being
+      // short of a flower, not to put one somewhere it cannot be used.
       const onTop =
         this.patches.some(
           (p) => p.alive && maze.colAt(p.x) === col && maze.rowAt(p.y) === row,
         ) ||
-        (col === hiveCol && row === hiveRow);
+        (col === hiveCol && row === hiveRow) ||
+        this.buyers.some((b) => maze.colAt(b.x) === col && maze.rowAt(b.y) === row);
       if (onTop) continue;
+
+      if (nearBuyer.has(index)) {
+        crowded.push(index);
+        continue;
+      }
 
       anywhere.push(index);
       if (taken.has(index)) continue;
@@ -498,7 +528,14 @@ export class Field {
       inBand.push(index);
     }
 
-    const pool = inBand.length > 0 ? inBand : spaced.length > 0 ? spaced : anywhere;
+    const pool =
+      inBand.length > 0
+        ? inBand
+        : spaced.length > 0
+          ? spaced
+          : anywhere.length > 0
+            ? anywhere
+            : crowded;
     if (pool.length === 0) return { x: this.hiveX, y: this.hiveY };
 
     const index = pool[Math.floor(Math.random() * pool.length)] ?? 0;
@@ -1722,7 +1759,14 @@ export class Field {
    */
   private loadForSale(bee: Bee): boolean {
     if (this.honey <= 0) return false;
-    const load = Math.min(TUNING.honey.perSellTrip, this.honey);
+    // Capped by a share of *capacity* as well as by a flat amount, so the
+    // number of trips it takes to empty a full hive stays roughly constant
+    // however far the Honey Store is pushed — and so no single bee ever
+    // shoulders the whole store. See `TUNING.honey.maxTripShare`.
+    const load = Math.min(
+      Math.max(TUNING.honey.perSellTrip, this.honeyCap * TUNING.honey.maxTripShare),
+      this.honey,
+    );
     this.honey -= load;
     bee.carrying = load;
     bee.payload = 'honey';

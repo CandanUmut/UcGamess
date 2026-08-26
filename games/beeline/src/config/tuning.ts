@@ -300,12 +300,16 @@ export interface BuyerTuning {
 export interface HoneyTuning {
   /** Hive capacity at level zero. Deliberately small — see the runtime note. */
   baseCap: number;
-  /** Honey one bee carries to a buyer per trip. */
+  /** Most honey one bee carries to a buyer per trip, as a flat amount. */
   perSellTrip: number;
+  /** And as a fraction of hive capacity, so trips-to-empty stays constant. */
+  maxTripShare: number;
   /** How near a route's tip must be for its bees to trade. */
   reachRadius: number;
   /** How near a drag has to end to count as aimed at a buyer. */
   aimRadius: number;
+  /** How much board a depot lights at dawn. Not the same as its reach. */
+  revealRadius: number;
 }
 
 export interface MazeTuning {
@@ -876,13 +880,30 @@ export const TUNING: Tuning = {
   /**
    * The two buyers.
    *
-   * The Market is close, steady and cheap; the Apothecary is far, wild and
+   * The Market is close, steady and cheap; the Apothecary is further, wild and
    * pays much better at its peaks. That contrast is the decision — not "which
-   * number is bigger right now", but whether a long run to a swinging price is
-   * worth the trips it costs, with a hive that is filling up while you decide.
+   * number is bigger right now", but whether a longer run to a swinging price
+   * is worth the trips it costs, with a hive filling up while you decide.
    *
-   * Both sit on the far side of the board from the hive's corner, so selling is
-   * always a real journey through the maze rather than a formality.
+   * ### Why they sit near the hive
+   *
+   * They used to be planted on the far side of the board, on the theory that
+   * selling should be a real journey. It was the wrong theory. Selling is not
+   * the reward at the end of the loop, it is the *pressure inside* it — the
+   * hive is small, it spills, and the answer to a brimming hive has to be
+   * reachable inside the few seconds before honey starts walking out of the
+   * door. A depot four corridors away turned that pressure into a chore, and
+   * turned the near-versus-far decision into a foregone one, because at that
+   * range both buyers were simply *far*.
+   *
+   * Near the hive, the two are close enough that a sell line is a cheap
+   * standing commitment and the decision goes back to being about the price.
+   * The distance between *them* is what still costs something: the Market is a
+   * short hop up the left wall, the Apothecary a longer run out along the
+   * bottom, and a sell line can only point at one.
+   *
+   * Both sit on maze cell centres so a depot never lands inside a wall, and
+   * flower placement blocks their cells — see `Field.randomPatchPosition`.
    */
   buyers: {
     market: {
@@ -891,19 +912,19 @@ export const TUNING: Tuning = {
       // A slow wave you can plan around and a small fast one so the number is
       // never quite still. Steady enough to be the answer when the hive is
       // brimming and there is no time to gamble.
-      periodSlow: 26,
-      periodFast: 11,
+      periodSlow: 60,
+      periodFast: 26,
       swingSlow: 0.2,
       swingFast: 0.08,
       floorFraction: 0.45,
       saturationPerHoney: 0.0011,
       saturationRecovery: 0.055,
       maxSaturation: 0.45,
-      // Close, in the same lower band as the hive. A sell line here is about a
-      // third of the board — cheap enough to keep standing all day, which is
-      // exactly what the safe buyer should be.
-      x: 700,
-      y: 620,
+      // Left-middle, one corridor up the wall from the hive's own row. A sell
+      // line here is a couple of corridors — cheap enough to keep standing all
+      // day, which is exactly what the safe buyer should be.
+      x: 106,
+      y: 284,
       tint: 0xf0a83c,
     },
     apothecary: {
@@ -912,8 +933,8 @@ export const TUNING: Tuning = {
       // that on top. Catching a peak here is the best thing that happens in a
       // day; arriving at a trough after a long flight is the worst.
       basePrice: 1.5,
-      periodSlow: 19,
-      periodFast: 7,
+      periodSlow: 42,
+      periodFast: 18,
       swingSlow: 0.34,
       swingFast: 0.16,
       floorFraction: 0.35,
@@ -923,11 +944,12 @@ export const TUNING: Tuning = {
       saturationPerHoney: 0.0019,
       saturationRecovery: 0.045,
       maxSaturation: 0.55,
-      // Across the board and up. Half again the flight of the Market, which is
-      // what its better price is buying — and what makes arriving at a trough
-      // hurt, because the line cost real bees to lay and real bees to hold.
-      x: 900,
-      y: 175,
+      // Bottom-middle, out along the hive's own row. Still the longer flight of
+      // the two — which is what its better price is buying, and what makes
+      // arriving at a trough hurt, because the line cost real bees to lay and
+      // real bees to hold.
+      x: 564,
+      y: 632,
       tint: 0xa87ce0,
     },
   },
@@ -943,11 +965,57 @@ export const TUNING: Tuning = {
    */
   honey: {
     baseCap: 220,
-    // Six trips to empty a full hive at level zero, so a sell line is a
-    // commitment of several bees for several seconds rather than one errand.
-    perSellTrip: 38,
-    reachRadius: 88,
-    aimRadius: 150,
+    /**
+     * The smallest useful load, in absolute honey.
+     *
+     * A floor rather than the cap it used to be — see `maxTripShare`. It only
+     * binds at the very bottom of the Honey Store, and it is there so a small
+     * hive is emptied by bees rather than by dribbles.
+     */
+    perSellTrip: 26,
+    /**
+     * What one bee shoulders, as a fraction of hive capacity.
+     *
+     * A flat load failed at both ends. Near the brim a sale read as one bee
+     * teleporting a chunk of the day's work to a depot instead of as a swarm
+     * working a line; and once the hive was low, a single bee took *all* of it,
+     * which is the same thing seen from the other side. Worse, a flat load does
+     * not scale — every Honey Store level added trips to empty the hive, so the
+     * upgrade meant to relieve pressure quietly made selling more tedious.
+     *
+     * A share fixes both. Roughly nine trips to empty a full hive at any
+     * capacity, so a sell line is always a standing commitment of several bees
+     * over several seconds, and the Honey Store buys headroom rather than
+     * homework.
+     */
+    maxTripShare: 0.11,
+    /**
+     * How near a route's tip must be for its bees to trade.
+     *
+     * Small on purpose. This ring is drawn on the board, and a depot sitting in
+     * the play area with an 88-unit disc around it covered most of a corridor —
+     * two landmarks reading as craters. The aim assist below is what makes the
+     * ring easy to hit; the ring itself only has to say "here".
+     */
+    reachRadius: 54,
+    /**
+     * How near a drag has to end to count as aimed at a buyer.
+     *
+     * Deliberately under `patch.aimAssistRadius`, and a nearer flower now beats
+     * a buyer outright (see `RouteIntent.applyAimAssist`). While the depots
+     * were exiled to the far edge nothing else was ever within reach of one, so
+     * an unconditional win cost nothing; near the hive it would quietly steal
+     * drags meant for the flowers next door.
+     */
+    aimRadius: 104,
+    /**
+     * How much ground a depot lights at dawn.
+     *
+     * Buyers are landmarks, not discoveries, so their ground is never fogged.
+     * Kept separate from `reachRadius` because it answers a different question
+     * — shrinking the ring you have to touch should not also dim the board.
+     */
+    revealRadius: 190,
   },
 
   offline: {
