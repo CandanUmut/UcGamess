@@ -87,6 +87,35 @@ pieces still waiting on hand-drawn art.
 
   These three replaced the last of the Phaser primitives on the board.
 
+### shop-market.png, shop-apothecary.png
+
+- **File:** `sprites/shop-market.png`
+- **File:** `sprites/shop-apothecary.png`
+- **Source:** Original work — drawn by hand by the studio (`left.png`,
+  `right.png`)
+- **Author:** Umut Candan (UC Games)
+- **License:** Owned outright by the studio; all rights reserved
+- **URL:** n/a — not published anywhere; the source files live outside the repo
+- **Added:** 2026-08-26
+- **AI:** No. Drawn by hand.
+- **Notes:** Two honey pots with their labels — a magenta **Money Inc.** and a
+  cyan **Honey Inc.** Processed by the same route as `bee.png`: the white
+  background flood-filled inward from the border rather than keyed out by
+  colour, edges feathered to partial alpha, then trimmed from the 2278x3223
+  source to the drawing itself and scaled to 224px wide.
+
+  Both are then **quantised to a 64-colour palette**, which takes the pair from
+  99 KB to 13 KB with no visible change. That is worth doing here and nowhere
+  else on the board: these are flat blocks of colour with hard outlines, which
+  is the one thing a small palette reproduces exactly. The photographic ground
+  tile would fall apart under the same treatment.
+
+  The **shop names set the fiction**, rather than the other way round — the
+  buyers were "The Market" and "The Apothecary" until these arrived. Their two
+  colours are read off the drawings into `TUNING.buyers[*].tint`, so a building,
+  its price tag and its HUD row are visibly one thing; a redrawn shop in a
+  different colour wants that value updated to match.
+
 ### pollen.png
 
 - **File:** `sprites/pollen.png`

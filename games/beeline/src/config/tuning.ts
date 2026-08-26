@@ -29,8 +29,14 @@ export interface BeeTuning {
   collectSeconds: number;
   nectarPerTrip: number;
   idleDriftRadius: number;
-  /** Maximum sideways offset from the route centreline. */
+  /** Maximum fixed sideways offset from the route centreline. */
   lateralSpread: number;
+  /** How far the weave carries a bee off that lane, at its widest. */
+  weaveAmplitude: number;
+  /** Design units of route covered by one full weave. */
+  weaveLength: number;
+  /** Per-bee variation in that, as a fraction. Keeps the swarm out of step. */
+  weaveLengthJitter: number;
   /** How hard a bee corrects toward its target point. 0..1 per fixed step. */
   steerLerp: number;
   /** How long a bee mills about after finding no patch at the route's end. */
@@ -342,6 +348,14 @@ export interface MazeTuning {
   tighteningDays: number;
   /** First day any wall appears at all. */
   startDay: number;
+  /**
+   * A rectangle of cells kept clear of walls, in cell coordinates inclusive.
+   *
+   * The hive's front yard: the strip of board the two shops stand on. See the
+   * note on `maze.yard` for why home ground is open and only the frontier is a
+   * maze.
+   */
+  yard: { col0: number; row0: number; col1: number; row1: number };
 }
 
 export interface ItemShopTuning {
@@ -446,7 +460,28 @@ export const TUNING: Tuning = {
     collectSeconds: 0.35,
     nectarPerTrip: 1,
     idleDriftRadius: 90,
-    lateralSpread: 14,
+    /**
+     * The two lanes, and the weave laid over them.
+     *
+     * `lateralSpread` was 14 and doing the whole job alone, which meant the
+     * swarm flew a route as two dead-straight lines. The lane is now narrower
+     * and the weave carries the rest, so the total envelope is about the same
+     * width as before — the bees are not spread wider, they are spread
+     * *differently*, along a curve instead of a rail.
+     *
+     * Width is capped by the corridors rather than by taste: a cell is 116 deep
+     * and a hedge eats 20 of it, so a bee more than about 25 off a centreline
+     * that runs beside a wall would be drawn inside the hedge. It does not
+     * collide — bees never do — but it would look like it should.
+     *
+     * The wavelength is a little under a corridor, so a bee crossing one cell
+     * completes roughly one weave. Much longer and the path reads as a gentle
+     * bend rather than as flight; much shorter and it reads as a rattle.
+     */
+    lateralSpread: 9,
+    weaveAmplitude: 8,
+    weaveLength: 96,
+    weaveLengthJitter: 0.35,
     steerLerp: 0.16,
     confusedSeconds: 0.4,
     departIntervalSeconds: 0.045,
@@ -771,6 +806,26 @@ export const TUNING: Tuning = {
     opennessFloor: 0.28,
     tighteningDays: 10,
     startDay: 3,
+    /**
+     * The hive's front yard: the bottom-left strip, always open.
+     *
+     * **Home ground is open; the frontier is a maze.** Selling is the pressure
+     * inside the loop rather than the reward at the end of it, and a hedge
+     * between the hive and the shop it has to reach in the next few seconds
+     * makes an emergency into a puzzle — at exactly the moment the player has
+     * no attention to spare for one. Foraging is where the maze earns its keep,
+     * and foraging happens everywhere else.
+     *
+     * It also gives the board a readable shape. There is a *town* down here —
+     * hive, two shops, open ground between them — and a wilderness beyond it,
+     * rather than one undifferentiated grid.
+     *
+     * Three cells wide so the shops can flank the approach rather than crowd
+     * it: a shop stands in the outer two and the middle one is left as the
+     * hive's own doorstep. Cleared after generation, so the spanning tree has
+     * already made every cell reachable and this can only add routes.
+     */
+    yard: { col0: 0, row0: 4, col1: 2, row1: 4 },
   },
 
   /**
@@ -896,18 +951,22 @@ export const TUNING: Tuning = {
    * turned the near-versus-far decision into a foregone one, because at that
    * range both buyers were simply *far*.
    *
-   * Near the hive, the two are close enough that a sell line is a cheap
-   * standing commitment and the decision goes back to being about the price.
-   * The distance between *them* is what still costs something: the Market is a
-   * short hop up the left wall, the Apothecary a longer run out along the
-   * bottom, and a sell line can only point at one.
+   * Both now stand in the hive's front yard — the wall-free strip along the
+   * bottom-left, see `maze.yard`. A sell line is a cheap standing commitment
+   * and the decision goes back to being about the price. The distance between
+   * *them* is what still costs something: Money Inc. is next to the hive's
+   * door, Honey Inc. is across the open ground, and a sell line can only point
+   * at one.
    *
-   * Both sit on maze cell centres so a depot never lands inside a wall, and
-   * flower placement blocks their cells — see `Field.randomPatchPosition`.
+   * Both sit on maze cell centres inside the yard, so a shop never lands inside
+   * a wall and the yard never grows one around it. Flower placement blocks the
+   * whole yard — see `Field.randomPatchPosition`.
    */
   buyers: {
     market: {
-      name: 'The Market',
+      // The studio's own drawings name the two shops, so the fiction follows
+      // the art rather than the other way round.
+      name: 'Money Inc.',
       basePrice: 1,
       // A slow wave you can plan around and a small fast one so the number is
       // never quite still. Steady enough to be the answer when the hive is
@@ -920,15 +979,17 @@ export const TUNING: Tuning = {
       saturationPerHoney: 0.0011,
       saturationRecovery: 0.055,
       maxSaturation: 0.45,
-      // Left-middle, one corridor up the wall from the hive's own row. A sell
-      // line here is a couple of corridors — cheap enough to keep standing all
+      // The left-hand shop in the yard, closest to the hive's door. A sell
+      // line here is barely a corridor — cheap enough to keep standing all
       // day, which is exactly what the safe buyer should be.
       x: 106,
-      y: 284,
-      tint: 0xf0a83c,
+      y: 632,
+      // Read off the drawing, so the price tag, the highlight and the building
+      // are obviously one thing.
+      tint: 0xf221b5,
     },
     apothecary: {
-      name: 'The Apothecary',
+      name: 'Honey Inc.',
       // Half again as much at its own normal, and it swings by more than half
       // that on top. Catching a peak here is the best thing that happens in a
       // day; arriving at a trough after a long flight is the worst.
@@ -944,13 +1005,13 @@ export const TUNING: Tuning = {
       saturationPerHoney: 0.0019,
       saturationRecovery: 0.045,
       maxSaturation: 0.55,
-      // Bottom-middle, out along the hive's own row. Still the longer flight of
-      // the two — which is what its better price is buying, and what makes
-      // arriving at a trough hurt, because the line cost real bees to lay and
-      // real bees to hold.
-      x: 564,
+      // The right-hand shop in the yard, across the open ground. Still the
+      // longer flight of the two — which is what its better price is buying,
+      // and what makes arriving at a trough hurt, because the line cost real
+      // bees to lay and real bees to hold.
+      x: 411,
       y: 632,
-      tint: 0xa87ce0,
+      tint: 0x1fd6c4,
     },
   },
 

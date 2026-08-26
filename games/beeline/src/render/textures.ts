@@ -33,7 +33,22 @@ export const TEX = {
   wall: 'wall',
   /** A pollen grain, for the moment a bee picks one up. */
   pollen: 'pollen',
+  /**
+   * The two shops, keyed by buyer id.
+   *
+   * `SHOP_TEX` below is the lookup the renderer uses; these exist so the keys
+   * are declared in one place with everything else. A missing file falls back
+   * to the drawn depot, so a failed fetch costs the picture and not the loop.
+   */
+  shopMarket: 'shop-market',
+  shopApothecary: 'shop-apothecary',
 } as const;
+
+/** Shop art by buyer id, in the same order the buyers are built. */
+export const SHOP_TEX: Record<'market' | 'apothecary', string> = {
+  market: TEX.shopMarket,
+  apothecary: TEX.shopApothecary,
+};
 
 /**
  * One flower sprite per species, in the same order as `COLORS.species`.
@@ -58,6 +73,8 @@ export const TEX_FILES: ReadonlyArray<readonly [key: string, path: string]> = [
   [TEX.wasp, 'sprites/wasp.png'],
   [TEX.wall, 'sprites/wall.png'],
   [TEX.pollen, 'sprites/pollen.png'],
+  [TEX.shopMarket, 'sprites/shop-market.png'],
+  [TEX.shopApothecary, 'sprites/shop-apothecary.png'],
   [TEX.sparkle, 'particles/sparkle.png'],
   [TEX.glint, 'particles/glint.png'],
   ...FLOWER_TEX.map((key) => [key, `sprites/${key}.png`] as const),

@@ -1,7 +1,15 @@
 import type Phaser from 'phaser';
 
 export type SfxKey =
-  'collect' | 'deposit' | 'sell' | 'draw' | 'dayEnd' | 'upgrade' | 'wasp' | 'hum';
+  | 'collect'
+  | 'deposit'
+  | 'sell'
+  | 'buzz'
+  | 'draw'
+  | 'dayEnd'
+  | 'upgrade'
+  | 'wasp'
+  | 'hum';
 
 const SAMPLE_RATE = 22_050;
 
@@ -74,6 +82,7 @@ export class Sfx {
       this.addBuffer(ctx, 'collect', 0.38, collectBlip);
       this.addBuffer(ctx, 'deposit', 0.13, depositThunk);
       this.addBuffer(ctx, 'sell', 0.34, sellChink);
+      this.addBuffer(ctx, 'buzz', 0.62, beeBuzz);
       this.addBuffer(ctx, 'draw', 0.22, drawWhoosh);
       this.addBuffer(ctx, 'dayEnd', 0.75, dayEndChime);
       this.addBuffer(ctx, 'upgrade', 0.42, upgradeArpeggio);
@@ -247,6 +256,33 @@ function depositThunk(t: number): number {
   const tone = Math.sin(2 * Math.PI * 196 * t);
   const body = 0.4 * Math.sin(2 * Math.PI * 98 * t);
   return (tone + body) * decay(t, 22) * attack(t, 0.006) * 0.45;
+}
+
+function beeBuzz(t: number, duration: number): number {
+  // A bee going past, once in a while.
+  //
+  // The hive hum is always there and says *this place is alive*; this says
+  // *something just flew by*, which is a different thing and the reason it is
+  // a separate sound rather than a louder hum.
+  //
+  // It is deliberately built as the wasp buzz's opposite number, because the
+  // two must never be confused — one is ambience and the other is a threat. The
+  // wasp is harsh, low and amplitude-wobbled hard on purpose. This sits a
+  // little higher, wobbles at 19Hz instead of 27 and by half as much, and the
+  // two partials are a clean octave apart rather than four hertz apart: the
+  // wasp's near-unison pair *beats*, and beating is what the ear reads as
+  // menace. Take the beating out and the same shape becomes pleasant.
+  //
+  // A slow swell in and out rather than a struck onset, so it reads as
+  // something passing rather than something arriving.
+  const wobble = 1 + 0.16 * Math.sin(2 * Math.PI * 19 * t);
+  const body = Math.sin(2 * Math.PI * 172 * t * wobble);
+  const upper = 0.32 * Math.sin(2 * Math.PI * 344 * t * wobble);
+  // A touch of Doppler: the pitch eases down across the pass, which is what a
+  // flyby does and what stops it sounding like a held note.
+  const glide = 1 - 0.06 * (t / duration);
+  const envelope = Math.sin(Math.PI * (t / duration)) ** 1.6;
+  return (body + upper) * glide * envelope * 0.24;
 }
 
 function sellChink(t: number): number {

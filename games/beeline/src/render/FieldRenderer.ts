@@ -8,7 +8,7 @@ import {
   WORLD_HEIGHT as PLAYFIELD_HEIGHT,
   WORLD_WIDTH as PLAYFIELD_WIDTH,
 } from '../sim/Field.ts';
-import { FLOWER_TEX, TEX } from './textures.ts';
+import { FLOWER_TEX, SHOP_TEX, TEX } from './textures.ts';
 
 // Nunito first, system stack behind it — the same fallback chain the rest of
 // the game uses, because the subset is small and a missing glyph (the trend
@@ -47,6 +47,51 @@ const HIVE_ORIGIN_Y = 0.62;
  * wall constants these are eyeballed, not measured, because there is no single
  * edge to measure against.
  */
+/**
+ * The shade behind every number on the board.
+ *
+ * Both readouts shipped as light text with a *pale* halo, which is legible
+ * against grass and against nothing else — over a hedge, a poppy or a depot
+ * roof the number simply vanished, and the player was asked to read a figure
+ * that was sometimes not there. A stroke can only ever fight the background it
+ * was tuned for; a plate replaces it.
+ *
+ * Dark and translucent rather than opaque: the board still shows through, so a
+ * number reads as a tag on the field instead of a hole punched in it.
+ */
+const PLATE_FILL = 0x1d1810;
+const PLATE_ALPHA = 0.62;
+const PLATE_PAD_X = 8;
+const PLATE_PAD_Y = 3;
+const PLATE_RADIUS = 7;
+
+/**
+ * How wide a shop is drawn, in design units.
+ *
+ * The art is a tall honey pot, so the height follows from its aspect ratio
+ * rather than being set here. Wide enough to read as a building at phone scale,
+ * narrow enough that two of them and the hive fit across the yard without
+ * touching.
+ */
+const SHOP_WIDTH = 84;
+/**
+ * Where the pot's base sits in its own image.
+ *
+ * Anchored at the base rather than the middle, which is what makes the shop
+ * stand *on* its reach ring instead of floating inside it — the ring is ground,
+ * and a building has to meet it.
+ */
+const SHOP_ORIGIN_Y = 0.94;
+
+/** The price tag above a shop: a board on a short post, as Turmoil does it. */
+const TAG_FILL = 0x171208;
+const TAG_ALPHA = 0.88;
+const TAG_PAD_X = 11;
+const TAG_PAD_Y = 5;
+const TAG_RADIUS = 5;
+/** How far the tag floats above the top of the pot. */
+const TAG_LIFT = 16;
+
 const SKEP_WIDTH_AT_BASE = 0.92;
 const SKEP_WIDTH_AT_BRIM = 0.37;
 
@@ -93,6 +138,28 @@ export class FieldRenderer {
   private readonly surroundGfx: Phaser.GameObjects.Graphics;
   private readonly scene: Phaser.Scene;
   private readonly depth: number;
+  /**
+   * Where the board's numbers live, well above the board itself.
+   *
+   * Passed in rather than derived from `depth` because it has to clear the fog,
+   * and the fog's depth is the scene's business. See the note on `plateGfx`.
+   */
+  private readonly labelDepth: number;
+  /**
+   * One layer for every label's backing shade, redrawn per frame.
+   *
+   * Above the walls, and above the mist. The walls part was a real bug: the
+   * buyer labels sat at the same depth as the wall bars, and the bars are
+   * pooled lazily, so a bar created on a later frame than the label rendered
+   * *over* it. That is why a price was readable sometimes and not others.
+   *
+   * Above the mist is a judgement rather than a fix. Fog's job is to hide where
+   * things are; once something is found, the number attached to it is the thing
+   * the game is asking the player to act on, and dimming it teaches nothing.
+   * The flower underneath still fades, so the sense of a half-known board is
+   * intact.
+   */
+  private readonly plateGfx: Phaser.GameObjects.Graphics;
   /** One label per patch, reused. Pollen left is a number worth reading now. */
   private labels: Phaser.GameObjects.Text[] = [];
   /**
@@ -141,6 +208,10 @@ export class FieldRenderer {
   /** One per wasp, reused. There are never more than a couple. */
   private wasps: Phaser.GameObjects.Image[] = [];
   private buyerLabels: Phaser.GameObjects.Text[] = [];
+  /** One per buyer. A null entry is a shop whose art never arrived. */
+  private shops: Array<Phaser.GameObjects.Image | null> = [];
+  /** The price tags' boards and posts, redrawn per frame. */
+  private readonly tagGfx: Phaser.GameObjects.Graphics;
   private warningPhase = 0;
   /**
    * One per visible wall bar, reused.
@@ -152,10 +223,13 @@ export class FieldRenderer {
   /** How many pooled bars are in use this frame. */
   private wallBarCount = 0;
 
-  constructor(scene: Phaser.Scene, field: Field, depth: number) {
+  constructor(scene: Phaser.Scene, field: Field, depth: number, labelDepth: number) {
     this.scene = scene;
     this.depth = depth;
+    this.labelDepth = labelDepth;
     this.gfx = scene.add.graphics().setDepth(depth);
+    this.plateGfx = scene.add.graphics().setDepth(labelDepth);
+    this.tagGfx = scene.add.graphics().setDepth(labelDepth);
     this.hiveGlow = scene.add
       .image(field.hiveX, field.hiveY, TEX.glow)
       .setDepth(depth + 1)
@@ -194,7 +268,7 @@ export class FieldRenderer {
         strokeThickness: 4,
       })
       .setOrigin(0.5, 0)
-      .setDepth(depth + 5);
+      .setDepth(labelDepth + 1);
     // Its own layer, between the gold fill and the wasps. The honey line has to
     // sit *over* the skep, and the field's main graphics layer is underneath
     // it — drawing the meniscus there would have hidden it inside the building.
@@ -245,6 +319,8 @@ export class FieldRenderer {
   draw(field: Field, alpha: number, drawingFromHive: boolean): void {
     const g = this.gfx;
     g.clear();
+    this.plateGfx.clear();
+    this.tagGfx.clear();
 
     for (const patch of field.patches) {
       if (!patch.discovered) continue;
@@ -309,6 +385,7 @@ export class FieldRenderer {
           : `${Math.round(field.honey)}/${Math.round(field.honeyCap)}`,
       )
       .setColor(spilling ? '#ff8a70' : '#ffffff');
+    this.shade(this.hiveLabel);
 
     const fill = this.hiveFill;
     if (!fill) return;
@@ -372,6 +449,21 @@ export class FieldRenderer {
     let best = field.buyers[0];
     for (const buyer of field.buyers) if (best && buyer.price > best.price) best = buyer;
 
+    while (this.shops.length < field.buyers.length) {
+      const shopFor = field.buyers[this.shops.length];
+      const key = shopFor ? SHOP_TEX[shopFor.id] : undefined;
+      this.shops.push(
+        key && this.scene.textures.exists(key)
+          ? this.scene.add
+              .image(shopFor?.x ?? 0, shopFor?.y ?? 0, key)
+              .setOrigin(0.5, SHOP_ORIGIN_Y)
+              // Above the wall bars. No hedge is ever drawn inside the yard,
+              // but a bar on the row above must not clip a roof.
+              .setDepth(this.depth + 5)
+          : null,
+      );
+    }
+
     while (this.buyerLabels.length < field.buyers.length) {
       this.buyerLabels.push(
         this.scene.add
@@ -384,7 +476,7 @@ export class FieldRenderer {
             strokeThickness: 5,
           })
           .setOrigin(0.5)
-          .setDepth(this.depth + 4),
+          .setDepth(this.labelDepth + 1),
       );
     }
 
@@ -406,26 +498,40 @@ export class FieldRenderer {
       g.lineStyle(isBest ? 3 : 2, tint, isBest ? 0.85 : 0.4);
       g.strokeCircle(buyer.x, buyer.y, reach);
 
-      // The depot itself: a squat building with a roof, drawn rather than
-      // shipped for the same reason everything else here is. Sized to sit
-      // inside its own reach ring, so the landmark and the thing you have to
-      // touch are one shape instead of a building lost in a halo.
-      g.fillStyle(tint, 0.92);
-      g.fillRect(buyer.x - 19, buyer.y - 8, 38, 25);
-      g.fillStyle(tint, 0.62);
-      g.beginPath();
-      g.moveTo(buyer.x - 25, buyer.y - 8);
-      g.lineTo(buyer.x, buyer.y - 26);
-      g.lineTo(buyer.x + 25, buyer.y - 8);
-      g.closePath();
-      g.fillPath();
+      // The shop itself: the studio's own drawing, standing on the ring.
+      const shop = this.shops[index] ?? null;
+      let top = buyer.y - 34;
+      if (shop) {
+        shop.setVisible(true);
+        // The better price stands a touch taller. A building that is slightly
+        // larger reads before any number does, which is most of the reason the
+        // shops are on the board as well as in the HUD.
+        const scale = (SHOP_WIDTH / shop.width) * (isBest ? 1.06 : 1);
+        shop.setScale(scale);
+        top = buyer.y - shop.height * scale * SHOP_ORIGIN_Y;
+      } else {
+        // No art: the old drawn depot, so a failed fetch costs the picture
+        // rather than the landmark.
+        g.fillStyle(tint, 0.92);
+        g.fillRect(buyer.x - 19, buyer.y - 8, 38, 25);
+        g.fillStyle(tint, 0.62);
+        g.beginPath();
+        g.moveTo(buyer.x - 25, buyer.y - 8);
+        g.lineTo(buyer.x, buyer.y - 26);
+        g.lineTo(buyer.x + 25, buyer.y - 8);
+        g.closePath();
+        g.fillPath();
+      }
 
       const label = this.buyerLabels[index];
       const arrow = buyer.trend > 0 ? '▲' : buyer.trend < 0 ? '▼' : '·';
+      if (!label) return;
       label
-        ?.setText(`${buyer.price.toFixed(2)} ${arrow}`)
-        .setPosition(buyer.x, buyer.y + reach - 6)
+        .setText(`${buyer.price.toFixed(2)} ${arrow}`)
+        .setPosition(buyer.x, top - TAG_LIFT)
+        .setColor(buyer.trend > 0 ? '#8ce6a0' : buyer.trend < 0 ? '#ff9b85' : '#ffffff')
         .setVisible(true);
+      this.priceTag(label, tint, isBest);
     });
   }
 
@@ -559,12 +665,15 @@ export class FieldRenderer {
         .text(0, 0, '', {
           fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
           fontSize: '19px',
-          color: '#2f2a1c',
-          stroke: '#f7f8ee',
-          strokeThickness: 4,
+          color: '#f4f4f8',
+          // A thin dark stroke *with* the plate, not instead of it. The plate
+          // carries the contrast; this only keeps the glyph edges from
+          // shimmering against it.
+          stroke: '#12100a',
+          strokeThickness: 2,
         })
         .setOrigin(0.5)
-        .setDepth(this.depth + 2);
+        .setDepth(this.labelDepth + 1);
       this.labels.push(label);
     }
 
@@ -589,7 +698,58 @@ export class FieldRenderer {
       // Warns before it runs dry, so retargeting is a decision rather than a
       // surprise.
       label.setColor(patch.fullness < 0.25 ? '#ff8a65' : '#f4f4f8');
+      this.shade(label);
     }
+  }
+
+  /**
+   * Draws the backing shade for one label, sized to what it currently says.
+   *
+   * Measured off the Text object rather than guessed, so a three-digit count
+   * and a price with an arrow on it each get a plate that fits. Called after
+   * the text and the position are set, since both change the size.
+   */
+  /**
+   * The price tag: a board on a post above the shop.
+   *
+   * A tag rather than the plain shade the other numbers get, because this is
+   * the one figure on the board meant to be *compared* rather than just read.
+   * The border is the shop's own colour, so the building, its tag and its HUD
+   * row are obviously one thing, and the better offer gets a brighter, thicker
+   * one — the comparison lands before the digits are read.
+   *
+   * The post matters more than it looks. Without it the tag floats, and two
+   * floating numbers over two buildings are ambiguous about which belongs to
+   * which as soon as the shops are close together — which, in the yard, they
+   * are.
+   */
+  private priceTag(label: Phaser.GameObjects.Text, tint: number, isBest: boolean): void {
+    const width = label.displayWidth + TAG_PAD_X * 2;
+    const height = label.displayHeight + TAG_PAD_Y * 2;
+    const left = label.x - width / 2;
+    const top = label.y - height / 2;
+
+    const g = this.tagGfx;
+    g.lineStyle(2, tint, 0.75);
+    g.beginPath();
+    g.moveTo(label.x, top + height);
+    g.lineTo(label.x, top + height + TAG_LIFT);
+    g.strokePath();
+
+    g.fillStyle(TAG_FILL, TAG_ALPHA);
+    g.fillRoundedRect(left, top, width, height, TAG_RADIUS);
+    g.lineStyle(isBest ? 3 : 2, tint, isBest ? 1 : 0.7);
+    g.strokeRoundedRect(left, top, width, height, TAG_RADIUS);
+  }
+
+  private shade(label: Phaser.GameObjects.Text): void {
+    const width = label.displayWidth + PLATE_PAD_X * 2;
+    const height = label.displayHeight + PLATE_PAD_Y * 2;
+    const left = label.x - label.displayWidth * label.originX - PLATE_PAD_X;
+    const top = label.y - label.displayHeight * label.originY - PLATE_PAD_Y;
+
+    this.plateGfx.fillStyle(PLATE_FILL, PLATE_ALPHA);
+    this.plateGfx.fillRoundedRect(left, top, width, height, PLATE_RADIUS);
   }
 
   /**
@@ -847,10 +1007,14 @@ export class FieldRenderer {
     this.hiveFill?.destroy();
     this.hiveLabel.destroy();
     this.hiveGfx.destroy();
+    this.plateGfx.destroy();
     for (const wasp of this.wasps) wasp.destroy();
     this.wasps = [];
     for (const label of this.buyerLabels) label.destroy();
     this.buyerLabels = [];
+    for (const shop of this.shops) shop?.destroy();
+    this.shops = [];
+    this.tagGfx.destroy();
     for (const bar of this.wallBars) bar.destroy();
     this.wallBars = [];
   }
