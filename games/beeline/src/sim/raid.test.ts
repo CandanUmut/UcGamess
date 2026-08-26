@@ -205,59 +205,49 @@ describe('drawing a line at a wasp fights it', () => {
   });
 });
 
-describe('wind pressing a route into a wall costs pollen', () => {
-  it('shakes the load out of a laden bee crossing the pinch', () => {
-    // The answer to "wind after we made the paths stable almost don't matter".
-    // Wind alone only made routes longer, which a strong road shrugged off;
-    // now a road the wind has bent into a hedge actively loses cargo, so a
-    // maintained route is worth maintaining.
-    const field = openBoard();
+describe('the wind cannot blow a route through a wall', () => {
+  it('shelters a route lying inside a corridor', () => {
+    // The fix for "there is no way to prevent once it hits to the walls".
+    // There was not: wind pushed a line into a hedge, the hedge shortened it,
+    // and nothing the player did changed that. A hedge now *breaks* the wind
+    // instead, so the maze is cover as well as an obstacle.
+    const field = newDay(14);
     const coords: number[] = [];
-    for (let d = 0; d <= 300; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(coords);
-    expect(route).not.toBeNull();
+    for (let d = 0; d <= 260; d += 20) coords.push(field.hiveX + d, field.hiveY);
+    const route = field.createRoute(field.slidePath(coords).coords);
+    if (!route) return;
 
-    route!.markPinch(150);
-    const bee = field.bees[0];
-    expect(bee).toBeDefined();
-    bee!.routeId = route!.id;
-    bee!.state = 'inbound';
-    bee!.s = 150;
-    bee!.carrying = 40;
-
-    field.step(DT);
-    expect(bee!.carrying).toBe(0);
+    // Whatever the gale does over a full day, it may never end up with the
+    // road crossing a wall — that is the property, not any particular shape.
+    for (let t = 0; t < 60 * 45; t += 1) {
+      field.step(DT);
+      if (route.dead) break;
+      expect(
+        Number.isFinite(field.blockedDistance(route.poly, route.liveLength)) &&
+          field.blockedDistance(route.poly, route.liveLength) < route.liveLength,
+      ).toBe(false);
+    }
   });
 
-  it('leaves a bee well clear of the pinch alone', () => {
-    // The rule the whole maze design rests on: the tax is on neglecting a
-    // road, never on where exactly a thumb went.
-    const field = openBoard();
+  it('leaves a road to a shop completely alone', () => {
+    // A sell line that wandered off its own depot would break the one part of
+    // the loop a player cannot improvise around: there is nowhere else to sell.
+    const field = newDay(14);
+    const buyer = field.buyers[0]!;
     const coords: number[] = [];
-    for (let d = 0; d <= 300; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(coords);
+    const n = 20;
+    for (let i = 0; i <= n; i += 1) {
+      coords.push(
+        field.hiveX + ((buyer.x - field.hiveX) * i) / n,
+        field.hiveY + ((buyer.y - field.hiveY) * i) / n,
+      );
+    }
+    const route = field.createRoute(field.slidePath(coords).coords);
+    field.aimRouteAt(route!, null, buyer);
 
-    route!.markPinch(280);
-    const bee = field.bees[0];
-    bee!.routeId = route!.id;
-    bee!.state = 'inbound';
-    bee!.s = 100;
-    bee!.carrying = 40;
-
-    field.step(DT);
-    expect(bee!.carrying).toBe(40);
-  });
-
-  it('clears itself once the wind stops pressing', () => {
-    const field = openBoard();
-    const coords: number[] = [];
-    for (let d = 0; d <= 200; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(coords);
-
-    route!.markPinch(100);
-    expect(route!.isPinched).toBe(true);
-    advance(field, TUNING.route.pinchSeconds + 0.5);
-    expect(route!.isPinched).toBe(false);
+    const shape = [...route!.poly.pts];
+    advance(field, 20);
+    expect([...route!.poly.pts]).toEqual(shape);
   });
 });
 
@@ -319,5 +309,57 @@ describe('hive defences fight without the player', () => {
     };
 
     expect(drain(['propolisSeal'])).toBeLessThan(drain([]) * 0.8);
+  });
+});
+
+describe('a guard line stands itself down', () => {
+  it('goes back to work once the last wasp is gone', () => {
+    // "Those wasps are gone but I have to delete the red line because those
+    // bees cannot carry polens." Making the player tidy up after a fight they
+    // won is the game handing them a chore for succeeding.
+    const field = openBoard();
+    const wasp = new Wasp(field.hiveX + 300, field.hiveY);
+    field.wasps.push(wasp);
+
+    const coords: number[] = [];
+    for (let d = 0; d <= 300; d += 20) coords.push(field.hiveX + d, field.hiveY);
+    const route = field.createRoute(coords);
+    expect(route!.guard).toBe(true);
+
+    // Still guarding while anything is on the board, however long it takes.
+    // Moved out of the line's reach first, so this measures the stand-down
+    // rule rather than how fast the line kills what it was drawn at.
+    wasp.x = field.hiveX;
+    wasp.y = field.hiveY - 340;
+    advance(field, TUNING.wasp.standDownSeconds + 1);
+    expect(route!.guard).toBe(true);
+
+    field.wasps = [];
+    advance(field, TUNING.wasp.standDownSeconds + 0.5);
+
+    // Either it found something to forage or it retired — never left standing
+    // there costing a slot and a share of the swarm for nothing.
+    expect(route!.dead || route!.guard === false).toBe(true);
+    expect(route!.guard).toBe(false);
+  });
+
+  it('holds through the gaps inside a wave', () => {
+    // Wasps arrive in ones and twos. Standing down on the first quiet frame
+    // would dissolve the line in the middle of the fight it was drawn for.
+    const field = openBoard();
+    const first = new Wasp(field.hiveX + 300, field.hiveY);
+    field.wasps.push(first);
+
+    const coords: number[] = [];
+    for (let d = 0; d <= 300; d += 20) coords.push(field.hiveX + d, field.hiveY);
+    const route = field.createRoute(coords);
+    expect(route!.guard).toBe(true);
+
+    field.wasps = [];
+    advance(field, TUNING.wasp.standDownSeconds * 0.5);
+    field.wasps.push(new Wasp(field.hiveX + 320, field.hiveY));
+    advance(field, TUNING.wasp.standDownSeconds * 0.9);
+
+    expect(route!.guard).toBe(true);
   });
 });

@@ -109,6 +109,8 @@ export interface FieldEvents {
   stolen: number;
   /** Wasps that arrived on the board this step. */
   raidLanded: number;
+  /** Guard lines retired because the fight was over. */
+  stoodDown: Array<{ x: number; y: number }>;
   /** Honey lost over the brim this step. */
   spilled: number;
   /** Sales completed this step, for the coin burst and the sound. */
@@ -209,6 +211,7 @@ export class Field {
     waspDown: [],
     stolen: 0,
     raidLanded: 0,
+    stoodDown: [],
     spilled: 0,
     sold: [],
     banked: 0,
@@ -235,6 +238,10 @@ export class Field {
   spilled = 0;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
+  /** Bees this wave has taken, against the budget below. */
+  private lostThisRaid = 0;
+  /** The most this wave may take, fixed when it is announced. */
+  private raidLossBudget = 999;
   /** Counts down to the next blow the hive's guards land. */
   private guardTimer = TUNING.wasp.guardInterval;
 
@@ -1119,6 +1126,14 @@ export class Field {
         continue;
       }
 
+      if (route.guard) {
+        this.standDownIfQuiet(route, dt);
+        if (route.dead) {
+          this.killRoute(route);
+          continue;
+        }
+      }
+
       if (route.targetWasp) {
         // A route pointed at a wasp follows it. The wasp is moving — usually
         // straight at the hive — so a line that only knew where it *was* would
@@ -1126,7 +1141,7 @@ export class Field {
         if (!route.targetWasp.alive || route.targetWasp.state === 'fleeing') {
           this.retarget(route);
         }
-      } else if (!route.target || !route.target.alive) {
+      } else if (!route.guard && (!route.target || !route.target.alive)) {
         this.retarget(route);
       }
     }
@@ -1151,6 +1166,11 @@ export class Field {
 
     if (signal === 'warning') {
       this.raidEntry = this.pickRaidEntry();
+      this.lostThisRaid = 0;
+      this.raidLossBudget = Math.max(
+        1,
+        Math.floor(this.fullSwarm * TUNING.wasp.maxSwarmLossPerRaid),
+      );
       this.events.raidWarning = {
         x: this.raidEntry.x,
         y: this.raidEntry.y,
@@ -1365,6 +1385,12 @@ export class Field {
    */
   private loseBee(): void {
     if (this.bees.length <= MIN_SWARM) return;
+    // A wave is a bite, not a wipe. Without this ceiling the per-wasp numbers
+    // multiply by the wave size and a day-twelve raid takes the whole hive —
+    // which is exactly what the measured run showed, and why the later days
+    // earned no more than the early ones.
+    if (this.lostThisRaid >= this.raidLossBudget) return;
+    this.lostThisRaid += 1;
 
     let index = this.bees.findIndex((b) => b.state === 'idle' || b.state === 'queued');
     if (index < 0) index = this.bees.length - 1;
@@ -1393,6 +1419,44 @@ export class Field {
     }
     this.bees.splice(index, 1);
     this.beesLost += 1;
+  }
+
+  /**
+   * Stands a guard line down once the fight is over.
+   *
+   * A guard line's bees carry nothing, so once the last wasp is off the board
+   * it is a slot and a share of the swarm doing no work at all. Leaving that
+   * for the player to notice and erase is the game handing them a chore for
+   * having defended successfully.
+   *
+   * It is given back rather than thrown away where possible: if the line
+   * happens to end at a flower it simply goes back to foraging, and only a line
+   * with nowhere useful to point is retired. Either way the bees return to the
+   * swarm and the slot comes free.
+   *
+   * The delay matters. A wave arrives in ones and twos and there are gaps
+   * between a wasp fleeing and the next one crossing into reach, so standing
+   * down on the first quiet frame would dissolve the line mid-fight.
+   */
+  private standDownIfQuiet(route: Route, dt: number): void {
+    const stillFighting = this.wasps.some((w) => w.alive && w.state !== 'fleeing');
+    if (stillFighting) {
+      route.guardIdleFor = 0;
+      return;
+    }
+
+    route.guardIdleFor += dt;
+    if (route.guardIdleFor < TUNING.wasp.standDownSeconds) return;
+
+    route.guard = false;
+    route.targetWasp = null;
+    route.guardIdleFor = 0;
+    this.retarget(route);
+
+    if (!route.target && !route.targetBuyer) {
+      route.dead = true;
+      this.events.stoodDown.push({ x: route.tipX, y: route.tipY });
+    }
   }
 
   /** The nearest buyer to a point, for aim assist and targeting. */
@@ -1471,6 +1535,13 @@ export class Field {
     const basePush = this.windStrength * dt * this.modifiers.windResist;
 
     for (const route of this.routes) {
+      // A road to a shop does not bend. The buyers are buildings that have
+      // been there all run and the road to one is a trade route, not a line
+      // scribbled across a meadow — and a sell line that wandered off its own
+      // depot would break the one part of the loop the player cannot improvise
+      // around, since there is nowhere else to sell.
+      if (route.targetBuyer) continue;
+
       const poly = route.poly;
       // A beaten track holds its shape. This is the counterplay the player
       // asked for: wind is no longer something that simply happens to you, it
@@ -1480,8 +1551,25 @@ export class Field {
         // Points further from the hive bend more, so the route bows rather
         // than sliding sideways as a rigid whole.
         const influence = i / poly.count;
-        poly.pts[i * 2] = (poly.pts[i * 2] ?? 0) + nx * push * influence;
-        poly.pts[i * 2 + 1] = (poly.pts[i * 2 + 1] ?? 0) + ny * push * influence;
+        const x = poly.pts[i * 2] ?? 0;
+        const y = poly.pts[i * 2 + 1] ?? 0;
+        const toX = x + nx * push * influence;
+        const toY = y + ny * push * influence;
+
+        // **Hedges break the wind.** A point the gale would push through a wall
+        // simply does not move.
+        //
+        // This is the fix for the complaint that there was "no way to prevent"
+        // a route being blown into a wall. There was not: wind pushed a line
+        // into a hedge, the hedge shortened it, and nothing the player could do
+        // changed that. Now a corridor *shelters* the line inside it, so the
+        // maze is somewhere to take cover rather than only something to get
+        // around — and routing through the lee of a wall is a real read on a
+        // real board, which is exactly the kind of skill this was missing.
+        if (this.maze.segmentBlocked(x, y, toX, toY)) continue;
+
+        poly.pts[i * 2] = toX;
+        poly.pts[i * 2 + 1] = toY;
       }
       route.rebuildLengths();
     }
@@ -1507,7 +1595,6 @@ export class Field {
     if (!slid.contact) return;
 
     this.events.deflected.push(slid.contact);
-    route.markPinch(hit);
     route.deflectTo(slid.coords);
   }
 
@@ -1608,7 +1695,15 @@ export class Field {
         // than a decision. A drone is nearly free to swat; a hornet takes more
         // than half the bees that touch it, which is what makes "cover the
         // door and let that one through" a real option.
-        if (foe.strikesBack() && this.bees.length > MIN_SWARM) {
+        if (
+          foe.strikesBack() &&
+          this.bees.length > MIN_SWARM &&
+          this.lostThisRaid < this.raidLossBudget
+        ) {
+          // Counted against the same budget as the theft at the door: a wave
+          // has one bill, and whether it is paid fighting or paid standing
+          // still is the player's choice rather than two separate taxes.
+          this.lostThisRaid += 1;
           this.dropBee(bee);
           this.events.beesLost.push({ x: bee.x, y: bee.y });
           return;
@@ -1798,20 +1893,6 @@ export class Field {
         } else {
           bee.s -= speed * dt;
 
-          // Where the wind is crushing this road into a hedge, a laden bee
-          // loses what it is carrying. Only the wind can put a route in that
-          // state — a line the player drew is slid clear of the walls before
-          // it exists — so the tax is on neglecting a road, never on an
-          // imprecise thumb.
-          if (
-            bee.carrying > 0 &&
-            route.isPinched &&
-            Math.abs(bee.s - route.pinchAt) <= TUNING.route.pinchRadius
-          ) {
-            bee.carrying = 0;
-            this.events.pollenLost.push({ x: bee.x, y: bee.y });
-          }
-
           if (bee.s <= 0) {
             bee.s = 0;
             // A delivery beats the path in a little further. Only a laden
@@ -1979,6 +2060,7 @@ export class Field {
       waspDown: [],
       stolen: 0,
       raidLanded: 0,
+      stoodDown: [],
       spilled: 0,
       sold: [],
       banked: 0,

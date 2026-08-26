@@ -62,6 +62,16 @@ export class Route {
    */
   guard = false;
   /**
+   * How long this guard line has had nothing to fight.
+   *
+   * A guard line that has done its job is dead weight: its bees carry no
+   * pollen, and it holds one of the five slots. The playtest was blunt about
+   * it — "those wasps are gone but I have to delete the red line because those
+   * bees cannot carry polens". Making the player tidy up after a fight they
+   * just won is the game asking for chores.
+   */
+  guardIdleFor = 0;
+  /**
    * The buyer this line sells to, if it is a sell line.
    *
    * A route now has exactly one job: gather from a flower, hold a corridor
@@ -94,16 +104,6 @@ export class Route {
    * rather than a choice — which is precisely why the game read as a toy.
    */
   strength = 0;
-
-  /**
-   * Where along the route the wind is currently crushing it into a wall, and
-   * for how much longer. `-1` when the road is clear.
-   *
-   * Held on the route rather than recomputed per bee because the contact is a
-   * property of the road's shape, and every bee on it wants the same answer.
-   */
-  pinchAt = -1;
-  pinchTimer = 0;
 
   constructor(coords: readonly number[], holdSeconds: number) {
     this.id = nextRouteId++;
@@ -171,11 +171,6 @@ export class Route {
       this.strength - this.strength * TUNING.route.strengthDecayPerSecond * dt,
     );
 
-    if (this.pinchTimer > 0) {
-      this.pinchTimer -= dt;
-      if (this.pinchTimer <= 0) this.pinchAt = -1;
-    }
-
     if (this.holdRemaining > 0) {
       this.holdRemaining -= dt;
     } else {
@@ -218,17 +213,6 @@ export class Route {
     }
 
     this.updateTip();
-  }
-
-  /** True while the wind has this road pressed into a hedge. */
-  get isPinched(): boolean {
-    return this.pinchTimer > 0 && this.pinchAt >= 0;
-  }
-
-  /** Records that a wall is currently biting the road at `s`. */
-  markPinch(s: number): void {
-    this.pinchAt = s;
-    this.pinchTimer = TUNING.route.pinchSeconds;
   }
 
   /**

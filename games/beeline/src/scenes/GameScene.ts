@@ -787,6 +787,12 @@ export class GameScene extends BaseGameplayScene {
     for (const hit of events.struck) this.juice.scatter(hit.x, hit.y);
     if (events.struck.length > 0) this.sfx.playVaried('draw', 0.22, 400);
 
+    // Standing a guard line down is a success, not a loss, and the player has
+    // to be told it happened or the line simply vanishes on them.
+    for (const spot of events.stoodDown) {
+      this.showGain(spot.x, spot.y, 'all clear', '#9bd3a0');
+    }
+
     for (const down of events.waspDown) {
       for (let i = 0; i < 8; i += 1) this.juice.scatter(down.x, down.y);
       this.sfx.play('upgrade', 0.3);
