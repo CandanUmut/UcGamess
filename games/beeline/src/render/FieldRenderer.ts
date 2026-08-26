@@ -73,7 +73,7 @@ const PLATE_RADIUS = 7;
  * narrow enough that two of them and the hive fit across the yard without
  * touching.
  */
-const SHOP_WIDTH = 84;
+const SHOP_WIDTH = 58;
 /**
  * Where the pot's base sits in its own image.
  *
@@ -83,14 +83,24 @@ const SHOP_WIDTH = 84;
  */
 const SHOP_ORIGIN_Y = 0.94;
 
-/** The price tag above a shop: a board on a short post, as Turmoil does it. */
+/**
+ * The price tag, sitting **on** the shop rather than floating over it.
+ *
+ * The first version put it on a post well above the pot, and it read as a flag
+ * planted next to a building rather than as that building's price — two things
+ * on the board instead of one. Turmoil, which is where the idea came from, puts
+ * the number *on* the derrick.
+ *
+ * `TAG_ON_SHOP` is how far down the pot the tag's middle sits, as a fraction of
+ * the drawn height: high enough to lie across the lid rather than across the
+ * hand-lettered label, low enough to be plainly part of the drawing.
+ */
 const TAG_FILL = 0x171208;
-const TAG_ALPHA = 0.88;
-const TAG_PAD_X = 11;
-const TAG_PAD_Y = 5;
-const TAG_RADIUS = 5;
-/** How far the tag floats above the top of the pot. */
-const TAG_LIFT = 16;
+const TAG_ALPHA = 0.9;
+const TAG_PAD_X = 5;
+const TAG_PAD_Y = 3;
+const TAG_RADIUS = 4;
+const TAG_ON_SHOP = 0.2;
 
 const SKEP_WIDTH_AT_BASE = 0.92;
 const SKEP_WIDTH_AT_BRIM = 0.37;
@@ -259,7 +269,7 @@ export class FieldRenderer {
           .setAlpha(0)
       : null;
     this.hiveLabel = scene.add
-      .text(field.hiveX, field.hiveY + 46, '', {
+      .text(field.hiveX, field.hiveY - 78, '', {
         fontFamily: FONT,
         fontSize: '15px',
         fontStyle: 'bold',
@@ -267,7 +277,9 @@ export class FieldRenderer {
         stroke: '#171208',
         strokeThickness: 4,
       })
-      .setOrigin(0.5, 0)
+      // Above the skep, not below it. A shop now stands directly under the hive,
+      // and the readout was landing on its lid.
+      .setOrigin(0.5, 1)
       .setDepth(labelDepth + 1);
     // Its own layer, between the gold fill and the wasps. The honey line has to
     // sit *over* the skep, and the field's main graphics layer is underneath
@@ -469,11 +481,14 @@ export class FieldRenderer {
         this.scene.add
           .text(0, 0, '', {
             fontFamily: FONT,
-            fontSize: '19px',
+            // Smaller than the flower counts, because it has to fit across a
+            // pot rather than stand alone on grass, and its tag carries the
+            // contrast that a stroke would otherwise have to.
+            fontSize: '15px',
             fontStyle: 'bold',
             color: '#ffffff',
             stroke: '#171208',
-            strokeThickness: 5,
+            strokeThickness: 3,
           })
           .setOrigin(0.5)
           .setDepth(this.labelDepth + 1),
@@ -501,6 +516,7 @@ export class FieldRenderer {
       // The shop itself: the studio's own drawing, standing on the ring.
       const shop = this.shops[index] ?? null;
       let top = buyer.y - 34;
+      let drawnHeight = 44;
       if (shop) {
         shop.setVisible(true);
         // The better price stands a touch taller. A building that is slightly
@@ -508,7 +524,8 @@ export class FieldRenderer {
         // shops are on the board as well as in the HUD.
         const scale = (SHOP_WIDTH / shop.width) * (isBest ? 1.06 : 1);
         shop.setScale(scale);
-        top = buyer.y - shop.height * scale * SHOP_ORIGIN_Y;
+        drawnHeight = shop.height * scale;
+        top = buyer.y - drawnHeight * SHOP_ORIGIN_Y;
       } else {
         // No art: the old drawn depot, so a failed fetch costs the picture
         // rather than the landmark.
@@ -528,7 +545,7 @@ export class FieldRenderer {
       if (!label) return;
       label
         .setText(`${buyer.price.toFixed(2)} ${arrow}`)
-        .setPosition(buyer.x, top - TAG_LIFT)
+        .setPosition(buyer.x, top + drawnHeight * TAG_ON_SHOP)
         .setColor(buyer.trend > 0 ? '#8ce6a0' : buyer.trend < 0 ? '#ff9b85' : '#ffffff')
         .setVisible(true);
       this.priceTag(label, tint, isBest);
@@ -710,7 +727,7 @@ export class FieldRenderer {
    * the text and the position are set, since both change the size.
    */
   /**
-   * The price tag: a board on a post above the shop.
+   * The price tag, painted across the shop's own shoulder.
    *
    * A tag rather than the plain shade the other numbers get, because this is
    * the one figure on the board meant to be *compared* rather than just read.
@@ -718,10 +735,11 @@ export class FieldRenderer {
    * row are obviously one thing, and the better offer gets a brighter, thicker
    * one — the comparison lands before the digits are read.
    *
-   * The post matters more than it looks. Without it the tag floats, and two
-   * floating numbers over two buildings are ambiguous about which belongs to
-   * which as soon as the shops are close together — which, in the yard, they
-   * are.
+   * It sits on the drawing rather than above it. Floating it on a post read as
+   * a flag planted beside a building rather than as that building's price, and
+   * the two shops became four objects on the board. Ownership is unambiguous
+   * when the number is painted on the thing it belongs to, and it costs no
+   * vertical space in a corner that has none to spare.
    */
   private priceTag(label: Phaser.GameObjects.Text, tint: number, isBest: boolean): void {
     const width = label.displayWidth + TAG_PAD_X * 2;
@@ -730,15 +748,9 @@ export class FieldRenderer {
     const top = label.y - height / 2;
 
     const g = this.tagGfx;
-    g.lineStyle(2, tint, 0.75);
-    g.beginPath();
-    g.moveTo(label.x, top + height);
-    g.lineTo(label.x, top + height + TAG_LIFT);
-    g.strokePath();
-
     g.fillStyle(TAG_FILL, TAG_ALPHA);
     g.fillRoundedRect(left, top, width, height, TAG_RADIUS);
-    g.lineStyle(isBest ? 3 : 2, tint, isBest ? 1 : 0.7);
+    g.lineStyle(isBest ? 2.5 : 1.5, tint, isBest ? 1 : 0.75);
     g.strokeRoundedRect(left, top, width, height, TAG_RADIUS);
   }
 
@@ -764,6 +776,16 @@ export class FieldRenderer {
    * once either of the cells it divides has been seen, because a hedge you have
    * stood next to is a hedge you know about.
    */
+  /**
+   * The maze, minus its own rim.
+   *
+   * The four boundary edges are never drawn. They are real in the sense that
+   * `wallLeft`/`wallAbove` report them closed and `openLeft`/`openAbove` refuse
+   * to open them — but nothing can cross the edge of the board anyway, so a
+   * hedge there blocks nothing that was not already blocked. All it did was
+   * spend a bramble-thick band of the playfield's edge on a statement the board
+   * boundary was already making, which is space the corner shops need.
+   */
   private drawWalls(field: Field): void {
     const g = this.wallGfx;
     g.clear();
@@ -781,6 +803,8 @@ export class FieldRenderer {
     for (let row = 0; row < maze.rows; row += 1) {
       for (let col = 0; col <= maze.cols; col += 1) {
         if (!maze.wallLeft(col, row)) continue;
+        // The board's own rim is never drawn — see `isPerimeter`.
+        if (col === 0 || col === maze.cols) continue;
         if (!seen(col, row) && !seen(col - 1, row)) continue;
 
         const x = maze.originX + col * maze.cellWidth;
@@ -793,6 +817,7 @@ export class FieldRenderer {
     for (let row = 0; row <= maze.rows; row += 1) {
       for (let col = 0; col < maze.cols; col += 1) {
         if (!maze.wallAbove(col, row)) continue;
+        if (row === 0 || row === maze.rows) continue;
         if (!seen(col, row) && !seen(col, row - 1)) continue;
 
         const x = maze.originX + col * maze.cellWidth;

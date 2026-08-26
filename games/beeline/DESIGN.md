@@ -2024,6 +2024,75 @@ stops being a bee within about three repeats and becomes a metronome.
 
 ---
 
+## 32. The corner, arranged
+
+§31 built the yard and put the shops in it badly. This is the same corner, laid
+out from a screenshot rather than from arithmetic.
+
+What was wrong, in the order it read: one shop stood against the hive's flank
+and half-covered it, the other was off to the _right_ of the hive rather than in
+the corner at all, both were drawn nearly as large as the hive itself, and each
+price floated on a post a long way above its building — so two shops occupied
+four places on the board.
+
+The arrangement now is: **hive up and to the right, one shop directly to its
+left, one directly below it**, and the fourth cell of the yard left as open
+corner. The hive moved up-right by about 60 units to make that room. Not
+further; it is still meant to sit in a corner with a frontier in front of it,
+rather than in the middle of a field it looks out over in every direction.
+
+The shops are drawn at 58 units wide against the hive's 100, so the hive is
+plainly the biggest thing in its own yard.
+
+### The price went onto the building
+
+A tag on a post reads as a flag planted _beside_ a building, not as that
+building's price. It is now painted across the pot's own shoulder — over the
+lid, which is the least informative part of the drawing — with a border in the
+shop's colour and no post at all. Ownership stops being a question when the
+number is on the thing it belongs to, and it costs no vertical space in a corner
+that has none to spare.
+
+The hive's own `honey/cap` readout moved from below the skep to above it, since
+a shop now stands where it used to sit.
+
+### The board's rim stopped pretending to be a maze
+
+The four boundary edges are no longer drawn. They are real in the sense that the
+maze reports them closed and refuses to open them, but nothing can cross the edge
+of the board anyway — so a hedge there blocked nothing that was not already
+blocked. All it did was spend a bramble-thick band of the playfield's edge
+restating the boundary, which is exactly the space the corner needed.
+
+### What this costs, and it is worth naming
+
+Side by side in one corner, the two shops are within a fifth of each other by
+flight distance. **The price is now doing nearly all the work.**
+
+That is a narrower decision than the two buyers were built for. With the shops
+on opposite edges, choosing between them was half geography — a long line to a
+volatile price was a real commitment of bees and of road. It is now "steady, or
+swinging?", which is still a question, but a smaller one.
+
+It is the right trade for the corner the game wanted, and it is recorded here so
+that if the market ever stops feeling like a decision, the cause is already
+known: the fix is in the swings and the saturation, not in moving the buildings
+back out to the far edge.
+
+### On verifying this without a browser
+
+The layout was checked by compositing the actual sprites at the actual
+transforms — the numbers read straight out of `tuning.ts` and `FieldRenderer.ts`
+— and looking at the result. That caught two things arithmetic had not: the tag
+overhanging the pot it sits on, and the left shop's reach ring running off the
+side of the board.
+
+The script is scratch and deliberately not in the repo; per CLAUDE.md the asset
+pipeline stops at compression, and a second renderer to maintain is exactly the
+kind of infrastructure that does not help ship the game. What _is_ in the repo
+is the assertion that came out of it: the shops must clear the hive and each
+other, one to its left and one below.
+
 ## 25. Success criteria
 
 Not submission-ready until all of these hold:

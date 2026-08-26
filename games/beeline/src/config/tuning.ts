@@ -442,8 +442,12 @@ export const TUNING: Tuning = {
    * frontier, rather than a circle you sit in the middle of.
    */
   hive: {
-    x: 210,
-    y: 545,
+    // Up and to the right of the board's bottom-left corner, which is what
+    // clears room for the yard below and beside it. Not further: the hive is
+    // still meant to sit in a corner with a frontier in front of it, not in
+    // the middle of a field it looks out over in every direction.
+    x: 266,
+    y: 492,
     drawRadius: 110,
     depositSeconds: 0.15,
     // Sized against the *discovery* threshold, not the radius. Reveal falls off
@@ -820,12 +824,13 @@ export const TUNING: Tuning = {
      * hive, two shops, open ground between them — and a wilderness beyond it,
      * rather than one undifferentiated grid.
      *
-     * Three cells wide so the shops can flank the approach rather than crowd
-     * it: a shop stands in the outer two and the middle one is left as the
-     * hive's own doorstep. Cleared after generation, so the spanning tree has
-     * already made every cell reachable and this can only add routes.
+     * Two cells by two, holding the hive and both shops: the hive top-right of
+     * the block, one shop out to its left and one directly below it, and the
+     * fourth cell left open as the corner they all look into. Cleared after
+     * generation, so the spanning tree has already made every cell reachable
+     * and this can only add routes.
      */
-    yard: { col0: 0, row0: 4, col1: 2, row1: 4 },
+    yard: { col0: 0, row0: 3, col1: 1, row1: 4 },
   },
 
   /**
@@ -951,12 +956,23 @@ export const TUNING: Tuning = {
    * turned the near-versus-far decision into a foregone one, because at that
    * range both buyers were simply *far*.
    *
-   * Both now stand in the hive's front yard — the wall-free strip along the
-   * bottom-left, see `maze.yard`. A sell line is a cheap standing commitment
-   * and the decision goes back to being about the price. The distance between
-   * *them* is what still costs something: Money Inc. is next to the hive's
-   * door, Honey Inc. is across the open ground, and a sell line can only point
-   * at one.
+   * Both now stand in the hive's front yard — the wall-free block in the
+   * bottom-left corner, see `maze.yard`. Money Inc. sits directly below the
+   * hive and Honey Inc. out to its left, both a few seconds' flight away.
+   *
+   * That leaves **the price doing nearly all the work**, and it is worth being
+   * honest that this is a narrower decision than the one the two buyers were
+   * built for. When the shops stood on opposite edges of the board, choosing
+   * between them was half geography: a long line to a volatile price was a real
+   * commitment of bees and of road. Side by side in the yard, the flights are
+   * within a fifth of each other and the question collapses to "steady, or
+   * swinging?".
+   *
+   * That question is still a question — the Apothecary's swings are wide enough
+   * that catching one is the best thing that happens in a day — but if the
+   * market ever stops feeling like a decision, this is the reason, and the fix
+   * is in the swings and the saturation rather than in moving the buildings
+   * back out.
    *
    * Both sit on maze cell centres inside the yard, so a shop never lands inside
    * a wall and the yard never grows one around it. Flower placement blocks the
@@ -979,11 +995,11 @@ export const TUNING: Tuning = {
       saturationPerHoney: 0.0011,
       saturationRecovery: 0.055,
       maxSaturation: 0.45,
-      // The left-hand shop in the yard, closest to the hive's door. A sell
-      // line here is barely a corridor — cheap enough to keep standing all
-      // day, which is exactly what the safe buyer should be.
-      x: 106,
-      y: 632,
+      // Directly below the hive, a short drop straight down. A sell line here
+      // is barely a corridor — cheap enough to keep standing all day, which is
+      // exactly what the safe buyer should be.
+      x: 266,
+      y: 648,
       // Read off the drawing, so the price tag, the highlight and the building
       // are obviously one thing.
       tint: 0xf221b5,
@@ -1005,12 +1021,11 @@ export const TUNING: Tuning = {
       saturationPerHoney: 0.0019,
       saturationRecovery: 0.045,
       maxSaturation: 0.55,
-      // The right-hand shop in the yard, across the open ground. Still the
-      // longer flight of the two — which is what its better price is buying,
-      // and what makes arriving at a trough hurt, because the line cost real
-      // bees to lay and real bees to hold.
-      x: 411,
-      y: 632,
+      // Out to the left of the hive, hard against the board's edge. Still the
+      // longer flight of the two, though the margin is now small — see the
+      // note on `buyers` about what carries the decision instead.
+      x: 92,
+      y: 516,
       tint: 0x1fd6c4,
     },
   },
