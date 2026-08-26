@@ -211,6 +211,37 @@ describe('where the buyers stand', () => {
     }
   });
 
+  it('stands the shops clear of the hive and of each other', () => {
+    // The first attempt at this corner put a shop hard against the hive, which
+    // looked like a bug and read as one. The buildings are drawn about 60 units
+    // wide against a hive about 100 wide, so anything closer than their two
+    // half-widths plus a gap is a collision on screen even though nothing in
+    // the simulation minds.
+    const field = newDay(7);
+    const [a, b] = field.buyers;
+
+    const MIN_FROM_HIVE = 140;
+    const MIN_APART = 150;
+
+    for (const buyer of field.buyers) {
+      const gap = Math.hypot(buyer.x - field.hiveX, buyer.y - field.hiveY);
+      expect(gap, `${buyer.tuning.name} is on top of the hive`).toBeGreaterThan(
+        MIN_FROM_HIVE,
+      );
+    }
+
+    expect(Math.hypot(a!.x - b!.x, a!.y - b!.y)).toBeGreaterThan(MIN_APART);
+
+    // One to the hive's left and one below it, which is the shape of the
+    // corner: a shop directly under the hive would otherwise drift sideways
+    // into the other one's ground the next time these numbers are touched.
+    const left = field.buyers.find((buyer) => buyer.x < field.hiveX - 60);
+    const below = field.buyers.find((buyer) => buyer.y > field.hiveY + 60);
+    expect(left, 'no shop to the left of the hive').toBeTruthy();
+    expect(below, 'no shop below the hive').toBeTruthy();
+    expect(left).not.toBe(below);
+  });
+
   it('never spawns a flower in the yard', () => {
     // The yard is the road to the shops, and a foraging target standing on it
     // is how open ground stops being open.
