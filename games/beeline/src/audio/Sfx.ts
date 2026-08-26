@@ -1,7 +1,7 @@
 import type Phaser from 'phaser';
 
 export type SfxKey =
-  'collect' | 'deposit' | 'draw' | 'dayEnd' | 'upgrade' | 'wasp' | 'hum';
+  'collect' | 'deposit' | 'sell' | 'draw' | 'dayEnd' | 'upgrade' | 'wasp' | 'hum';
 
 const SAMPLE_RATE = 22_050;
 
@@ -73,6 +73,7 @@ export class Sfx {
     try {
       this.addBuffer(ctx, 'collect', 0.38, collectBlip);
       this.addBuffer(ctx, 'deposit', 0.13, depositThunk);
+      this.addBuffer(ctx, 'sell', 0.34, sellChink);
       this.addBuffer(ctx, 'draw', 0.22, drawWhoosh);
       this.addBuffer(ctx, 'dayEnd', 0.75, dayEndChime);
       this.addBuffer(ctx, 'upgrade', 0.42, upgradeArpeggio);
@@ -246,6 +247,40 @@ function depositThunk(t: number): number {
   const tone = Math.sin(2 * Math.PI * 196 * t);
   const body = 0.4 * Math.sin(2 * Math.PI * 98 * t);
   return (tone + body) * decay(t, 22) * attack(t, 0.006) * 0.45;
+}
+
+function sellChink(t: number): number {
+  // Money landing: a small coin, not a cash register.
+  //
+  // The brief was "a satisfying sell sound, not annoying, not too loud", and
+  // the trap in it is that the obvious reference — a till, a jackpot, a coin
+  // pile — is *built* to be annoying, because a casino wants the room to hear
+  // it. This has to work at the other extreme: it fires several times a sale,
+  // many sales a day, over the music, and its job is only to confirm.
+  //
+  // What makes it read as metal rather than as another wooden chime is
+  // **inharmonicity**. A struck bar's partials sit at irrational-looking
+  // multiples of the fundamental (2.76 and 5.4 here, roughly a real bell's
+  // first two), and it is those non-integer ratios the ear hears as *metal*.
+  // The collect blip goes out of its way to avoid exactly this, for exactly the
+  // same reason in reverse — but that one plays hundreds of times a day and
+  // this plays a handful, so it can afford a little edge.
+  //
+  // The edge is kept in check three ways: the partials are quiet and decay far
+  // faster than the fundamental, so the metal is an *onset* rather than a tone;
+  // there is a low body underneath giving the coin weight instead of leaving it
+  // thin and glassy; and the whole thing is well under a third of a second.
+  const f = 784;
+  const strike = Math.sin(2 * Math.PI * f * t) * decay(t, 9);
+  const bell =
+    0.3 * Math.sin(2 * Math.PI * f * 2.76 * t) * decay(t, 30) +
+    0.14 * Math.sin(2 * Math.PI * f * 5.4 * t) * decay(t, 52);
+  // A fifth below, under everything. Weight, not pitch — it is 12dB down and
+  // gone before the strike is, so it lands as heft rather than as a second
+  // note fighting the first.
+  const body = 0.25 * Math.sin(2 * Math.PI * 261.6 * t) * decay(t, 14);
+  // Long enough not to click, short enough that the coin still sounds struck.
+  return (strike + bell + body) * attack(t, 0.007) * 0.3;
 }
 
 function drawWhoosh(t: number, duration: number): number {

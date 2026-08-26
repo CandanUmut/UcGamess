@@ -1676,8 +1676,9 @@ carry the honey there → bring the money home → spend it.**
 
 The hive holds 220 honey at level zero — about six sell-loads — and the cap is
 now actually enforced. A full hive **spills**: bees keep flying and keep
-arriving, and everything past the brim is lost, with the comb gauge turning red
-and saying so.
+arriving, and everything past the brim is lost, and the hive itself turns red
+and says so. (It was a bar in the HUD corner until §30 moved it into the skep,
+and a sell trip was a flat load until §30 made it a share.)
 
 Three options were on the table and this is the hardest of them. Pausing the
 swarm at the brim would waste nothing and would turn a full hive into a quiet
@@ -1689,9 +1690,9 @@ watching if the vessel jumps.
 
 ### Two buyers, and why their prices are waves
 
-**The Market** is close, steady and cheap. **The Apothecary** is across the
-board, swings by more than half its own base, and pays half again as much at
-its normal. The contrast is the decision: not "which number is bigger right
+**The Market** is close, steady and cheap. **The Apothecary** is further off,
+swings by more than half its own base, and pays half again as much at its
+normal. (Both stood on the far edge of the board until §30 brought them home.) The contrast is the decision: not "which number is bigger right
 now", but whether a long line to a volatile price is worth the bees it costs to
 lay and to hold, with the combs filling while you decide.
 
@@ -1749,6 +1750,129 @@ vocabulary is deliberately small and reused: fifteen unique little paintings
 would be fifteen things to get right and would still not read at 44px.
 
 ---
+
+## 30. The market, after the first play
+
+Section 29 shipped the selling loop. This is the report that came back on it,
+and what each line of it turned out to be.
+
+### The depots came home
+
+They were planted on the far side of the board, on the stated theory that
+"selling is always a real journey through the maze rather than a formality".
+That theory was wrong, and it was wrong in a way worth writing down: **selling
+is not the reward at the end of the loop, it is the pressure inside it.** The
+hive is small, it spills, and the answer to a brimming hive has to be reachable
+inside the few seconds before honey starts walking out of the door. At four
+corridors' range the answer was a project.
+
+Worse, the distance flattened the decision the two buyers exist to create. At
+that range both depots were simply _far_, and "near versus wild" collapsed into
+"whichever number is bigger". The Market is now a short hop up the left wall and
+the Apothecary a longer run out along the bottom — both a couple of corridors
+out, and the distance _between them_ is what still costs something.
+
+Both sit on maze cell centres, so a depot never lands inside a wall.
+
+### Two rules the move broke, and the fix for each
+
+Moving the buildings into the play area invalidated two rules that had been
+quietly safe only because nothing was ever near them.
+
+**Flowers could spawn on top of a depot.** Two reach rings on top of each other
+is genuinely ambiguous — the aim assist has to pick one, and whichever it picks
+costs the player the line they meant to draw. A depot's cell is now excluded
+from flower placement outright, and its ring gets its own fallback tier below
+the flower spacing rules: the flower rule is allowed to give way on a crowded
+board, this one only gives way when there is nowhere else at all.
+
+**Aim assist let a buyer win unconditionally.** Fine on the far edge, where
+nothing else was ever within reach of one. Among the flowers it would turn a
+drag that landed squarely on a marigold into a sell line because a depot was a
+little further off in the same direction. Nearest thing wins now — the rule the
+wasp branch already used.
+
+### The prices were a blur, and the arrows were a lie
+
+The report was that the price moved too fast to act on. It did: the waves ran on
+26- and 11-second periods against a day of 45 to 90 seconds, so a full cycle
+went by several times a day and no reading of one survived long enough to be
+worth making. The periods are roughly doubled — the Market's slow wave now runs
+about one cycle per day.
+
+Looking at that turned up something worse. The trend arrow compared the price
+against **the previous frame's**, and one frame of a wave with a period measured
+in tens of seconds moves the price by well under a thousandth — against a
+threshold set at four thousandths. Both arrows had been permanently blank for
+the whole life of the feature, and the test covering them passed _because_ of
+it: a value that never changes never changes direction. The arrow is now taken
+against a lagging copy of the price, which makes the gap a real measure of slope
+at a size that does not depend on the frame rate. The test now asserts that each
+arrow actually takes both values over a long run.
+
+That is the second bug this project has shipped where a plausible-looking
+threshold was never once crossed. Both were found by asking what the _numbers_
+were, rather than whether the code did what it said.
+
+### One bee stopped carrying the hive
+
+A sell trip was a flat 38 honey, which failed at both ends. Near the brim a sale
+read as one bee teleporting a chunk of the day's work to a depot instead of as a
+swarm working a line; and once the combs were low, a single bee took every last
+drop. Worse, a flat load does not scale — every Honey Store level added trips to
+empty the hive, so the upgrade meant to relieve pressure quietly made selling
+more tedious.
+
+A trip is now a **share of capacity** (11%, with a small floor so a low-level
+hive is not emptied by dribbles). Roughly nine trips at any capacity, so a sell
+line is always a standing commitment of several bees over several seconds, and
+the Honey Store buys headroom rather than homework.
+
+### The honey went back into the hive
+
+The fullness gauge shipped as a vertical bar against the left edge of the HUD,
+which is the standard answer and the wrong one here. The hive is already on
+screen and is already the thing filling up; a separate gauge asks the player to
+watch two objects and join them mentally.
+
+The skep now fills. A gold copy of the hive drawing is cropped to the honey line
+and drawn over the original, with a bright meniscus across the surface — the
+line is what makes the exact level readable, because a soft gold wash on its own
+is surprisingly hard to measure. It uses **fill** tinting rather than multiply:
+multiplying gold over a drawing that is already brown gives a slightly warmer
+brown, which is not a signal. Spilling turns the whole thing orange and pulses
+it, in the one colour the game reserves for losing something.
+
+The easing is driven off simulation time rather than a per-frame constant, so it
+does not run at 2.4x on a 144Hz monitor — the fixed-timestep bug in its cosmetic
+form.
+
+### The depots stopped being craters
+
+A filled 88-unit disc around each buyer was free decoration on the far edge and
+covered most of a corridor once they moved inside the board. The reach ring is
+now 54 units and carried by its outline, with only a faint wash inside it, and
+the building is sized to sit within its own ring — the landmark and the thing
+you have to touch are one shape instead of a building lost in a halo. The aim
+assist is what makes it easy to hit; the ring only has to say _here_.
+
+### A coin, not a till
+
+The brief was a satisfying sell sound that is not annoying, and the trap in it
+is that every obvious reference — a till, a jackpot, a coin pile — is _built_ to
+be annoying, because a casino wants the room to hear it.
+
+What makes this read as metal rather than as another wooden chime is
+**inharmonicity**: partials at 2.76x and 5.4x the fundamental, roughly a real
+bell's first two, and it is those non-integer ratios the ear hears as metal. The
+collect blip goes out of its way to avoid exactly this — but that one plays
+hundreds of times a day and this plays a handful, so it can afford an edge. The
+edge is kept in check three ways: the partials are quiet and decay far faster
+than the fundamental, so the metal is an _onset_ rather than a tone; a low body
+underneath gives the coin weight instead of leaving it thin and glassy; and the
+whole thing is under a third of a second. It plays on the pentatonic scale and
+at most six times a second, so a delivery stream is an arpeggio rather than a
+rattle.
 
 ## 25. Success criteria
 

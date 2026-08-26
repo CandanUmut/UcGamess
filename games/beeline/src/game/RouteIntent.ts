@@ -87,21 +87,33 @@ export function applyAimAssist(
     return { coords: out, connected: false, wasp: null, buyer: null };
   }
 
-  // A buyer is a building. It never moves and is always visible, so it is the
-  // easiest thing on the board to aim at and gets the plainest rule: end the
-  // drag near one and the line sells there.
-  const buyer = field.nearestBuyerTo(endX, endY, TUNING.honey.aimRadius);
-  if (buyer && !field.pathBlocked(endX, endY, buyer.x, buyer.y)) {
-    if (Math.hypot(buyer.x - endX, buyer.y - endY) > TUNING.honey.reachRadius * 0.5) {
-      out.push(buyer.x, buyer.y);
-    }
-    return { coords: out, connected: true, wasp: null, buyer };
-  }
-
   // Only ever snaps to a flower the player has found. Assist exists to make a
   // drag mean what it looks like it means; pulling a line onto something
   // invisible would hand back the information the dark was there to take away.
   const patch = field.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
+  const patchDistance = patch ? Math.hypot(patch.x - endX, patch.y - endY) : Infinity;
+
+  // A buyer is a building. It never moves and is always visible, so it is the
+  // easiest thing on the board to aim at and gets the plainest rule: end the
+  // drag near one and the line sells there.
+  //
+  // It no longer wins *unconditionally*, though. That was safe only while the
+  // depots sat on the far edge of the board, where nothing else was ever within
+  // reach of one. They now stand a couple of corridors from the hive, among the
+  // flowers, and an unconditional win would quietly turn a drag that landed
+  // squarely on a marigold into a sell line because a depot was a little
+  // further off in the same direction. Nearest thing wins — the same rule the
+  // wasp branch below already uses.
+  const buyer = field.nearestBuyerTo(endX, endY, TUNING.honey.aimRadius);
+  const buyerDistance = buyer ? Math.hypot(buyer.x - endX, buyer.y - endY) : Infinity;
+  if (
+    buyer &&
+    buyerDistance <= patchDistance &&
+    !field.pathBlocked(endX, endY, buyer.x, buyer.y)
+  ) {
+    if (buyerDistance > TUNING.honey.reachRadius * 0.5) out.push(buyer.x, buyer.y);
+    return { coords: out, connected: true, wasp: null, buyer };
+  }
 
   // A wasp outranks a flower at the same distance, and is caught from further
   // out, because it is the only target on the board that moves. A drag aimed
@@ -115,9 +127,8 @@ export function applyAimAssist(
   // corridors away is still a route to the marigold.
   const wasp = field.nearestWaspTo(endX, endY, TUNING.wasp.aimRadius);
   const toWasp = wasp ? Math.hypot(wasp.x - endX, wasp.y - endY) : Infinity;
-  const toPatch = patch ? Math.hypot(patch.x - endX, patch.y - endY) : Infinity;
 
-  if (wasp && toWasp <= toPatch && !field.pathBlocked(endX, endY, wasp.x, wasp.y)) {
+  if (wasp && toWasp <= patchDistance && !field.pathBlocked(endX, endY, wasp.x, wasp.y)) {
     if (toWasp > TUNING.wasp.reachRadius * 0.5) out.push(wasp.x, wasp.y);
     return { coords: out, connected: true, wasp, buyer: null };
   }
@@ -133,9 +144,7 @@ export function applyAimAssist(
 
   // Only extend to the flower's centre if we are not already inside it, so a
   // careful player's line is left exactly as they drew it.
-  if (Math.hypot(patch.x - endX, patch.y - endY) > TUNING.patch.reachRadius * 0.5) {
-    out.push(patch.x, patch.y);
-  }
+  if (patchDistance > TUNING.patch.reachRadius * 0.5) out.push(patch.x, patch.y);
   return { coords: out, connected: true, wasp: null, buyer: null };
 }
 

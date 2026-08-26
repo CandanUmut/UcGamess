@@ -66,6 +66,15 @@ const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
  */
 const COLLECT_NOTE_GAP = 0.09;
 
+/**
+ * Shortest gap between two sell coins, in seconds.
+ *
+ * Longer than the collect gap, because a coin is meant to land as a distinct
+ * event rather than as texture. A sell line delivers in a stream, so without
+ * this a single sale is a burst of overlapping chinks.
+ */
+const SELL_NOTE_GAP = 0.16;
+
 /** How long a finger must rest on a route to erase it. */
 const ERASE_HOLD_SECONDS = 0.75;
 /** Movement beyond this cancels the hold and treats the gesture as a draw. */
@@ -116,6 +125,7 @@ export class GameScene extends BaseGameplayScene {
 
   /** Sim time of the last collection note, for the rate limit. */
   private lastCollectNote = -1;
+  private lastSellNote = -1;
   private lastSpillNote = -1;
 
   private externallyPaused = false;
@@ -648,13 +658,6 @@ export class GameScene extends BaseGameplayScene {
       const wind = this.field.windVector;
       this.hud.setWind(wind.x, wind.y, wind.strength);
 
-      this.hud.setHive(
-        this.field.honeyFullness,
-        this.field.honey,
-        this.field.honeyCap,
-        this.field.isSpilling,
-        seconds,
-      );
       this.hud.setPrices(
         this.field.buyers.map((b) => ({
           name: b.tuning.name,
@@ -770,7 +773,16 @@ export class GameScene extends BaseGameplayScene {
       for (let i = 0; i < 5; i += 1) this.juice.collect(sale.x, sale.y, 4);
       this.showGain(sale.x, sale.y, `+${Math.round(sale.money)}`, '#ffe9a8');
     }
-    if (events.sold.length > 0) this.sfx.playVaried('deposit', 0.26, 320);
+    // One coin per frame at most, however many bees landed together. A sell
+    // line delivers in a stream, and a stream of chinks stacking on the same
+    // frame is a rattle rather than a payday — the same rate limit the collect
+    // blip needed, for the same reason.
+    if (events.sold.length > 0 && this.field.time - this.lastSellNote >= SELL_NOTE_GAP) {
+      this.lastSellNote = this.field.time;
+      // On the scale rather than at a random detune, so consecutive sales in a
+      // good run land as an arpeggio instead of as noise.
+      this.sfx.playNote('sell', 0.3);
+    }
 
     // Spilling is the one loss the player is meant to feel as urgency rather
     // than as damage: it is not the wasps taking your honey, it is you failing
