@@ -90,8 +90,18 @@ export class RouteRenderer {
     const strength = route.strength;
     const widthGain = 1 + strength * 0.9;
     const alphaGain = strength * 0.08;
-    const colour =
-      strength > 0.02 ? blend(COLORS.route, 0xfff3c4, strength) : COLORS.route;
+    // A line's colour says what it is for. Gathering lines keep the amber the
+    // game has always used; a guard line is red because it is spending bees
+    // rather than earning, and a sell line takes its buyer's own colour so the
+    // depot at its end and the road to it are obviously one thing.
+    //
+    // This matters more than it sounds. With three jobs and five slots, "which
+    // of my lines is doing what" is the question a player asks most often, and
+    // answering it by colour costs no screen furniture at all.
+    const base = route.guard
+      ? 0xe0523c
+      : (route.targetBuyer?.tuning.tint ?? COLORS.route);
+    const colour = strength > 0.02 ? blend(base, 0xfff3c4, strength) : base;
 
     // A soft underlay beneath a mature road, so it reads as packed ground
     // rather than as a slightly fatter scribble.

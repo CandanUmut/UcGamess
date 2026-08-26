@@ -9,12 +9,12 @@ const CURRENT_VERSION = 1;
 
 export interface BeelineSave {
   version: number;
-  /** Unspent honey. */
-  honey: number;
+  /** Unspent money. The run's spendable currency. */
+  money: number;
   /** Next day to be played, 1-indexed. */
   day: number;
   levels: UpgradeLevels;
-  bestDayHoney: number;
+  bestDayMoney: number;
   /** Furthest day reached across all runs. The thing a run is played for. */
   bestRunDay: number;
   /** Epoch ms of the last day completed, for offline accrual. */
@@ -37,10 +37,10 @@ export interface BeelineSave {
 export function newSave(): BeelineSave {
   return {
     version: CURRENT_VERSION,
-    honey: 0,
+    money: 0,
     day: 1,
     levels: emptyLevels(),
-    bestDayHoney: 0,
+    bestDayMoney: 0,
     bestRunDay: 0,
     lastPlayedAt: Date.now(),
     items: [],
@@ -81,10 +81,10 @@ export function coerceSave(raw: unknown): BeelineSave {
 
   return {
     version: CURRENT_VERSION,
-    honey: clampNumber(data.honey, 0, Number.MAX_SAFE_INTEGER, 0),
+    money: clampNumber(data.money, 0, Number.MAX_SAFE_INTEGER, 0),
     day: clampInt(data.day, 1, 9999) || 1,
     levels,
-    bestDayHoney: clampNumber(data.bestDayHoney, 0, Number.MAX_SAFE_INTEGER, 0),
+    bestDayMoney: clampNumber(data.bestDayMoney, 0, Number.MAX_SAFE_INTEGER, 0),
     bestRunDay: clampInt(data.bestRunDay, 0, 9999),
     lastPlayedAt: clampNumber(data.lastPlayedAt, 0, Date.now(), Date.now()),
     // Unknown ids — items renamed or removed between versions — are dropped

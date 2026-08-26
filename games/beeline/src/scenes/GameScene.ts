@@ -11,6 +11,7 @@ import { Field, WORLD_HEIGHT, WORLD_WIDTH } from '../sim/Field.ts';
 import type { Route } from '../sim/Route.ts';
 import { pushIfSpaced, type SamplePoint } from '../sim/polyline.ts';
 import { createGeneratedTextures, TEX_FILES } from '../render/textures.ts';
+import { createItemIcons } from '../render/itemIcons.ts';
 import { createBeeRenderer, type BeeRenderer } from '../render/BeeRenderer.ts';
 import { RouteRenderer } from '../render/RouteRenderer.ts';
 import { FieldRenderer } from '../render/FieldRenderer.ts';
@@ -115,6 +116,7 @@ export class GameScene extends BaseGameplayScene {
 
   /** Sim time of the last collection note, for the rate limit. */
   private lastCollectNote = -1;
+  private lastSpillNote = -1;
 
   private externallyPaused = false;
 
@@ -132,6 +134,11 @@ export class GameScene extends BaseGameplayScene {
 
   preload(): void {
     createGeneratedTextures(this);
+    // Built here rather than in the night scene: textures live on the game's
+    // texture manager, not a scene's, and the night scene is launched and
+    // stopped repeatedly. Generating them once at boot means the shop never
+    // waits and never rebuilds fifteen canvases between days.
+    createItemIcons(this);
 
     // The only files the game fetches, and nothing depends on them: the bee
     // falls back to a version drawn in code, the flowers and the ground fall
@@ -284,10 +291,10 @@ export class GameScene extends BaseGameplayScene {
     this.sfx.play('dayEnd', 0.45);
     this.cameras.main.flash(220, 60, 50, 30);
 
-    const result = evaluateDay(this.day, this.field.honey, this.save.bestDayHoney);
+    const result = evaluateDay(this.day, this.field.money, this.save.bestDayMoney);
 
-    this.save.honey += Math.floor(result.honey);
-    this.save.bestDayHoney = Math.max(this.save.bestDayHoney, Math.floor(result.honey));
+    this.save.money += Math.floor(result.money);
+    this.save.bestDayMoney = Math.max(this.save.bestDayMoney, Math.floor(result.money));
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     this.save.lastPlayedAt = Date.now();
     if (this.tutorial.finished) this.save.tutorialDone = true;
@@ -344,7 +351,7 @@ export class GameScene extends BaseGameplayScene {
     this.scene.resume();
 
     // Roll back the day-end bookkeeping, since the day is continuing.
-    this.save.honey -= Math.floor(this.field.honey);
+    this.save.money -= Math.floor(this.field.money);
     this.save.day = this.day;
     this.persist();
 
@@ -367,9 +374,9 @@ export class GameScene extends BaseGameplayScene {
   private claimOfflineHoney(): void {
     const stats = deriveStats(this.save.levels);
     const offline = computeOffline(this.save.lastPlayedAt, Date.now(), stats);
-    if (offline.honey <= 0) return;
+    if (offline.money <= 0) return;
 
-    this.save.honey += offline.honey;
+    this.save.money += offline.money;
     this.save.lastPlayedAt = Date.now();
     this.persist();
 
@@ -377,7 +384,7 @@ export class GameScene extends BaseGameplayScene {
       .text(
         DESIGN_WIDTH / 2,
         DESIGN_HEIGHT - 110,
-        `+${offline.honey} honey while you were away (${formatAway(offline.hoursAway)})`,
+        `+${offline.money} honey while you were away (${formatAway(offline.hoursAway)})`,
         { fontFamily: FONT, fontSize: '20px', color: '#ffd966' },
       )
       .setOrigin(0.5)
@@ -636,14 +643,31 @@ export class GameScene extends BaseGameplayScene {
     this.consumeEvents();
 
     if (this.phase === 'playing') {
-      this.hud.update(this.day, this.field.honey, dayQuota(this.day), this.secondsLeft);
+      this.hud.update(this.day, this.field.money, dayQuota(this.day), this.secondsLeft);
 
       const wind = this.field.windVector;
       this.hud.setWind(wind.x, wind.y, wind.strength);
 
+      this.hud.setHive(
+        this.field.honeyFullness,
+        this.field.honey,
+        this.field.honeyCap,
+        this.field.isSpilling,
+        seconds,
+      );
+      this.hud.setPrices(
+        this.field.buyers.map((b) => ({
+          name: b.tuning.name,
+          price: b.price,
+          trend: b.trend,
+          tint: b.tuning.tint,
+        })),
+      );
+
       this.tutorial.update({
         routesDrawn: this.routesDrawn,
         honey: this.field.honey,
+        money: this.field.money,
         anyRouteRetreating: this.field.routes.some((r) => r.isRetreating),
       });
       this.tutorialText.setText(this.tutorial.current?.text ?? '');
@@ -739,6 +763,47 @@ export class GameScene extends BaseGameplayScene {
     }
 
     for (const lost of events.pollenLost) this.showLoss(lost.x, lost.y, 'pollen!');
+
+    // A sale is the payoff of the whole loop, so it lands where it happened —
+    // at the buyer, in that buyer's colour, with the money it made.
+    for (const sale of events.sold) {
+      for (let i = 0; i < 5; i += 1) this.juice.collect(sale.x, sale.y, 4);
+      this.showGain(sale.x, sale.y, `+${Math.round(sale.money)}`, '#ffe9a8');
+    }
+    if (events.sold.length > 0) this.sfx.playVaried('deposit', 0.26, 320);
+
+    // Spilling is the one loss the player is meant to feel as urgency rather
+    // than as damage: it is not the wasps taking your honey, it is you failing
+    // to sell it. Rate-limited to one word a second so a brimming hive nags
+    // rather than screams.
+    if (events.spilled > 0 && this.field.time - this.lastSpillNote >= 1) {
+      this.lastSpillNote = this.field.time;
+      this.showLoss(this.field.hiveX, this.field.hiveY - 40, 'spilling!');
+    }
+  }
+
+  /** A small bright word where the player gained something. */
+  private showGain(x: number, y: number, text: string, colour: string): void {
+    const label = this.add
+      .text(x, y - 30, text, {
+        fontFamily: FONT,
+        fontSize: '20px',
+        fontStyle: 'bold',
+        color: colour,
+        stroke: '#12100c',
+        strokeThickness: 5,
+      })
+      .setOrigin(0.5)
+      .setDepth(DEPTH.juice);
+
+    this.tweens.add({
+      targets: label,
+      y: label.y - 30,
+      alpha: 0,
+      duration: 900,
+      ease: 'Quad.easeOut',
+      onComplete: () => label.destroy(),
+    });
   }
 
   /** A small red word where something was taken from the player. */
@@ -877,6 +942,8 @@ export class GameScene extends BaseGameplayScene {
           tipY: Math.round(r.tipY),
           strength: Number(r.strength.toFixed(2)),
           connected: r.reachesTarget(),
+          buyer: r.targetBuyer ? r.targetBuyer.id : null,
+          guard: r.guard,
           wasp: r.targetWasp ? 1 : 0,
         })),
       day: () => ({
@@ -884,8 +951,16 @@ export class GameScene extends BaseGameplayScene {
         secondsLeft: this.secondsLeft,
         quota: dayQuota(this.day),
         honey: this.field.honey,
+        money: this.field.money,
         phase: this.phase,
       }),
+      buyers: () =>
+        this.field.buyers.map((b) => ({
+          id: b.id,
+          x: b.x,
+          y: b.y,
+          price: Number(b.price.toFixed(2)),
+        })),
       save: () => this.save,
       // Lands a raid on demand. The clock is deliberately random, so without
       // this a harness check of the raid would be a check of the dice.

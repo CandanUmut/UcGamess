@@ -24,7 +24,13 @@ export function dayLength(day: number): number {
 }
 
 /**
- * Honey needed to pass a day.
+ * Money needed to pass a day.
+ *
+ * Money, not honey, since honey became stock rather than score: you gather it,
+ * the hive holds a little of it, and it only counts once a buyer has paid for
+ * it. The table is re-based accordingly — roughly the old honey figures at the
+ * price a competent seller gets, so the shape of the run is unchanged and only
+ * the units moved.
  *
  * A hand-tuned table for the first twelve days, then a growth curve. A single
  * exponential cannot be both trivially passable on day one and tight by day
@@ -256,7 +262,8 @@ export type DayOutcome = 'met' | 'missed';
 
 export interface DayResult {
   day: number;
-  honey: number;
+  /** Money banked. What a day is judged on now that honey is stock, not score. */
+  money: number;
   quota: number;
   outcome: DayOutcome;
   /** True when the miss was close enough to be worth offering extra time. */
@@ -264,19 +271,19 @@ export interface DayResult {
   isBest: boolean;
 }
 
-export function evaluateDay(day: number, honey: number, bestSoFar: number): DayResult {
+export function evaluateDay(day: number, money: number, bestSoFar: number): DayResult {
   const quota = dayQuota(day);
-  const met = honey >= quota;
-  const shortfall = (quota - honey) / quota;
+  const met = money >= quota;
+  const shortfall = (quota - money) / quota;
 
   return {
     day,
-    honey,
+    money,
     quota,
     outcome: met ? 'met' : 'missed',
     // Only offer more time when the player was genuinely close. Offering it on
     // a hopeless day reads as the game selling a rescue it knows will not work.
     nearMiss: !met && shortfall <= TUNING.ads.extendOfferMissThreshold,
-    isBest: honey > bestSoFar,
+    isBest: money > bestSoFar,
   };
 }

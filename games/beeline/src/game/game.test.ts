@@ -34,7 +34,7 @@ describe('day pacing', () => {
   });
 
   it('keeps day one trivially passable and then tightens', () => {
-    expect(dayQuota(1)).toBe(60);
+    expect(dayQuota(1)).toBe(TUNING.day.quotas[0]);
     for (let day = 2; day <= 20; day += 1) {
       expect(dayQuota(day)).toBeGreaterThan(dayQuota(day - 1));
     }
@@ -165,11 +165,11 @@ describe('upgrades', () => {
 describe('save coercion', () => {
   it('round-trips a valid save', () => {
     const original = newSave();
-    original.honey = 1234;
+    original.money = 1234;
     original.day = 7;
     original.levels.swarmSize = 3;
     expect(coerceSave(JSON.parse(JSON.stringify(original)))).toMatchObject({
-      honey: 1234,
+      money: 1234,
       day: 7,
       levels: expect.objectContaining({ swarmSize: 3 }),
     });
@@ -181,8 +181,8 @@ describe('save coercion', () => {
     for (const junk of [null, undefined, 42, 'nonsense', [], { day: 'seven' }]) {
       const save = coerceSave(junk);
       expect(save.day).toBeGreaterThanOrEqual(1);
-      expect(save.honey).toBeGreaterThanOrEqual(0);
-      expect(Number.isFinite(save.honey)).toBe(true);
+      expect(save.money).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(save.money)).toBe(true);
     }
   });
 
@@ -195,9 +195,9 @@ describe('save coercion', () => {
   });
 
   it('rejects negative and non-finite honey', () => {
-    expect(coerceSave({ honey: -500 }).honey).toBe(0);
-    expect(coerceSave({ honey: Number.NaN }).honey).toBe(0);
-    expect(coerceSave({ honey: Number.POSITIVE_INFINITY }).honey).toBeLessThan(Infinity);
+    expect(coerceSave({ money: -500 }).money).toBe(0);
+    expect(coerceSave({ money: Number.NaN }).money).toBe(0);
+    expect(coerceSave({ money: Number.POSITIVE_INFINITY }).money).toBeLessThan(Infinity);
   });
 });
 
@@ -208,11 +208,11 @@ describe('offline accrual', () => {
   it('pays for time away, capped by the Honey Store', () => {
     const now = Date.now();
     const short = computeOffline(now - HOUR, now, stats);
-    expect(short.honey).toBeGreaterThan(0);
-    expect(short.honey).toBeLessThanOrEqual(stats.offlineCapHoney);
+    expect(short.money).toBeGreaterThan(0);
+    expect(short.money).toBeLessThanOrEqual(stats.offlineCapMoney);
 
     const long = computeOffline(now - 500 * HOUR, now, stats);
-    expect(long.honey).toBe(stats.offlineCapHoney);
+    expect(long.money).toBe(stats.offlineCapMoney);
     expect(long.capped).toBe(true);
   });
 
@@ -220,38 +220,38 @@ describe('offline accrual', () => {
     // Guards a real tuning bug: a short window at a low rate meant the cap was
     // never reached, and buying Honey Store raised a ceiling nothing hit.
     const maxEarnableInWindow = stats.offlineWindowHours * TUNING.offline.honeyPerHour;
-    expect(maxEarnableInWindow).toBeGreaterThan(stats.offlineCapHoney);
+    expect(maxEarnableInWindow).toBeGreaterThan(stats.offlineCapMoney);
 
     const maxed = deriveStats({ ...emptyLevels(), honeyStore: maxLevel('honeyStore') });
     expect(maxed.offlineWindowHours * TUNING.offline.honeyPerHour).toBeGreaterThan(
-      maxed.offlineCapHoney,
+      maxed.offlineCapMoney,
     );
   });
 
   it('ignores a clock that jumped backwards', () => {
     const now = Date.now();
-    expect(computeOffline(now + 100 * HOUR, now, stats).honey).toBe(0);
+    expect(computeOffline(now + 100 * HOUR, now, stats).money).toBe(0);
   });
 
   it('never pays out more for a longer absence than the window allows', () => {
     const now = Date.now();
-    const a = computeOffline(now - 10_000 * HOUR, now, stats).honey;
-    const b = computeOffline(now - 100_000 * HOUR, now, stats).honey;
+    const a = computeOffline(now - 10_000 * HOUR, now, stats).money;
+    const b = computeOffline(now - 100_000 * HOUR, now, stats).money;
     // A device clock set years forward must not hand over years of honey.
     expect(a).toBe(b);
-    expect(a).toBeLessThanOrEqual(stats.offlineCapHoney);
+    expect(a).toBeLessThanOrEqual(stats.offlineCapMoney);
   });
 
   it('does not bother the player with a trivial amount', () => {
     const now = Date.now();
-    expect(computeOffline(now - 1000, now, stats).honey).toBe(0);
+    expect(computeOffline(now - 1000, now, stats).money).toBe(0);
   });
 
   it('pays more once the Honey Store is upgraded', () => {
     const now = Date.now();
     const upgraded = deriveStats({ ...emptyLevels(), honeyStore: 3 });
-    const base = computeOffline(now - 200 * HOUR, now, stats).honey;
-    const better = computeOffline(now - 200 * HOUR, now, upgraded).honey;
+    const base = computeOffline(now - 200 * HOUR, now, stats).money;
+    const better = computeOffline(now - 200 * HOUR, now, upgraded).money;
     expect(better).toBeGreaterThan(base);
   });
 });

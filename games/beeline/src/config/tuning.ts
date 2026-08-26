@@ -274,6 +274,40 @@ export interface RaidTuning {
   hornetShare: number;
 }
 
+export interface BuyerTuning {
+  name: string;
+  /** Money paid per unit of honey at this buyer's own normal. */
+  basePrice: number;
+  /** Seconds for the slow wave and the fast one. */
+  periodSlow: number;
+  periodFast: number;
+  /** How far each wave moves the price, as a fraction of base. */
+  swingSlow: number;
+  swingFast: number;
+  /** Price floor, as a fraction of base. Nobody ever pays nothing. */
+  floorFraction: number;
+  /** How much one unit of honey sold here depresses the price. */
+  saturationPerHoney: number;
+  /** How fast that wears off, per second. */
+  saturationRecovery: number;
+  maxSaturation: number;
+  /** Board position, in design units. */
+  x: number;
+  y: number;
+  tint: number;
+}
+
+export interface HoneyTuning {
+  /** Hive capacity at level zero. Deliberately small — see the runtime note. */
+  baseCap: number;
+  /** Honey one bee carries to a buyer per trip. */
+  perSellTrip: number;
+  /** How near a route's tip must be for its bees to trade. */
+  reachRadius: number;
+  /** How near a drag has to end to count as aimed at a buyer. */
+  aimRadius: number;
+}
+
 export interface MazeTuning {
   /** Grid the board is carved into. Cells are the corridors. */
   cols: number;
@@ -348,6 +382,8 @@ export interface Tuning {
   day: DayTuning;
   wind: WindTuning;
   wasp: WaspTuning;
+  buyers: Record<'market' | 'apothecary', BuyerTuning>;
+  honey: HoneyTuning;
   raid: RaidTuning;
   fog: {
     cellSize: number;
@@ -535,7 +571,15 @@ export const TUNING: Tuning = {
     //
     // Days one to seven are untouched. That is where a new player decides
     // whether to keep going, and none of this problem lives there.
-    quotas: [60, 110, 460, 700, 860, 1050, 1300, 1550, 1800, 2150, 2500, 2900],
+    // In money now, not honey.
+    //
+    // Derived rather than guessed, but **not yet playtested** — see DESIGN.md
+    // §29. A scripted seller converts 55-70% of the honey it gathers at an
+    // effective 1.3 money per unit, so money lands at roughly 0.78x what the
+    // same board used to yield in honey. These are the old honey figures at
+    // two thirds, which leaves a competent day comfortably clear and a sloppy
+    // one short. The first real run is what settles it.
+    quotas: [40, 75, 300, 460, 570, 700, 860, 1030, 1200, 1420, 1650, 1920],
     quotaGrowthAfterTable: 1.18,
   },
 
@@ -790,7 +834,10 @@ export const TUNING: Tuning = {
     // ceiling nothing reaches. Level seven puts it at 2,300, just under. There
     // is a test that fails the moment this line raises a ceiling that does not
     // bind, which is what caught an eighth level being added here.
-    honeyStore: { base: 70, growth: 1.5, levels: 7, perLevel: 300 },
+    // Re-sized when this line stopped being an offline curiosity and became
+    // the hive's actual capacity: 220 at level zero to 710 at the top, so the
+    // pressure to sell eases across a run without ever going away.
+    honeyStore: { base: 70, growth: 1.5, levels: 7, perLevel: 70 },
     /**
      * The line that never runs out.
      *
@@ -826,6 +873,83 @@ export const TUNING: Tuning = {
    * The window stays fixed and generous; it exists only to stop a device clock
    * set years forward from paying out years of honey.
    */
+  /**
+   * The two buyers.
+   *
+   * The Market is close, steady and cheap; the Apothecary is far, wild and
+   * pays much better at its peaks. That contrast is the decision — not "which
+   * number is bigger right now", but whether a long run to a swinging price is
+   * worth the trips it costs, with a hive that is filling up while you decide.
+   *
+   * Both sit on the far side of the board from the hive's corner, so selling is
+   * always a real journey through the maze rather than a formality.
+   */
+  buyers: {
+    market: {
+      name: 'The Market',
+      basePrice: 1,
+      // A slow wave you can plan around and a small fast one so the number is
+      // never quite still. Steady enough to be the answer when the hive is
+      // brimming and there is no time to gamble.
+      periodSlow: 26,
+      periodFast: 11,
+      swingSlow: 0.2,
+      swingFast: 0.08,
+      floorFraction: 0.45,
+      saturationPerHoney: 0.0011,
+      saturationRecovery: 0.055,
+      maxSaturation: 0.45,
+      // Close, in the same lower band as the hive. A sell line here is about a
+      // third of the board — cheap enough to keep standing all day, which is
+      // exactly what the safe buyer should be.
+      x: 700,
+      y: 620,
+      tint: 0xf0a83c,
+    },
+    apothecary: {
+      name: 'The Apothecary',
+      // Half again as much at its own normal, and it swings by more than half
+      // that on top. Catching a peak here is the best thing that happens in a
+      // day; arriving at a trough after a long flight is the worst.
+      basePrice: 1.5,
+      periodSlow: 19,
+      periodFast: 7,
+      swingSlow: 0.34,
+      swingFast: 0.16,
+      floorFraction: 0.35,
+      // Saturates faster as well as harder: the Apothecary is a specialist, not
+      // a warehouse, and dumping a whole hive into one is meant to be the wrong
+      // shape of sale even when the price is good.
+      saturationPerHoney: 0.0019,
+      saturationRecovery: 0.045,
+      maxSaturation: 0.55,
+      // Across the board and up. Half again the flight of the Market, which is
+      // what its better price is buying — and what makes arriving at a trough
+      // hurt, because the line cost real bees to lay and real bees to hold.
+      x: 900,
+      y: 175,
+      tint: 0xa87ce0,
+    },
+  },
+
+  /**
+   * The hive's own stores.
+   *
+   * The cap is deliberately small — a little over three full bee-loads' worth
+   * of trips — and it is now actually enforced: a full hive **spills**, and
+   * every second it spills is money walking away. That is the pressure the
+   * whole selling loop hangs on. A generous cap would mean gathering all day
+   * and selling once at dusk, which is not a loop, it is two chores.
+   */
+  honey: {
+    baseCap: 220,
+    // Six trips to empty a full hive at level zero, so a sell line is a
+    // commitment of several bees for several seconds rather than one errand.
+    perSellTrip: 38,
+    reachRadius: 88,
+    aimRadius: 150,
+  },
+
   offline: {
     baseCapHoney: 200,
     baseWindowHours: 12,

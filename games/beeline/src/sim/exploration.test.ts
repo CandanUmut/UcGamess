@@ -127,15 +127,18 @@ describe('discovery', () => {
     // Snapping onto something invisible hands back the information the dark was
     // there to take away, and reads as the game aiming for the player.
     const field = newDay(1);
-    field.patches = [new Patch(900, 300, 500)];
+    // Placed clear of both buyers on purpose: a drag that ends near one of
+    // them is a sell line, and would snap for a completely different and
+    // perfectly correct reason.
+    field.patches = [new Patch(420, 300, 500)];
     const hidden = field.patches[0]!;
     hidden.discovered = false;
 
-    const assisted = applyAimAssist(field, [880, 300, 890, 300]);
+    const assisted = applyAimAssist(field, [400, 300, 410, 300]);
     expect(assisted.connected).toBe(false);
 
     hidden.discovered = true;
-    expect(applyAimAssist(field, [880, 300, 890, 300]).connected).toBe(true);
+    expect(applyAimAssist(field, [400, 300, 410, 300]).connected).toBe(true);
   });
 
   it('still lets bees collect from a flower the player has not seen', () => {
@@ -153,6 +156,40 @@ describe('discovery', () => {
     ]);
     expect(route).not.toBeNull();
     expect(route!.reachesTarget()).toBe(true);
+  });
+
+  it('does not hand over the next flower when the current one runs dry', () => {
+    // The bug this closes made the fog close to pointless in real play. A route
+    // whose flower ran out re-aimed at the nearest flower *anywhere*, unseen
+    // ones included; the bees flew to it, lit it, and the game announced a
+    // discovery the player had never gone looking for. Every dead flower was a
+    // free map of the next one.
+    const field = newDay(1);
+    const near = new Patch(field.hiveX + 200, field.hiveY, 40);
+    const hidden = new Patch(field.hiveX + 620, field.hiveY, 500);
+    near.discovered = true;
+    hidden.discovered = false;
+    field.patches = [near, hidden];
+
+    const route = field.createRoute([
+      field.hiveX,
+      field.hiveY,
+      field.hiveX + 200,
+      field.hiveY,
+    ]);
+    expect(route!.target).toBe(near);
+
+    near.drain(999);
+    expect(near.alive).toBe(false);
+    field.step(1 / 60);
+
+    expect(route!.target).not.toBe(hidden);
+    expect(route!.target).toBeNull();
+
+    // And the moment the player has actually found it, it is a target again.
+    hidden.discovered = true;
+    field.step(1 / 60);
+    expect(route!.target).toBe(hidden);
   });
 });
 
