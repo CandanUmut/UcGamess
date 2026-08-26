@@ -219,6 +219,38 @@ export class Maze {
   }
 
   /**
+   * Flattens every wall in a rectangle of cells, and every wall around it.
+   *
+   * Called after `generate`, so the spanning tree has already guaranteed that
+   * every cell is reachable; removing walls can only ever add routes, never
+   * strand a cell. That ordering is the whole safety argument, and it is why
+   * this is a separate pass rather than a special case inside generation.
+   *
+   * The boundary walls go too, not just the interior ones. A cleared rectangle
+   * that kept its outer wall would be a *room*, and a room with the hive in
+   * front of it is a bottleneck — the opposite of the open apron this is for.
+   * `openLeft` and `openAbove` already refuse to touch the board's own edge, so
+   * a region on the rim stays enclosed by the board.
+   */
+  clearRegion(col0: number, row0: number, col1: number, row1: number): void {
+    const left = Math.max(0, Math.min(col0, col1));
+    const right = Math.min(this.cols - 1, Math.max(col0, col1));
+    const top = Math.max(0, Math.min(row0, row1));
+    const bottom = Math.min(this.rows - 1, Math.max(row0, row1));
+    if (left > right || top > bottom) return;
+
+    // Every vertical edge from the region's left rim to its right rim
+    // inclusive, so the cells inside connect to each other and to the column
+    // on either side.
+    for (let row = top; row <= bottom; row += 1) {
+      for (let col = left; col <= right + 1; col += 1) this.openLeft(col, row);
+    }
+    for (let row = top; row <= bottom + 1; row += 1) {
+      for (let col = left; col <= right; col += 1) this.openAbove(col, row);
+    }
+  }
+
+  /**
    * Re-opens a fraction of the interior walls.
    *
    * Without this the board is a perfect maze: exactly one route to each flower,

@@ -166,6 +166,72 @@ describe('where the buyers stand', () => {
     }
   });
 
+  it('keeps the yard free of walls, every day of a run', () => {
+    // Home ground is open; the frontier is a maze. A hedge between the hive and
+    // a shop it has to reach within seconds turns an emergency into a puzzle,
+    // at the moment the player has least attention to spare for one.
+    const yard = TUNING.maze.yard;
+
+    for (let day = 1; day <= 20; day += 1) {
+      const field = newDay(day);
+      const { maze } = field;
+
+      for (let row = yard.row0; row <= yard.row1; row += 1) {
+        for (let col = yard.col0; col <= yard.col1; col += 1) {
+          if (col > yard.col0) {
+            expect(
+              maze.canStep(col - 1, row, col, row),
+              `wall in yard at ${col},${row}`,
+            ).toBe(true);
+          }
+          if (row > yard.row0) {
+            expect(
+              maze.canStep(col, row - 1, col, row),
+              `wall in yard at ${col},${row}`,
+            ).toBe(true);
+          }
+        }
+      }
+
+      // And a way out of it, or the yard would be a room rather than an apron.
+      expect(maze.canStep(yard.col0, yard.row0, yard.col0, yard.row0 - 1)).toBe(true);
+    }
+  });
+
+  it('stands both shops in the yard, not in a wall', () => {
+    const yard = TUNING.maze.yard;
+    const field = newDay(9);
+    for (const buyer of field.buyers) {
+      const col = field.maze.colAt(buyer.x);
+      const row = field.maze.rowAt(buyer.y);
+      expect(col).toBeGreaterThanOrEqual(yard.col0);
+      expect(col).toBeLessThanOrEqual(yard.col1);
+      expect(row).toBeGreaterThanOrEqual(yard.row0);
+      expect(row).toBeLessThanOrEqual(yard.row1);
+    }
+  });
+
+  it('never spawns a flower in the yard', () => {
+    // The yard is the road to the shops, and a foraging target standing on it
+    // is how open ground stops being open.
+    const yard = TUNING.maze.yard;
+    let checked = 0;
+
+    for (let trial = 0; trial < 200; trial += 1) {
+      const field = newDay(1 + (trial % 15));
+      for (const patch of field.patches) {
+        checked += 1;
+        const col = field.maze.colAt(patch.x);
+        const row = field.maze.rowAt(patch.y);
+        const inYard =
+          col >= yard.col0 && col <= yard.col1 && row >= yard.row0 && row <= yard.row1;
+        expect(inYard, `flower in the yard at ${col},${row}`).toBe(false);
+      }
+    }
+
+    expect(checked).toBeGreaterThan(500);
+  });
+
   it('never spawns a flower on top of a depot', () => {
     // Two reach rings on top of each other is genuinely ambiguous, and the aim
     // assist has to pick one — so a flower next door to a depot costs the
@@ -266,6 +332,87 @@ describe('selling', () => {
     const large = trips(880);
     expect(small).toBeGreaterThan(4);
     expect(large).toBeLessThan(small * 2);
+  });
+
+  it('drops the other shop when one is chosen', () => {
+    // The player should never have to erase the old line by hand. More than
+    // convenience: a sell line left standing at the other shop goes on selling
+    // into it at whatever the price happens to be, so honey the player meant to
+    // hold for a peak leaks away at a trough while they look elsewhere — and
+    // then neither line is a decision.
+    const field = newDay();
+    const [first, second] = field.buyers;
+    expect(first && second).toBeTruthy();
+
+    const a = field.createRoute(lineTo(field, first!.x, first!.y));
+    field.aimRouteAt(a!, null, first!);
+    expect(field.routes).toContain(a);
+
+    const b = field.createRoute(lineTo(field, second!.x, second!.y));
+    field.aimRouteAt(b!, null, second!);
+
+    expect(field.routes).toContain(b);
+    expect(field.routes).not.toContain(a);
+    expect(field.events.droppedBuyer?.name).toBe(first!.tuning.name);
+  });
+
+  it('keeps several lines into the same shop', () => {
+    // Several roads into one buyer is a legitimate way to move a full hive
+    // quickly, and it is still one choice.
+    const field = newDay();
+    const buyer = field.buyers[0]!;
+
+    const a = field.createRoute(lineTo(field, buyer.x, buyer.y));
+    field.aimRouteAt(a!, null, buyer);
+    const b = field.createRoute(lineTo(field, buyer.x, buyer.y));
+    field.aimRouteAt(b!, null, buyer);
+
+    expect(field.routes).toContain(a);
+    expect(field.routes).toContain(b);
+    expect(field.events.droppedBuyer).toBeNull();
+  });
+
+  it('brings the bees on a dropped line home rather than losing them', () => {
+    // Switching shops must never cost the honey already in the air. Tried at a
+    // spread of moments, because the interesting case is a bee caught mid-flight
+    // and the shops are close enough that a fixed delay would usually miss it.
+    for (let delay = 0.2; delay <= 2.4; delay += 0.2) {
+      const field = newDay();
+      const [first, second] = field.buyers;
+      field.honey = field.honeyCap;
+
+      const a = field.createRoute(lineTo(field, first!.x, first!.y));
+      field.aimRouteAt(a!, null, first!);
+      advance(field, delay);
+
+      const b = field.createRoute(lineTo(field, second!.x, second!.y));
+      field.aimRouteAt(b!, null, second!);
+      expect(field.routes).not.toContain(a);
+
+      advance(field, 10);
+
+      // Nobody is left holding a load with no route to fly it on.
+      const stranded = field.bees.filter(
+        (bee) => bee.routeId === 0 && bee.state === 'idle' && bee.carrying > 0,
+      );
+      expect(stranded, `stranded after switching at ${delay.toFixed(1)}s`).toHaveLength(
+        0,
+      );
+
+      // And no honey evaporated. Conservation rather than value, because a
+      // buyer's price can be under 1.00 — money is not a proxy for honey. Every
+      // unit that started in the combs was sold, is still there, or went over
+      // the brim; a bee dropped mid-flight must not be a fourth outcome.
+      const sold = field.events.sold.reduce((sum, sale) => sum + sale.honey, 0);
+      const stillFlying = field.bees.reduce(
+        (sum, bee) => sum + (bee.payload === 'honey' ? bee.carrying : 0),
+        0,
+      );
+      const accounted = sold + field.honey + field.spilled + stillFlying;
+      expect(accounted, `honey lost switching at ${delay.toFixed(1)}s`).toBeGreaterThan(
+        field.honeyCap * 0.99,
+      );
+    }
   });
 
   it('holds bees at the hive rather than flying empty errands', () => {

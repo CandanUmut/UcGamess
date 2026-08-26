@@ -63,6 +63,22 @@ export class Bee {
   s = 0;
   /** Sideways offset from the route centreline. Fixed per bee. */
   lateral = 0;
+  /**
+   * Where this bee is in its own weave, and how long a full weave takes.
+   *
+   * The sideways offset used to be `lateral` alone, which is a constant — so
+   * the swarm flew the route as two dead-straight lanes, beads on a wire. The
+   * offset is now `lateral` plus a sine of **arc distance**, which is the part
+   * that matters: a wave in `s` rather than in time is a shape fixed in
+   * *space*, so a bee traces a serpentine through the world and the stream
+   * reads as a braided ribbon. A wave in time would make every bee wobble
+   * where it stood, which looks like a wire vibrating, not like flight.
+   *
+   * Phase and wavelength vary per bee so the swarm never falls into step —
+   * dozens of bees weaving in unison would read as one thick snake.
+   */
+  wavePhase = 0;
+  waveLength = 90;
   /** Per-bee speed multiplier, so the stream spreads out naturally. */
   speedMul = 1;
   carrying = 0;
@@ -72,7 +88,14 @@ export class Bee {
   wanderPhase = 0;
   wanderSpeed = 1;
 
-  reset(hiveX: number, hiveY: number, lateralSpread: number, jitter: number): void {
+  reset(
+    hiveX: number,
+    hiveY: number,
+    lateralSpread: number,
+    jitter: number,
+    waveLength = 90,
+    waveLengthJitter = 0,
+  ): void {
     const angle = Math.random() * Math.PI * 2;
     const radius = Math.random() * 40;
     this.x = hiveX + Math.cos(angle) * radius;
@@ -92,6 +115,12 @@ export class Bee {
     const sign = Math.random() < 0.5 ? -1 : 1;
     this.lateral = sign * (0.35 + Math.random() * 0.65) * lateralSpread;
     this.speedMul = 1 + (Math.random() * 2 - 1) * jitter;
+
+    this.wavePhase = Math.random() * Math.PI * 2;
+    this.waveLength = Math.max(
+      20,
+      waveLength * (1 + (Math.random() * 2 - 1) * waveLengthJitter),
+    );
 
     this.wanderPhase = Math.random() * Math.PI * 2;
     this.wanderSpeed = 0.6 + Math.random() * 0.8;

@@ -49,6 +49,16 @@ const DEPTH = {
   route: 30,
   fog: 35,
   bee: 40,
+  /**
+   * Numbers drawn on the board: pollen left, a buyer's price, the hive's store.
+   *
+   * Above the fog and above the swarm, both deliberately. These are the figures
+   * the game asks the player to act on, and a count that a passing bee or a
+   * patch of mist can take away is one the player learns not to trust. The
+   * things they label still fade under fog, so the board still reads as
+   * half-known.
+   */
+  boardLabel: 45,
   juice: 50,
   hud: 100,
 } as const;
@@ -74,6 +84,17 @@ const COLLECT_NOTE_GAP = 0.09;
  * this a single sale is a burst of overlapping chinks.
  */
 const SELL_NOTE_GAP = 0.16;
+
+/**
+ * How long between two passing bees, in seconds.
+ *
+ * Wide, and randomised inside the range. A flyby on a fixed cadence stops being
+ * a bee within about three repeats and becomes a metronome — irregularity is
+ * most of what makes an ambient sound read as ambience rather than as a cue.
+ * At a day of 45 to 90 seconds this lands a handful of times a day.
+ */
+const BUZZ_GAP_MIN = 5.5;
+const BUZZ_GAP_MAX = 13;
 
 /** How long a finger must rest on a route to erase it. */
 const ERASE_HOLD_SECONDS = 0.75;
@@ -126,6 +147,8 @@ export class GameScene extends BaseGameplayScene {
   /** Sim time of the last collection note, for the rate limit. */
   private lastCollectNote = -1;
   private lastSellNote = -1;
+  /** Field time of the next passing bee. Rolled forward on every buzz. */
+  private nextBuzzAt = 0;
   private lastSpillNote = -1;
 
   private externallyPaused = false;
@@ -177,7 +200,12 @@ export class GameScene extends BaseGameplayScene {
     this.field = new Field();
     this.field.setStats(deriveStats(this.save.levels));
 
-    this.fieldRenderer = new FieldRenderer(this, this.field, DEPTH.patch);
+    this.fieldRenderer = new FieldRenderer(
+      this,
+      this.field,
+      DEPTH.patch,
+      DEPTH.boardLabel,
+    );
     this.routeRenderer = new RouteRenderer(this, DEPTH.route);
     this.previewGfx = this.add.graphics().setDepth(DEPTH.route + 1);
     this.hintGfx = this.add.graphics().setDepth(DEPTH.route + 2);
@@ -262,6 +290,9 @@ export class GameScene extends BaseGameplayScene {
   private beginDay(extraSeconds = 0): void {
     this.phase = 'playing';
     this.day = this.save.day;
+    // Field time restarts at dawn, so the buzz clock has to as well — without
+    // this the first bee of every day goes past on frame one.
+    this.scheduleBuzz();
 
     const features = featuresForDay(this.day);
     const patchCount = patchesForDay(this.day) + this.save.levels.bloom;
@@ -658,6 +689,13 @@ export class GameScene extends BaseGameplayScene {
       const wind = this.field.windVector;
       this.hud.setWind(wind.x, wind.y, wind.strength);
 
+      // A bee goes past now and then. Only while there is a swarm to hear —
+      // a buzz over an empty board is a sound with nothing making it.
+      if (this.field.time >= this.nextBuzzAt && this.field.bees.length > 0) {
+        this.scheduleBuzz();
+        this.sfx.playVaried('buzz', 0.1, 260);
+      }
+
       this.hud.setPrices(
         this.field.buyers.map((b) => ({
           name: b.tuning.name,
@@ -788,10 +826,32 @@ export class GameScene extends BaseGameplayScene {
     // than as damage: it is not the wasps taking your honey, it is you failing
     // to sell it. Rate-limited to one word a second so a brimming hive nags
     // rather than screams.
+    // A sell line was dropped because the player pointed at the other shop.
+    // Said out loud at the shop that lost the business: a route vanishing on
+    // its own is exactly the kind of thing a player reads as a bug unless the
+    // game tells them it meant to.
+    const dropped = events.droppedBuyer;
+    if (dropped) {
+      // A floating word rather than `showLoss`, which scatters particles: the
+      // player did not lose anything here, they chose somewhere else.
+      this.showGain(dropped.x, dropped.y - 108, `${dropped.name} closed`, '#cfc6ae');
+    }
+
     if (events.spilled > 0 && this.field.time - this.lastSpillNote >= 1) {
       this.lastSpillNote = this.field.time;
       this.showLoss(this.field.hiveX, this.field.hiveY - 40, 'spilling!');
     }
+  }
+
+  /**
+   * Sets when the next bee goes past.
+   *
+   * Rolled forward from the current time rather than accumulated, so a paused
+   * or a fast-forwarded day cannot leave a backlog of buzzes to fire at once.
+   */
+  private scheduleBuzz(): void {
+    this.nextBuzzAt =
+      this.field.time + BUZZ_GAP_MIN + Math.random() * (BUZZ_GAP_MAX - BUZZ_GAP_MIN);
   }
 
   /** A small bright word where the player gained something. */

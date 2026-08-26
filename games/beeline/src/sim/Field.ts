@@ -44,6 +44,17 @@ const HUD_MARGIN = 110;
 const MAZE_INSET = 30;
 
 /**
+ * How far a flower is nudged off its cell centre, as a fraction of the cell.
+ *
+ * Purely so a board does not read as a grid of dots. Named rather than inlined
+ * because the day-one light rule has to subtract this same envelope: checking a
+ * cell *centre* for light and then jittering the flower out of it is how a
+ * teaching day ends up with an invisible flower, which is exactly what
+ * happened.
+ */
+const PATCH_JITTER = 0.14;
+
+/**
  * The swarm a raid can never take you below.
  *
  * Without a floor a long raid on a bad day leaves the hive with nothing to fly
@@ -108,6 +119,8 @@ export interface FieldEvents {
   beesLost: Array<{ x: number; y: number }>;
   /** Nectar shaken loose where the wind crushed a route into a wall. */
   pollenLost: Array<{ x: number; y: number }>;
+  /** A depot the swarm stopped trading with, because the other one was chosen. */
+  droppedBuyer: { x: number; y: number; name: string } | null;
 }
 
 const NO_FEATURES: DayFeatures = {
@@ -201,6 +214,7 @@ export class Field {
     banked: 0,
     beesLost: [],
     pollenLost: [],
+    droppedBuyer: null,
   };
 
   /** Decides when the next raid lands. See sim/Raid.ts. */
@@ -326,6 +340,12 @@ export class Field {
     // that. This is the reverse of the old thorn field, where obstacles were
     // placed relative to flowers that already existed.
     this.maze.generate(Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus));
+    // The hive's front yard, flattened after generation so the spanning tree
+    // has already made every cell reachable and this can only add routes. The
+    // shops stand here; see `TUNING.maze.yard`.
+    const yard = TUNING.maze.yard;
+    this.maze.clearRegion(yard.col0, yard.row0, yard.col1, yard.row1);
+
     this.cellSteps = this.maze.distancesFrom(
       this.maze.colAt(this.hiveX),
       this.maze.rowAt(this.hiveY),
@@ -364,7 +384,14 @@ export class Field {
 
     this.applyStats();
     for (const bee of this.bees) {
-      bee.reset(this.hiveX, this.hiveY, TUNING.bee.lateralSpread, TUNING.bee.speedJitter);
+      bee.reset(
+        this.hiveX,
+        this.hiveY,
+        TUNING.bee.lateralSpread,
+        TUNING.bee.speedJitter,
+        TUNING.bee.weaveLength,
+        TUNING.bee.weaveLengthJitter,
+      );
     }
   }
 
@@ -405,7 +432,14 @@ export class Field {
 
     while (this.bees.length < target) {
       const bee = new Bee();
-      bee.reset(this.hiveX, this.hiveY, TUNING.bee.lateralSpread, TUNING.bee.speedJitter);
+      bee.reset(
+        this.hiveX,
+        this.hiveY,
+        TUNING.bee.lateralSpread,
+        TUNING.bee.speedJitter,
+        TUNING.bee.weaveLength,
+        TUNING.bee.weaveLengthJitter,
+      );
       this.bees.push(bee);
     }
   }
@@ -455,24 +489,26 @@ export class Field {
       block(taken, maze.colAt(patch.x), maze.rowAt(patch.y), 1);
     }
 
-    // The ring around each depot is kept in its own set, and held to a harder
-    // rule than the flower rings above.
+    // The ring around each shop, held to a harder rule than the flower rings
+    // above: it gets its own last-resort tier rather than sharing `taken`.
     //
-    // Same reasoning — a flower's reach ring overlapping a buyer's makes it
-    // genuinely ambiguous which one a drag was aimed at, and the aim assist has
-    // to pick one — but the flower rule is allowed to give way under pressure
-    // and this one is not. `taken` is soft by design: on a crowded board a
-    // flower may land next to another flower rather than not spawn, which is
-    // untidy and costs nothing. Landing next to a *depot* costs the player a
-    // sell line they meant to draw, so it takes its own fallback tier below and
-    // only ever gives way when there is genuinely nowhere else on the board.
+    // A flower's reach ring overlapping a shop's makes it genuinely ambiguous
+    // which one a drag was aimed at, and the aim assist has to pick one. The
+    // flower rule is allowed to give way under pressure — landing next to
+    // another flower is untidy and costs nothing — while landing next to a shop
+    // costs the player the sell line they meant to draw.
     //
-    // None of this came up while the depots sat on the far edge, where nothing
-    // ever spawned within reach of one.
-    const nearBuyer = new Set<number>();
+    // Ringing the *shops* rather than the whole yard, which is what this
+    // started as. The yard is three cells and its ring is fifteen, most of them
+    // the near cells day one has to put its flowers in; excluding all of them
+    // left the opening board with nowhere lit to spawn. The yard cells
+    // themselves are excluded outright below, which is the part that actually
+    // keeps the road clear.
+    const nearShop = new Set<number>();
     for (const buyer of this.buyers) {
-      block(nearBuyer, maze.colAt(buyer.x), maze.rowAt(buyer.y), 1);
+      block(nearShop, maze.colAt(buyer.x), maze.rowAt(buyer.y), 1);
     }
+    const yard = TUNING.maze.yard;
     // Only the hive's own cell, not its neighbours. Day one's flowers are
     // deliberately one corridor out so they sit inside the hive's light, and
     // blocking the ring around the hive would push them straight back out of
@@ -482,10 +518,19 @@ export class Field {
     // Spaced and in band; then spaced at any distance; then merely not on top
     // of something. Giving up entirely is never an option — a day short of a
     // flower is recoverable, a flower in the hive is not.
+    // The light rule is checked against the cell centre, but the flower ends up
+    // `PATCH_JITTER` of a cell away from it, so the usable radius is that much
+    // smaller. Without this margin a cell that only just clears the threshold
+    // can put its flower just outside.
+    const jitterReach = Math.hypot(
+      maze.cellWidth * PATCH_JITTER,
+      maze.cellHeight * PATCH_JITTER,
+    );
+    const lightRadius = hiveDiscoveryRadius() - jitterReach;
     const inBand: number[] = [];
     const spaced: number[] = [];
     const anywhere: number[] = [];
-    /** Last resort: next door to a depot, but on the board and not on anything. */
+    /** Last resort: beside a shop, but on the board and not on anything. */
     const crowded: number[] = [];
 
     for (let index = 0; index < this.cellSteps.length; index += 1) {
@@ -494,18 +539,37 @@ export class Field {
 
       const col = index % maze.cols;
       const row = Math.floor(index / maze.cols);
-      // Never, at any fallback tier: a flower sharing a cell with the hive or
-      // with a depot is unaimable, and `anywhere` exists to stop a day being
-      // short of a flower, not to put one somewhere it cannot be used.
+      // Never, at any fallback tier: a flower sharing a cell with the hive, or
+      // standing anywhere in the yard, is either unaimable or in the way of the
+      // one journey that has to stay quick. `anywhere` exists to stop a day
+      // being short of a flower, not to put one somewhere it cannot be used.
       const onTop =
         this.patches.some(
           (p) => p.alive && maze.colAt(p.x) === col && maze.rowAt(p.y) === row,
         ) ||
         (col === hiveCol && row === hiveRow) ||
-        this.buyers.some((b) => maze.colAt(b.x) === col && maze.rowAt(b.y) === row);
+        (col >= yard.col0 && col <= yard.col1 && row >= yard.row0 && row <= yard.row1);
       if (onTop) continue;
 
-      if (nearBuyer.has(index)) {
+      // On the teaching days every flower must start lit, or the hint line has
+      // nothing to point at and a first-time player opens to a board with
+      // nothing on it.
+      //
+      // This is a hard filter rather than a condition on the in-band tier,
+      // which is where it used to live. As a tier condition it only held while
+      // that tier had something in it: the moment the board got tight enough to
+      // fall through to `spaced`, the light rule silently stopped applying and
+      // day one could spawn in the dark. Tightening the board is exactly what
+      // opening the yard did, and a test caught it. A guarantee that lapses
+      // under pressure is not a guarantee.
+      if (this.day < TUNING.maze.startDay) {
+        const centre = maze.centreOf(col, row);
+        if (Math.hypot(centre.x - this.hiveX, centre.y - this.hiveY) > lightRadius) {
+          continue;
+        }
+      }
+
+      if (nearShop.has(index)) {
         crowded.push(index);
         continue;
       }
@@ -514,16 +578,6 @@ export class Field {
       if (taken.has(index)) continue;
       spaced.push(index);
       if (steps < reach.min || steps > reach.max) continue;
-
-      // On the teaching days every flower must start lit, or the hint line has
-      // nothing to point at and a first-time player gets a black screen. Making
-      // it a placement rule rather than a happy consequence of the numbers is
-      // the difference between a guarantee and a coincidence.
-      if (this.day < TUNING.maze.startDay) {
-        const centre = maze.centreOf(col, row);
-        const reachable = Math.hypot(centre.x - this.hiveX, centre.y - this.hiveY);
-        if (reachable > hiveDiscoveryRadius()) continue;
-      }
 
       inBand.push(index);
     }
@@ -543,8 +597,8 @@ export class Field {
     const row = Math.floor(index / maze.cols);
     const centre = maze.centreOf(col, row);
 
-    const jitterX = (Math.random() * 2 - 1) * maze.cellWidth * 0.14;
-    const jitterY = (Math.random() * 2 - 1) * maze.cellHeight * 0.14;
+    const jitterX = (Math.random() * 2 - 1) * maze.cellWidth * PATCH_JITTER;
+    const jitterY = (Math.random() * 2 - 1) * maze.cellHeight * PATCH_JITTER;
 
     // The maze is inset far enough that a cell centre always has room for the
     // whole reach ring, so this only has to catch the jitter.
@@ -841,6 +895,7 @@ export class Field {
       route.targetWasp = null;
       route.target = null;
       route.guard = false;
+      this.tradeExclusively(buyer, route);
       return;
     }
     if (!wasp || !wasp.alive) return;
@@ -848,6 +903,49 @@ export class Field {
     route.targetWasp = wasp;
     route.target = null;
     route.guard = true;
+  }
+
+  /**
+   * The swarm trades with one buyer at a time.
+   *
+   * Pointing a line at a depot drops every line still pointing at the other
+   * one. Two reasons, and the second is the one that matters.
+   *
+   * The small one: it was busywork. Switching buyers meant drawing the new line
+   * and then hunting down the old one to erase it by hand, every single time,
+   * for a decision the player had already plainly made.
+   *
+   * The real one: **an unattended sell line quietly undoes the choice.** The
+   * whole point of two buyers is picking a moment — this price, now, over that
+   * one. A line left standing at the old depot goes on selling into it at
+   * whatever the price happens to be, so the honey the player meant to hold for
+   * a peak leaks away at a trough while they are looking somewhere else. The
+   * result is that neither line is a decision and the market reads as noise.
+   *
+   * Lines to the *same* depot are untouched: several roads into one buyer is a
+   * legitimate way to move a full hive quickly, and it is still one choice.
+   *
+   * Bees on a dropped line come home rather than vanishing, so a switch never
+   * costs the honey already in the air — see `killRoute`.
+   */
+  private tradeExclusively(chosen: Buyer, except: Route): void {
+    let dropped: Buyer | null = null;
+
+    for (const route of [...this.routes]) {
+      if (route === except || route.dead) continue;
+      const other = route.targetBuyer;
+      if (!other || other === chosen) continue;
+      dropped = other;
+      this.killRoute(route);
+    }
+
+    if (dropped) {
+      this.events.droppedBuyer = {
+        x: dropped.x,
+        y: dropped.y,
+        name: dropped.tuning.name,
+      };
+    }
   }
 
   retarget(route: Route): void {
@@ -1736,8 +1834,16 @@ export class Field {
           1,
           Math.min(bee.s, Math.max(route.liveLength - bee.s, 0)) / 60,
         );
-        const targetX = scratch.x - scratch.ty * bee.lateral * endFade;
-        const targetY = scratch.y + scratch.tx * bee.lateral * endFade;
+        // The weave, as a sine of arc distance rather than of time. That is
+        // what makes it a shape in the world: the bee traces a serpentine
+        // along the road, instead of vibrating in place as a wave in `t`
+        // would. See the note on `Bee.wavePhase`.
+        const weave =
+          Math.sin((bee.s / bee.waveLength) * Math.PI * 2 + bee.wavePhase) *
+          TUNING.bee.weaveAmplitude;
+        const offset = (bee.lateral + weave) * endFade;
+        const targetX = scratch.x - scratch.ty * offset;
+        const targetY = scratch.y + scratch.tx * offset;
 
         this.easeToward(bee, targetX, targetY);
         return;
@@ -1878,6 +1984,7 @@ export class Field {
       banked: 0,
       beesLost: [],
       pollenLost: [],
+      droppedBuyer: null,
     };
     return out;
   }

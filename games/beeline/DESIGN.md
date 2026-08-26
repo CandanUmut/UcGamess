@@ -1758,6 +1758,9 @@ and what each line of it turned out to be.
 
 ### The depots came home
 
+(§31 takes this further: both now stand in an open yard at the bottom-left, and
+the drawings that arrived with it renamed them.)
+
 They were planted on the far side of the board, on the stated theory that
 "selling is always a real journey through the maze rather than a formality".
 That theory was wrong, and it was wrong in a way worth writing down: **selling
@@ -1873,6 +1876,153 @@ underneath gives the coin weight instead of leaving it thin and glassy; and the
 whole thing is under a third of a second. It plays on the pentatonic scale and
 at most six times a second, so a delivery stream is an arpeggio rather than a
 rattle.
+
+## 31. A town at the bottom of the board
+
+Section 30 brought the two shops in from the far edge. This is the second half
+of that move, and it turned out to be a bigger idea than "put them nearer".
+
+### Home ground is open; the frontier is a maze
+
+The shops now stand in a **yard**: a three-cell strip along the bottom-left,
+cleared of walls every single day, with the hive at its head. Both shops stand
+in it, one at each end, and the middle cell is left as the hive's doorstep.
+
+The reasoning is the same one that moved them in the first place, followed one
+step further. Selling is the pressure _inside_ the loop, and a hedge between the
+hive and a shop it has to reach in the next few seconds turns an emergency into
+a puzzle — at exactly the moment the player has no attention to spare for one.
+Foraging is where the maze earns its keep, and foraging happens everywhere else.
+
+It also gives the board a shape it did not have. There is a _town_ down here —
+hive, two shops, open ground between them — and a wilderness beyond it, instead
+of one undifferentiated grid with some buildings scattered through it.
+
+The yard is cleared **after** generation, never during it. The spanning tree has
+already made every cell reachable by then, so removing walls can only ever add
+routes and never strand a flower. That ordering is the whole safety argument.
+Its outer walls go too: a cleared rectangle that kept its rim would be a _room_,
+and a room with the hive in the doorway is a bottleneck.
+
+### Which broke the teaching day, and exposed an older bug
+
+Excluding the yard from flower placement made the near board tight enough that
+day one started spawning flowers in the dark — the tutorial pointing at nothing.
+
+Two separate faults, both worth recording.
+
+**The light rule was a tier condition, not a rule.** "Every day-one flower must
+spawn inside the hive's light" was checked only in the in-band tier of the
+placement fallback. The moment the board got tight enough to fall through to the
+next tier, the guarantee silently stopped applying. It had held for months
+because nothing had ever made the board that tight. It is now a hard filter
+alongside "not in the hive's cell". _A guarantee that lapses under pressure is
+not a guarantee_ — it is a guarantee that only fails on the days that matter.
+
+**The light rule measured the wrong point.** It checked a cell's _centre_, and
+then the flower was jittered up to 14% of a cell away from that centre to stop
+the board reading as a grid of dots. A cell that only just cleared the threshold
+could put its flower just outside it. The usable radius now has that jitter
+envelope subtracted from it, off the same constant that applies it.
+
+The first fault hid the second: with the check confined to a tier that rarely
+mattered, the off-by-a-jitter never had the chance to show.
+
+### The shops are the studio's own, and the fiction followed
+
+Two hand-drawn honey pots — magenta **Money Inc.** and cyan **Honey Inc.** —
+replace the drawn depots. The buyers were "The Market" and "The Apothecary"
+until the drawings arrived; the art named them, rather than the other way round.
+Each shop's colour is read off its drawing into tuning, so the building, its
+price tag and its HUD row are visibly one thing.
+
+Both are quantised to a 64-colour palette: 99 KB down to 13 KB with no visible
+change. Worth doing for these and nothing else on the board — flat blocks of
+colour with hard outlines are the one thing a small palette reproduces exactly.
+
+The price sits above each shop as a **Turmoil-style tag**: a dark board with a
+border in the shop's colour, on a short post. The post is doing more work than
+it looks like it is — without it the tag floats, and two floating numbers over
+two buildings are ambiguous about which belongs to which as soon as the shops
+are close together. Which, in the yard, they are. The better offer gets a
+brighter border and a fractionally taller building, so the comparison lands
+before the digits are read.
+
+### One shop at a time
+
+Pointing a line at a shop now drops every line still pointing at the other one.
+
+The small reason is that it was busywork: switching meant drawing the new line
+and then hunting down the old one to erase by hand, every time, for a decision
+already plainly made.
+
+The real reason is that **an unattended sell line quietly undoes the choice.**
+The whole point of two buyers is picking a moment — this price, now, over that
+one. A line left standing at the old shop goes on selling into it at whatever
+the price happens to be, so honey meant for a peak leaks away at a trough while
+the player is looking elsewhere, and neither line is a decision any more.
+
+Lines to the _same_ shop are untouched: several roads into one buyer is a
+legitimate way to move a full hive quickly, and it is still one choice. Bees on
+a dropped line come home rather than vanishing, and the shop that lost the
+business says so out loud — a route disappearing on its own reads as a bug
+unless the game admits it meant to.
+
+### The numbers stopped hiding
+
+Two readouts on the board were light text with a _pale_ halo, which is legible
+against grass and against nothing else: over a hedge, a poppy or a shop roof
+they simply vanished. Both now sit on a dark translucent plate. A stroke can
+only ever fight the background it was tuned for; a plate replaces it.
+
+The buyer price had a second, sharper fault. It shared a depth with the wall
+bars, and the bars are pooled lazily — so a bar created on a later frame than
+the label rendered _over_ it. That is why a price was readable sometimes and not
+others, which is the worst version of the bug to have.
+
+Both readouts, and the hive's store, now live on their own depth above the fog
+and above the swarm. Above the mist is a judgement rather than a fix: fog's job
+is to hide where things are, and once something is found, the number attached to
+it is what the game is asking the player to act on. The flowers themselves still
+fade, so the board still reads as half-known.
+
+### Bees fly like bees
+
+The sideways offset that spreads the swarm across a route was a per-bee
+constant, so a road was flown as two dead-straight lanes — beads on a wire. It
+is now that constant plus a sine of **arc distance**.
+
+Arc distance, not time, is the whole trick. A wave in `s` is a shape fixed in
+space: the bee traces a serpentine along the road, and the stream reads as a
+braided ribbon. A wave in `t` would make each bee wobble where it stood, which
+looks like a vibrating wire rather than like flight. Phase and wavelength vary
+per bee so the swarm never falls into step.
+
+The lane width came down as the weave went in, so the total envelope is about
+what it was. The cap is set by the corridors, not by taste: a cell is 116 deep
+and a hedge eats 20 of it, so a bee much more than 25 off a centreline running
+beside a wall would be _drawn_ inside the hedge. It would not collide — bees
+never do — but it would look like it should.
+
+### And one goes past now and then
+
+A passing-bee buzz, every 5 to 13 seconds. The hive hum is always there and says
+_this place is alive_; this says _something just flew by_, which is a different
+job and why it is a second sound rather than a louder first one.
+
+It is deliberately built as the wasp buzz's opposite number, because those two
+must never be confused — one is ambience, the other is a threat. The wasp is
+harsh and low, wobbles hard, and has two partials four hertz apart; that
+near-unison pair **beats**, and beating is what the ear reads as menace. This
+one wobbles half as much, sits a little higher, and puts its partials a clean
+octave apart. Same shape, no beating, and it comes out pleasant. It also eases
+down in pitch across the pass, which is what a flyby does and what stops it
+sounding like a held note.
+
+The interval is randomised inside its range, because a flyby on a fixed cadence
+stops being a bee within about three repeats and becomes a metronome.
+
+---
 
 ## 25. Success criteria
 
