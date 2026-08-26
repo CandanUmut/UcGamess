@@ -2,7 +2,7 @@ import { COLORS, TUNING } from '../config/tuning.ts';
 import { Bee } from './Bee.ts';
 import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
-import { Wasp } from './Wasp.ts';
+import { Wasp, type WaspKind } from './Wasp.ts';
 import { RaidClock } from './Raid.ts';
 import { Maze } from './Maze.ts';
 import { slideAlongWalls, type WallSlide } from './deflect.ts';
@@ -14,7 +14,7 @@ import {
   type SamplePoint,
 } from './polyline.ts';
 import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
-import type { DayFeatures } from '../game/DayCycle.ts';
+import { dayQuota, type DayFeatures } from '../game/DayCycle.ts';
 import { noModifiers, type RunModifiers } from '../game/Items.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -95,6 +95,8 @@ export interface FieldEvents {
   waspDown: Array<{ x: number; y: number }>;
   /** Honey taken by raiders this step. */
   stolen: number;
+  /** Wasps that arrived on the board this step. */
+  raidLanded: number;
   /** Bees driven out of the swarm for the day. */
   beesLost: Array<{ x: number; y: number }>;
   /** Nectar shaken loose where the wind crushed a route into a wall. */
@@ -104,6 +106,7 @@ export interface FieldEvents {
 const NO_FEATURES: DayFeatures = {
   wind: false,
   raidSize: 0,
+  wave: [],
   mazeOpenness: 1,
   richPatches: false,
   nightBloom: false,
@@ -171,6 +174,7 @@ export class Field {
     struck: [],
     waspDown: [],
     stolen: 0,
+    raidLanded: 0,
     beesLost: [],
     pollenLost: [],
   };
@@ -187,6 +191,8 @@ export class Field {
    * already a real blow.
    */
   beesLost = 0;
+  /** Wasps brought down today, for the HUD and the end-of-day report. */
+  waspsDowned = 0;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
   /** Counts down to the next blow the hive's guards land. */
@@ -255,6 +261,7 @@ export class Field {
     this.patches = [];
     this.wasps = [];
     this.beesLost = 0;
+    this.waspsDowned = 0;
     this.raidEntry = null;
     this.raid.begin(features.raidSize, modifiers.extraWarningSeconds);
 
@@ -736,6 +743,7 @@ export class Field {
     if (!wasp || !wasp.alive) return;
     route.targetWasp = wasp;
     route.target = null;
+    route.guard = true;
   }
 
   retarget(route: Route): void {
@@ -748,6 +756,7 @@ export class Field {
     if (wasp) {
       route.targetWasp = wasp;
       route.target = null;
+      route.guard = true;
       return;
     }
 
@@ -1025,14 +1034,18 @@ export class Field {
     const entry = this.raidEntry ?? this.pickRaidEntry();
     this.raidEntry = null;
 
-    for (let i = 0; i < Math.max(1, this.raid.size); i += 1) {
+    const wave: WaspKind[] =
+      this.features.wave.length > 0 ? this.features.wave : ['raider'];
+
+    for (const kind of wave) {
       // Spread inside the entry corridor, never outside it: a wasp nudged
       // through a wall would start on the wrong side of the maze it is
       // supposed to have to cross.
-      const spreadX = (Math.random() - 0.5) * this.maze.cellWidth * 0.5;
-      const spreadY = (Math.random() - 0.5) * this.maze.cellHeight * 0.5;
-      this.wasps.push(new Wasp(entry.x + spreadX, entry.y + spreadY));
+      const spreadX = (Math.random() - 0.5) * this.maze.cellWidth * 0.6;
+      const spreadY = (Math.random() - 0.5) * this.maze.cellHeight * 0.6;
+      this.wasps.push(new Wasp(entry.x + spreadX, entry.y + spreadY, kind));
     }
+    this.events.raidLanded += wave.length;
   }
 
   private stepWasp(wasp: Wasp, dt: number): void {
@@ -1053,9 +1066,12 @@ export class Field {
       case 'raiding': {
         wasp.hover(this.hiveX, this.hiveY, dt);
 
+        // Against the day's quota, not a flat rate. A fixed number of honey a
+        // second was six percent of a day-ten quota and literal noise by day
+        // fifteen, which is why letting one in felt like nothing happened.
         const take = Math.min(
           this.honey,
-          TUNING.wasp.stealPerSecond * this.modifiers.stealResist * dt,
+          wasp.stealRate(dayQuota(this.day)) * this.modifiers.stealResist * dt,
         );
         this.honey -= take;
         this.events.stolen += take;
@@ -1127,13 +1143,27 @@ export class Field {
     const bee = this.bees[index];
     if (!bee) return;
 
+    this.dropBee(bee);
+    this.events.beesLost.push({ x: bee.x, y: bee.y });
+  }
+
+  /**
+   * Removes one specific bee from the day's swarm.
+   *
+   * Split out from `loseBee` because retaliation has to take *the bee that
+   * threw the punch*, not whichever one happened to be idle — the cost of a
+   * fight has to land on the fight.
+   */
+  private dropBee(bee: Bee): void {
+    const index = this.bees.indexOf(bee);
+    if (index < 0) return;
+
     if (bee.routeId !== 0) {
       const route = this.routeById(bee.routeId);
       if (route) route.beeCount -= 1;
     }
     this.bees.splice(index, 1);
     this.beesLost += 1;
-    this.events.beesLost.push({ x: bee.x, y: bee.y });
   }
 
   /** The nearest wasp worth pointing a route at. */
@@ -1303,32 +1333,47 @@ export class Field {
       (route?.speedMultiplier ?? 1) *
       (1 + this.modifiers.beeSpeedBonus);
 
-    // A bee flying a route aimed at a wasp strikes it the moment it gets
-    // close, anywhere along the line.
+    // A bee on a guard line strikes any wasp that comes within reach of it,
+    // anywhere along the line.
     //
-    // Not at the tip. Wasps move — usually straight at the hive — so a rule
-    // that only fired where the player's finger stopped would mean the defence
-    // worked only against a target that stood still, which is the one thing a
-    // raider never does. Drawing a line *across a wasp's path* is the gesture,
-    // and interception is what makes it read as one.
-    const foe = route?.targetWasp;
+    // Two deliberate choices, and both are where the skill lives. **Anywhere
+    // along the line**, because wasps move — a rule that only fired at the
+    // tip would work solely against a target that stood still, which a raider
+    // never is. **Any wasp, not only the one aimed at**, because a wave comes
+    // down the corridors the maze leaves open: a line laid across the corridor
+    // they must use is worth several laid on top of individual wasps, and
+    // reading the board for that corridor is a decision made under a clock.
     if (
-      foe &&
-      foe.alive &&
-      foe.state !== 'fleeing' &&
-      (bee.state === 'outbound' || bee.state === 'building' || bee.state === 'hunting') &&
-      Math.hypot(bee.x - foe.x, bee.y - foe.y) <= TUNING.wasp.reachRadius
+      route?.guard &&
+      (bee.state === 'outbound' || bee.state === 'building' || bee.state === 'hunting')
     ) {
-      // One bee, one hit, and it goes home. It does not linger to fight: a
-      // swarm pinned in a brawl is a swarm the player can no longer redirect,
-      // and the whole cost of defending is meant to be the trips not taken.
-      const downed = foe.hit(TUNING.wasp.beeDamage + this.modifiers.beeDamageBonus);
-      this.events.struck.push({ x: foe.x, y: foe.y });
-      if (downed) this.events.waspDown.push({ x: foe.x, y: foe.y });
-      this.releaseBee(bee);
-      bee.carrying = 0;
-      bee.state = 'homing';
-      return;
+      const foe = this.nearestWaspTo(bee.x, bee.y, TUNING.wasp.reachRadius);
+      if (foe) {
+        const downed = foe.hit(TUNING.wasp.beeDamage + this.modifiers.beeDamageBonus);
+        this.events.struck.push({ x: foe.x, y: foe.y });
+        if (downed) {
+          this.events.waspDown.push({ x: foe.x, y: foe.y });
+          this.waspsDowned += 1;
+        }
+
+        // And the wasp hits back. This is the trade the whole system was
+        // missing: striking used to be free, so a defence was a button rather
+        // than a decision. A drone is nearly free to swat; a hornet takes more
+        // than half the bees that touch it, which is what makes "cover the
+        // door and let that one through" a real option.
+        if (foe.strikesBack() && this.bees.length > MIN_SWARM) {
+          this.dropBee(bee);
+          this.events.beesLost.push({ x: bee.x, y: bee.y });
+          return;
+        }
+
+        // Survived it, and goes home rather than lingering. A swarm pinned in
+        // a brawl is a swarm the player can no longer redirect.
+        this.releaseBee(bee);
+        bee.carrying = 0;
+        bee.state = 'homing';
+        return;
+      }
     }
 
     // Wasps only threaten bees that are actually out in the field.
@@ -1601,6 +1646,7 @@ export class Field {
       struck: [],
       waspDown: [],
       stolen: 0,
+      raidLanded: 0,
       beesLost: [],
       pollenLost: [],
     };
