@@ -111,15 +111,6 @@ export interface RouteTuning {
   strengthKeptOnRedraw: number;
   /** Seconds at full length before the far end starts retreating. */
   holdSeconds: number;
-  /**
-   * How long a route stays "pinched" after the wind presses it into a wall.
-   *
-   * Longer than a fixed step so the hazard is something a player can see and
-   * react to rather than a coin flip resolved between frames.
-   */
-  pinchSeconds: number;
-  /** How near the pinch a laden bee has to pass to lose its load. */
-  pinchRadius: number;
   /** Retreat speed in px/s once decay begins. */
   decaySpeed: number;
   /** Below this live length the route dies. */
@@ -257,6 +248,18 @@ export interface WaspTuning {
   guardInterval: number;
   /** How long a bee will chase a wasp off the road before giving up. */
   huntSeconds: number;
+  /** Quiet seconds before a guard line stands down on its own. */
+  standDownSeconds: number;
+  /**
+   * Most of the swarm a single wave may ever take, as a fraction.
+   *
+   * The cap exists because the per-wasp numbers were sized against *one* wasp
+   * and then the wave was made eight of them. Measured over a run, raids were
+   * taking twenty-five to thirty-five bees a day against a swarm of thirty —
+   * the entire hive, every day, which is why the later days produced no more
+   * money than the early ones. A wave should be a bite, not a wipe.
+   */
+  maxSwarmLossPerRaid: number;
   /** How near a drag has to end for it to count as aimed at a wasp. */
   aimRadius: number;
 }
@@ -524,13 +527,6 @@ export const TUNING: Tuning = {
     strengthSpeedBonus: 0.35,
     strengthKeptOnRedraw: 0.5,
     holdSeconds: 12.0,
-    // What finally gives the wind teeth. A route the player drew is always
-    // clear of the walls; only the wind can press a live one into a hedge, and
-    // while it is pressed the bees crossing that point lose what they carry.
-    // So the punishment lands on neglect, never on an imprecise thumb — which
-    // is the distinction the whole maze design rests on.
-    pinchSeconds: 0.8,
-    pinchRadius: 30,
     decaySpeed: 26,
     minLength: 40,
     refreshSnapRadius: 160,
@@ -614,16 +610,21 @@ export const TUNING: Tuning = {
     //
     // Days one to seven are untouched. That is where a new player decides
     // whether to keep going, and none of this problem lives there.
-    // In money now, not honey.
+    // Rebuilt from measurement rather than from the old honey figures.
     //
-    // Derived rather than guessed, but **not yet playtested** — see DESIGN.md
-    // §29. A scripted seller converts 55-70% of the honey it gathers at an
-    // effective 1.3 money per unit, so money lands at roughly 0.78x what the
-    // same board used to yield in honey. These are the old honey figures at
-    // two thirds, which leaves a competent day comfortably clear and a sloppy
-    // one short. The first real run is what settles it.
-    quotas: [40, 75, 300, 460, 570, 700, 860, 1030, 1200, 1420, 1650, 1920],
-    quotaGrowthAfterTable: 1.18,
+    // The previous table asked for 3,722 on day sixteen against a swarm that
+    // measurably earns about 600, so every run died on day seven and stayed
+    // dead — which is most of why the game did not make anyone want another
+    // one. A scripted player that gathers, sells and **never defends** now
+    // sits just under the line from day seven and comfortably over it before
+    // that, so ignoring the wasps is survivable early and fatal later, and
+    // answering them is what buys the rest of the run.
+    //
+    // Growth after the table is 5% a day, not 18%. Throughput grows with the
+    // swarm and the swarm grows linearly; a compounding quota against linear
+    // production has exactly one outcome and it is the one we had.
+    quotas: [70, 140, 240, 340, 430, 520, 580, 640, 700, 760, 820, 880],
+    quotaGrowthAfterTable: 1.05,
   },
 
   // Shifted a day later than the original schedule to make room for brambles on
@@ -675,8 +676,8 @@ export const TUNING: Tuning = {
         speed: 95,
         health: 3,
         stealShare: 0.05,
-        beeLossInterval: 3.2,
-        retaliation: 0.3,
+        beeLossInterval: 5.5,
+        retaliation: 0.12,
         scale: 1,
         tint: 0xffffff,
         name: 'raiders',
@@ -693,8 +694,8 @@ export const TUNING: Tuning = {
         speed: 165,
         health: 2,
         stealShare: 0.02,
-        beeLossInterval: 1.5,
-        retaliation: 0.18,
+        beeLossInterval: 3.0,
+        retaliation: 0.06,
         scale: 0.78,
         tint: 0xbfe06a,
         name: 'drones',
@@ -711,8 +712,8 @@ export const TUNING: Tuning = {
         speed: 68,
         health: 7,
         stealShare: 0.1,
-        beeLossInterval: 4.5,
-        retaliation: 0.55,
+        beeLossInterval: 7.0,
+        retaliation: 0.28,
         scale: 1.4,
         tint: 0xff8a5c,
         name: 'hornets',
@@ -736,6 +737,12 @@ export const TUNING: Tuning = {
     // target — and a hard stop on one that did not, so a bad drag costs a trip
     // rather than removing a bee from the day.
     huntSeconds: 4,
+    // Long enough to cover the gaps inside a wave — wasps arrive in ones and
+    // twos, and standing down on the first quiet frame would dissolve the line
+    // mid-fight — and short enough that the slot is back before the player has
+    // finished noticing they won.
+    standDownSeconds: 2.5,
+    maxSwarmLossPerRaid: 0.16,
     // Wider than the flower assist, because a wasp is a moving target. A drag
     // aimed squarely at one still ends well behind it: the wasp covers most of
     // a corridor in the second the gesture takes.
