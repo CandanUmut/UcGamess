@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Tutorial } from './Tutorial.ts';
 
-const nothing = { routesDrawn: 0, honey: 0, anyRouteRetreating: false };
+const nothing = { routesDrawn: 0, honey: 0, money: 0, anyRouteRetreating: false };
 
 describe('tutorial', () => {
   it('does not exist for a returning player', () => {
@@ -28,21 +28,39 @@ describe('tutorial', () => {
     expect(tutorial.current?.id).toBe('watch');
   });
 
-  it('walks through drawing, earning and refreshing, then gets out of the way', () => {
+  it('walks the whole loop — draw, gather, sell, refresh — then gets out of the way', () => {
     const tutorial = new Tutorial(true);
 
-    tutorial.update({ routesDrawn: 1, honey: 0, anyRouteRetreating: false });
+    tutorial.update({ ...nothing, routesDrawn: 1 });
     expect(tutorial.current?.id).toBe('watch');
 
-    tutorial.update({ routesDrawn: 1, honey: 12, anyRouteRetreating: false });
+    tutorial.update({ ...nothing, routesDrawn: 1, honey: 12 });
+    expect(tutorial.current?.id).toBe('sell');
+
+    // Honey in the combs is not the lesson: money is. The step waits for a
+    // sale, because a player who never sells never sees the loop close.
+    tutorial.update({ ...nothing, routesDrawn: 2, honey: 40 });
+    expect(tutorial.current?.id).toBe('sell');
+
+    tutorial.update({ ...nothing, routesDrawn: 2, honey: 20, money: 18 });
     expect(tutorial.current?.id).toBe('refresh');
 
     // Decay starting is not enough on its own — the step is asking the player
     // to draw again, so it must not clear itself before they have.
-    tutorial.update({ routesDrawn: 1, honey: 40, anyRouteRetreating: true });
+    tutorial.update({
+      routesDrawn: 2,
+      honey: 40,
+      money: 18,
+      anyRouteRetreating: true,
+    });
     expect(tutorial.current?.id).toBe('refresh');
 
-    tutorial.update({ routesDrawn: 2, honey: 40, anyRouteRetreating: true });
+    tutorial.update({
+      routesDrawn: 3,
+      honey: 40,
+      money: 18,
+      anyRouteRetreating: true,
+    });
     expect(tutorial.current).toBeNull();
     expect(tutorial.finished).toBe(true);
   });

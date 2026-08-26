@@ -3,6 +3,7 @@ import { Bee } from './Bee.ts';
 import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp, type WaspKind } from './Wasp.ts';
+import { Buyer, type BuyerId } from './Buyer.ts';
 import { RaidClock } from './Raid.ts';
 import { Maze } from './Maze.ts';
 import { slideAlongWalls, type WallSlide } from './deflect.ts';
@@ -97,6 +98,12 @@ export interface FieldEvents {
   stolen: number;
   /** Wasps that arrived on the board this step. */
   raidLanded: number;
+  /** Honey lost over the brim this step. */
+  spilled: number;
+  /** Sales completed this step, for the coin burst and the sound. */
+  sold: Array<{ x: number; y: number; honey: number; money: number; buyer: BuyerId }>;
+  /** Money actually banked at the hive this step. */
+  banked: number;
   /** Bees driven out of the swarm for the day. */
   beesLost: Array<{ x: number; y: number }>;
   /** Nectar shaken loose where the wind crushed a route into a wall. */
@@ -151,7 +158,21 @@ export class Field {
   /** What the player has seen of the board today. */
   readonly fog = new Fog(WORLD_WIDTH, WORLD_HEIGHT);
 
+  /** Honey sitting in the hive, waiting to be sold. Capped — see `honeyCap`. */
   honey = 0;
+  /** Money banked today. The thing a day is now judged on. */
+  money = 0;
+  /**
+   * The two buyers, fixed on the far side of the board.
+   *
+   * Built once and re-seeded each dawn rather than rebuilt, so a buyer's
+   * identity — where it is, what it pays on average — is something a player
+   * learns across a whole run.
+   */
+  readonly buyers: Buyer[] = [
+    new Buyer('market', TUNING.buyers.market.x, TUNING.buyers.market.y),
+    new Buyer('apothecary', TUNING.buyers.apothecary.x, TUNING.buyers.apothecary.y),
+  ];
   /** Debug affordance: freeze route decay to feel the contrast. */
   decayEnabled = true;
 
@@ -175,6 +196,9 @@ export class Field {
     waspDown: [],
     stolen: 0,
     raidLanded: 0,
+    spilled: 0,
+    sold: [],
+    banked: 0,
     beesLost: [],
     pollenLost: [],
   };
@@ -193,6 +217,8 @@ export class Field {
   beesLost = 0;
   /** Wasps brought down today, for the HUD and the end-of-day report. */
   waspsDowned = 0;
+  /** Honey lost over the brim today. The number that shames you into selling. */
+  spilled = 0;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
   /** Counts down to the next blow the hive's guards land. */
@@ -211,6 +237,29 @@ export class Field {
 
   get time(): number {
     return this.elapsed;
+  }
+
+  /**
+   * How much honey the hive can hold.
+   *
+   * Small on purpose, and now actually enforced. A hive that could hold a whole
+   * day's gathering would let a player forage all morning and sell once at
+   * dusk, which is two chores rather than a loop. At this size the hive fills
+   * in well under a minute of good foraging, so the question "sell now, or hold
+   * for a better price" is live almost continuously.
+   */
+  get honeyCap(): number {
+    return this.stats.honeyCap;
+  }
+
+  /** 0..1, for the gauge. */
+  get honeyFullness(): number {
+    return this.honeyCap > 0 ? Math.min(1, this.honey / this.honeyCap) : 0;
+  }
+
+  /** True once the hive is brimming and deliveries are being lost. */
+  get isSpilling(): boolean {
+    return this.honey >= this.honeyCap - 1e-6;
   }
 
   get routeHoldSeconds(): number {
@@ -254,6 +303,9 @@ export class Field {
     this.modifiers = modifiers;
     this.swarmBoost = boost;
     this.honey = 0;
+    this.money = 0;
+    this.spilled = 0;
+    for (const buyer of this.buyers) buyer.beginDay();
     this.elapsed = 0;
     this.day = day;
 
@@ -298,6 +350,13 @@ export class Field {
     // more. Day one's flowers spawn inside the hive's light, so the first
     // thirty seconds are exactly what they were before fog existed.
     this.fog.reveal(this.hiveX, this.hiveY, TUNING.hive.sightRadius);
+    // The buyers are landmarks, not discoveries. A player who cannot see where
+    // to sell cannot play the loop at all, so their ground is lit at dawn and
+    // stays lit — the dark is there to hide what is *worth finding*, and a
+    // building that has been there the whole run is not that.
+    for (const buyer of this.buyers) {
+      this.fog.reveal(buyer.x, buyer.y, TUNING.honey.reachRadius * 2.2);
+    }
     if (modifiers.scoutRadius > 0) {
       this.fog.reveal(this.hiveX, this.hiveY, modifiers.scoutRadius);
     }
@@ -739,8 +798,16 @@ export class Field {
    * squarely at one. Intent captured at the drag wins over geometry read after
    * it.
    */
-  aimRouteAt(route: Route, wasp: Wasp | null): void {
+  aimRouteAt(route: Route, wasp: Wasp | null, buyer: Buyer | null = null): void {
+    if (buyer) {
+      route.targetBuyer = buyer;
+      route.targetWasp = null;
+      route.target = null;
+      route.guard = false;
+      return;
+    }
     if (!wasp || !wasp.alive) return;
+    route.targetBuyer = null;
     route.targetWasp = wasp;
     route.target = null;
     route.guard = true;
@@ -752,6 +819,14 @@ export class Field {
     // meant, and a wasp that moved 80px during the drag is still plainly what
     // they were pointing at. Matching the two radii made the gesture fail
     // silently whenever the raider was quick, which is every raider.
+    const buyer = this.nearestBuyerTo(route.tipX, route.tipY, TUNING.honey.reachRadius);
+    if (buyer) {
+      route.targetBuyer = buyer;
+      route.targetWasp = null;
+      route.target = null;
+      return;
+    }
+
     const wasp = this.nearestWaspTo(route.tipX, route.tipY, TUNING.wasp.aimRadius);
     if (wasp) {
       route.targetWasp = wasp;
@@ -761,6 +836,24 @@ export class Field {
     }
 
     route.targetWasp = null;
+
+    // A guard line stays a guard line. Its wasp dies within seconds — that is
+    // the point of it — and quietly turning the line back into a supply route
+    // the moment it succeeded would undo the player's decision at exactly the
+    // moment it paid off, mid-wave, with more wasps still coming down the same
+    // corridor. Erasing it is a deliberate act.
+    if (route.guard) {
+      route.target = null;
+      return;
+    }
+
+    // A sell line likewise keeps its buyer, even though a buyer is a building
+    // and cannot die. Without this a sell route whose tip drifts near a flower
+    // would quietly go back to foraging, which is the same betrayal.
+    if (route.targetBuyer) {
+      route.target = null;
+      return;
+    }
 
     // Two ways a route may end up pointed at a flower, and only two.
     //
@@ -870,6 +963,7 @@ export class Field {
     this.elapsed += dt;
 
     for (const patch of this.patches) patch.step(dt);
+    for (const buyer of this.buyers) buyer.step(dt);
 
     if (this.windStrength > 0) this.stepWind(dt);
 
@@ -1166,6 +1260,20 @@ export class Field {
     this.beesLost += 1;
   }
 
+  /** The nearest buyer to a point, for aim assist and targeting. */
+  nearestBuyerTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Buyer | null {
+    let best: Buyer | null = null;
+    let bestDist = limit;
+    for (const buyer of this.buyers) {
+      const dist = Math.hypot(buyer.x - x, buyer.y - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = buyer;
+      }
+    }
+    return best;
+  }
+
   /** The nearest wasp worth pointing a route at. */
   nearestWaspTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Wasp | null {
     let best: Wasp | null = null;
@@ -1310,7 +1418,11 @@ export class Field {
     const departAt = Math.max(this.elapsed, best.nextDepartAt);
     best.nextDepartAt = departAt + TUNING.bee.departIntervalSeconds;
     bee.timer = departAt - this.elapsed;
-    bee.state = bee.timer > 0 ? 'queued' : 'outbound';
+
+    // Queue first even when the slot is free, so a sell line always loads
+    // through the one place that knows how to check the combs. Two departure
+    // paths meant a bee could leave for a buyer with nothing to sell.
+    bee.state = 'queued';
   }
 
   private releaseBee(bee: Bee): void {
@@ -1427,6 +1539,11 @@ export class Field {
           if (!route || route.dead) {
             this.releaseBee(bee);
             bee.state = 'idle';
+          } else if (route.targetBuyer && !this.loadForSale(bee)) {
+            // Nothing in the combs to carry. Wait at the hive rather than fly
+            // an empty errand: a sell line running on nothing looks identical
+            // to one that is working.
+            bee.timer = 0.4;
           } else {
             bee.s = 0;
             bee.state = 'outbound';
@@ -1453,7 +1570,7 @@ export class Field {
       case 'homing': {
         this.flyToward(bee, this.hiveX, this.hiveY, speed, dt);
         if (Math.hypot(bee.x - this.hiveX, bee.y - this.hiveY) < 26) {
-          this.deposit(bee);
+          this.bank(bee);
           bee.state = 'idle';
         }
         return;
@@ -1509,7 +1626,26 @@ export class Field {
           bee.s += speed * dt;
           if (bee.s >= route.liveLength) {
             bee.s = route.liveLength;
-            if (route.targetWasp?.alive) {
+            const buyer = route.targetBuyer;
+            if (buyer) {
+              if (bee.payload === 'honey' && bee.carrying > 0 && route.reachesBuyer()) {
+                // The sale happens here, at whatever the price is this instant
+                // — which is what makes the long line to the Apothecary a
+                // gamble rather than a calculation. The money is not banked
+                // yet; the bee still has to carry it home.
+                const paid = buyer.sell(bee.carrying);
+                this.events.sold.push({
+                  x: buyer.x,
+                  y: buyer.y,
+                  honey: bee.carrying,
+                  money: paid,
+                  buyer: buyer.id,
+                });
+                bee.carrying = paid;
+                bee.payload = 'money';
+              }
+              bee.state = 'inbound';
+            } else if (route.targetWasp?.alive) {
               // Leaves the road to run the wasp down. The route said where the
               // fight was when it was drawn; by the time the bees get there the
               // wasp has moved, and stopping at the tip would mean the defence
@@ -1547,7 +1683,7 @@ export class Field {
             // arrival counts: a builder or a scattered bee coming home empty
             // did not use the road, it merely walked it.
             if (bee.carrying > 0) route.reinforce();
-            this.deposit(bee);
+            this.bank(bee);
             this.releaseBee(bee);
             this.assignBee(bee);
             return;
@@ -1575,14 +1711,60 @@ export class Field {
     }
   }
 
+  /**
+   * Loads a bee with honey for a sell run, if there is any to take.
+   *
+   * Returns false when the hive is empty, and the caller holds the bee at home
+   * rather than sending it. A sell line that keeps dispatching empty bees looks
+   * exactly like a working one and pays nothing, which is the most confusing
+   * possible failure — better that the line visibly idles until there is honey
+   * to move.
+   */
+  private loadForSale(bee: Bee): boolean {
+    if (this.honey <= 0) return false;
+    const load = Math.min(TUNING.honey.perSellTrip, this.honey);
+    this.honey -= load;
+    bee.carrying = load;
+    bee.payload = 'honey';
+    return true;
+  }
+
+  /** Banks whatever a bee came home with. */
+  private bank(bee: Bee): void {
+    if (bee.carrying <= 0) return;
+    if (bee.payload === 'money') {
+      this.money += bee.carrying;
+      this.events.banked += bee.carrying;
+      bee.carrying = 0;
+      bee.payload = 'nectar';
+      return;
+    }
+    // Honey coming home — either nectar from a flower, or a sell load whose
+    // route died under it before it reached the buyer. Both go in the combs.
+    this.deposit(bee);
+    bee.payload = 'nectar';
+  }
+
   private deposit(bee: Bee): void {
     if (bee.carrying <= 0) return;
     // Comb Wax is paid here, at the hive, rather than at the flower: what it
     // buys is a better yield from honey the swarm has actually brought home,
     // so nectar lost to a wasp on the way back is not paid for.
-    this.honey +=
+    const gained =
       bee.carrying * this.stats.honeyMultiplier * (1 + this.modifiers.honeyBonus);
+
+    // A full hive spills, and the spill is the whole reason selling is urgent.
+    // Bees keep flying and keep arriving — stopping them would turn a brimming
+    // hive into a quiet pause instead of an emergency — but everything past the
+    // brim is money walking out of the door, and the HUD says so.
+    const room = Math.max(0, this.honeyCap - this.honey);
+    const stored = Math.min(gained, room);
+    const lost = gained - stored;
+
+    this.honey += stored;
+    this.spilled += lost;
     this.events.deposited += bee.carrying;
+    if (lost > 0) this.events.spilled += lost;
     bee.carrying = 0;
   }
 
@@ -1647,6 +1829,9 @@ export class Field {
       waspDown: [],
       stolen: 0,
       raidLanded: 0,
+      spilled: 0,
+      sold: [],
+      banked: 0,
       beesLost: [],
       pollenLost: [],
     };

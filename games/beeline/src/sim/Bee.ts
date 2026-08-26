@@ -48,6 +48,15 @@ export class Bee {
   prevY = 0;
 
   state: BeeState = 'idle';
+  /**
+   * What `carrying` currently holds.
+   *
+   * A bee on a sell line leaves the hive loaded with honey and comes back with
+   * money, so the amount alone is no longer enough to know what to do with it
+   * on arrival. One field rather than three, because a bee only ever carries
+   * one thing at a time and three would only ever disagree.
+   */
+  payload: 'nectar' | 'honey' | 'money' = 'nectar';
   /** Route id, or 0 when unassigned. */
   routeId = 0;
   /** Arc distance along the assigned route. */
@@ -72,6 +81,7 @@ export class Bee {
     this.prevY = this.y;
 
     this.state = 'idle';
+    this.payload = 'nectar';
     this.routeId = 0;
     this.s = 0;
     this.carrying = 0;

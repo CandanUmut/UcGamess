@@ -2,7 +2,7 @@ import { TUNING } from '../config/tuning.ts';
 import type { DerivedStats } from './Upgrades.ts';
 
 export interface OfflineResult {
-  honey: number;
+  money: number;
   hoursAway: number;
   /** True when the store filled up and further time earned nothing. */
   capped: boolean;
@@ -17,7 +17,7 @@ const MIN_CLAIM = 5;
  *
  *  - **Clamp the elapsed time to the window.** A device clock that jumps
  *    forward — timezone change, manual adjustment, a stale `lastPlayedAt` —
- *    would otherwise pay out years of honey and destroy the progression.
+ *    would otherwise pay out years of money and destroy the progression.
  *  - **Ignore negative elapsed.** Clocks move backwards too.
  *
  * The Honey Store upgrade raises both the hourly cap and the window, which is
@@ -30,19 +30,19 @@ export function computeOffline(
 ): OfflineResult {
   const elapsedMs = now - lastPlayedAt;
   if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
-    return { honey: 0, hoursAway: 0, capped: false };
+    return { money: 0, hoursAway: 0, capped: false };
   }
 
   const hoursAway = elapsedMs / 3_600_000;
   const countedHours = Math.min(hoursAway, stats.offlineWindowHours);
 
   const earned = countedHours * TUNING.offline.honeyPerHour;
-  const honey = Math.floor(Math.min(earned, stats.offlineCapHoney));
+  const money = Math.floor(Math.min(earned, stats.offlineCapMoney));
 
   return {
-    honey: honey < MIN_CLAIM ? 0 : honey,
+    money: money < MIN_CLAIM ? 0 : money,
     hoursAway,
-    capped: earned > stats.offlineCapHoney || hoursAway > stats.offlineWindowHours,
+    capped: earned > stats.offlineCapMoney || hoursAway > stats.offlineWindowHours,
   };
 }
 

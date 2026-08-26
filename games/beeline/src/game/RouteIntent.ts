@@ -1,6 +1,7 @@
 import { TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
 import type { Wasp } from '../sim/Wasp.ts';
+import type { Buyer } from '../sim/Buyer.ts';
 
 export type IntentKind = 'extend' | 'fresh';
 
@@ -78,12 +79,23 @@ export function resolveDragStart(field: Field, x: number, y: number): DragIntent
 export function applyAimAssist(
   field: Field,
   coords: readonly number[],
-): { coords: number[]; connected: boolean; wasp: Wasp | null } {
+): { coords: number[]; connected: boolean; wasp: Wasp | null; buyer: Buyer | null } {
   const out = [...coords];
   const endX = out[out.length - 2];
   const endY = out[out.length - 1];
   if (endX === undefined || endY === undefined) {
-    return { coords: out, connected: false, wasp: null };
+    return { coords: out, connected: false, wasp: null, buyer: null };
+  }
+
+  // A buyer is a building. It never moves and is always visible, so it is the
+  // easiest thing on the board to aim at and gets the plainest rule: end the
+  // drag near one and the line sells there.
+  const buyer = field.nearestBuyerTo(endX, endY, TUNING.honey.aimRadius);
+  if (buyer && !field.pathBlocked(endX, endY, buyer.x, buyer.y)) {
+    if (Math.hypot(buyer.x - endX, buyer.y - endY) > TUNING.honey.reachRadius * 0.5) {
+      out.push(buyer.x, buyer.y);
+    }
+    return { coords: out, connected: true, wasp: null, buyer };
   }
 
   // Only ever snaps to a flower the player has found. Assist exists to make a
@@ -107,16 +119,16 @@ export function applyAimAssist(
 
   if (wasp && toWasp <= toPatch && !field.pathBlocked(endX, endY, wasp.x, wasp.y)) {
     if (toWasp > TUNING.wasp.reachRadius * 0.5) out.push(wasp.x, wasp.y);
-    return { coords: out, connected: true, wasp };
+    return { coords: out, connected: true, wasp, buyer: null };
   }
 
-  if (!patch) return { coords: out, connected: false, wasp: null };
+  if (!patch) return { coords: out, connected: false, wasp: null, buyer: null };
 
   // Never snap through thorns. Assist exists to make a drag mean what it looks
   // like it means; hopping the line over a thicket the player can plainly see
   // would do the opposite — and the route would only be cut back there anyway.
   if (field.pathBlocked(endX, endY, patch.x, patch.y)) {
-    return { coords: out, connected: false, wasp: null };
+    return { coords: out, connected: false, wasp: null, buyer: null };
   }
 
   // Only extend to the flower's centre if we are not already inside it, so a
@@ -124,7 +136,7 @@ export function applyAimAssist(
   if (Math.hypot(patch.x - endX, patch.y - endY) > TUNING.patch.reachRadius * 0.5) {
     out.push(patch.x, patch.y);
   }
-  return { coords: out, connected: true, wasp: null };
+  return { coords: out, connected: true, wasp: null, buyer: null };
 }
 
 /** Applies a completed drag to the field. */
@@ -167,7 +179,8 @@ export function commitDrag(
   const connected =
     assisted.connected &&
     (field.nearestPatchTo(endX, endY, TUNING.patch.reachRadius) !== null ||
-      field.nearestWaspTo(endX, endY, TUNING.wasp.reachRadius) !== null);
+      field.nearestWaspTo(endX, endY, TUNING.wasp.reachRadius) !== null ||
+      field.nearestBuyerTo(endX, endY, TUNING.honey.reachRadius) !== null);
 
   if (intent.kind === 'extend') {
     const route = field.routeById(intent.routeId);
@@ -175,7 +188,7 @@ export function commitDrag(
       const before = route.poly.length;
       route.extendWith(coords, field.routeHoldSeconds);
       field.retarget(route);
-      field.aimRouteAt(route, assisted.wasp);
+      field.aimRouteAt(route, assisted.wasp, assisted.buyer);
       return {
         kind: 'extend',
         drawnLength,
@@ -199,7 +212,7 @@ export function commitDrag(
   if (existing) {
     existing.replaceWith(coords, field.routeHoldSeconds);
     field.retarget(existing);
-    field.aimRouteAt(existing, assisted.wasp);
+    field.aimRouteAt(existing, assisted.wasp, assisted.buyer);
     return {
       kind: 'fresh',
       drawnLength,
@@ -211,7 +224,7 @@ export function commitDrag(
   }
 
   const route = field.createRoute(coords);
-  if (route) field.aimRouteAt(route, assisted.wasp);
+  if (route) field.aimRouteAt(route, assisted.wasp, assisted.buyer);
   return {
     kind: route ? 'fresh' : 'rejected',
     drawnLength,
