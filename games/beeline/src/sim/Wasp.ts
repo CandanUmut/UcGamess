@@ -1,27 +1,27 @@
-import { TUNING } from '../config/tuning.ts';
+import { TUNING, type WaspKindTuning } from '../config/tuning.ts';
 
 export type WaspState = 'approaching' | 'raiding' | 'fleeing' | 'gone';
+export type WaspKind = 'raider' | 'drone' | 'hornet';
 
 /**
- * A wasp, which now comes for the hive rather than loitering near it.
+ * A wasp, in one of three kinds.
  *
- * The old wasp drifted between random points and scattered the occasional bee,
- * which the playtest summed up as "the wasps also don't do almost anything".
- * It was right: a hazard you route around once is a slightly smaller board, not
- * an enemy. This one has somewhere to be.
+ * The previous one turned up alone, drifted to the hive, took a flat 140 honey
+ * and died to five free bee hits. The playtest verdict — "no skill, no real
+ * threat, and very boring, there is no fight" — was accurate on every count,
+ * and each of them had a cause worth naming:
  *
- *   - **approaching** — crossing the maze toward the hive. It has to use the
- *     corridors like everything else, which is what turns a dense day from
- *     purely a cost into a wall the wasps also have to get through. Bees it
- *     passes on the way are still scattered, so distance stays dangerous.
- *   - **raiding** — at the hive, draining honey by the second and driving bees
- *     out of the day's swarm. This is the part that has to hurt.
- *   - **fleeing** — leaving, having been beaten off or having taken its fill.
+ *  - **Alone.** One enemy cannot besiege a board. A wave can be triaged.
+ *  - **Flat damage.** 140 honey is six percent of a day-ten quota and a
+ *    rounding error by day fifteen, so ignoring it was correct play. Theft is
+ *    now a share of the day's quota, so it stays a threat at any point.
+ *  - **No fight.** Bees struck for free, so answering a raid was a button
+ *    rather than a trade. Every kind now hits back, and a hornet costs real
+ *    swarm to bring down.
  *
- * Health, and therefore the fact that it can be beaten off at all, is the
- * counterpart to the defence gesture: drawing a line at a wasp sends bees to
- * fight it. A hazard you can only endure is weather; a hazard you can answer is
- * a decision, because the bees you send are bees that are not carrying nectar.
+ * The three kinds ask different questions. Raiders go for the stores; drones
+ * are fast, fragile and after the swarm, so they punish a slow reaction;
+ * hornets are slow and expensive to leave alone but brutal to meet head-on.
  */
 export class Wasp {
   x: number;
@@ -29,8 +29,11 @@ export class Wasp {
   prevX: number;
   prevY: number;
 
+  readonly kind: WaspKind;
+  readonly tuning: WaspKindTuning;
+
   state: WaspState = 'approaching';
-  health = TUNING.wasp.health;
+  health: number;
   /** Where it came in, and where it leaves to. */
   readonly homeX: number;
   readonly homeY: number;
@@ -38,16 +41,20 @@ export class Wasp {
   /** Seconds left at the hive before it goes home of its own accord. */
   private raidLeft = TUNING.wasp.raidSeconds;
   /** Counts down to driving off the next bee. */
-  private beeTimer = TUNING.wasp.beeLossInterval;
+  private beeTimer: number;
   private wanderPhase = Math.random() * Math.PI * 2;
 
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, kind: WaspKind = 'raider') {
     this.x = x;
     this.y = y;
     this.prevX = x;
     this.prevY = y;
     this.homeX = x;
     this.homeY = y;
+    this.kind = kind;
+    this.tuning = TUNING.wasp.kinds[kind];
+    this.health = this.tuning.health;
+    this.beeTimer = this.tuning.beeLossInterval;
   }
 
   get alive(): boolean {
@@ -59,9 +66,19 @@ export class Wasp {
     return this.state === 'raiding';
   }
 
-  /** 0..1, for the damage pips. */
+  /** 0..1, for the damage arc. */
   get vitality(): number {
-    return Math.max(0, this.health) / TUNING.wasp.health;
+    return Math.max(0, this.health) / this.tuning.health;
+  }
+
+  /**
+   * Honey this kind drains per second, given the day's quota.
+   *
+   * Derived rather than tuned so the threat scales with the run. See
+   * `WaspKindTuning.stealShare`.
+   */
+  stealRate(quota: number): number {
+    return (quota * this.tuning.stealShare) / TUNING.wasp.raidSeconds;
   }
 
   /**
@@ -80,13 +97,25 @@ export class Wasp {
     return true;
   }
 
-  /** Flies toward a point at wasp speed. The caller decides which point. */
+  /**
+   * Whether the bee that just landed a hit is lost for the day.
+   *
+   * The trade that makes a defence a decision. A drone is nearly free to swat;
+   * a hornet takes more than half the bees that touch it, so seven hits is a
+   * real bite out of the swarm and "let this one through and cover the door
+   * instead" is a live option rather than a failure.
+   */
+  strikesBack(random: () => number = Math.random): boolean {
+    return random() < this.tuning.retaliation;
+  }
+
+  /** Flies toward a point at this kind's speed. The caller decides which point. */
   moveToward(x: number, y: number, dt: number): void {
     const dx = x - this.x;
     const dy = y - this.y;
     const dist = Math.hypot(dx, dy);
     if (dist < 1e-3) return;
-    const step = Math.min(TUNING.wasp.speed * dt, dist);
+    const step = Math.min(this.tuning.speed * dt, dist);
     this.x += (dx / dist) * step;
     this.y += (dy / dist) * step;
   }
@@ -110,7 +139,7 @@ export class Wasp {
   beginRaid(): void {
     this.state = 'raiding';
     this.raidLeft = TUNING.wasp.raidSeconds;
-    this.beeTimer = TUNING.wasp.beeLossInterval;
+    this.beeTimer = this.tuning.beeLossInterval;
   }
 
   /**
@@ -126,7 +155,7 @@ export class Wasp {
 
     let taken = 0;
     while (this.beeTimer <= 0) {
-      this.beeTimer += TUNING.wasp.beeLossInterval;
+      this.beeTimer += this.tuning.beeLossInterval;
       taken += 1;
     }
 
@@ -142,8 +171,7 @@ export class Wasp {
    * leave the player nothing to do but watch.
    *
    * The two multipliers are how a Smoke Pot works — it widens the safe zone and
-   * shrinks the wasp's reach for a day. Applying it here rather than mutating
-   * TUNING keeps the tuning table a constant and the item a parameter.
+   * shrinks the wasp's reach for a day.
    */
   threatens(
     x: number,

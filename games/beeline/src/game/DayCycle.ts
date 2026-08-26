@@ -1,4 +1,5 @@
 import { TUNING } from '../config/tuning.ts';
+import type { WaspKind } from '../sim/Wasp.ts';
 
 /**
  * Days the late-game elements arrive on.
@@ -98,6 +99,8 @@ export interface DayFeatures {
    * number that matters is how many turn up at once.
    */
   raidSize: number;
+  /** What each wave is made of. Empty on a day with no raids. */
+  wave: WaspKind[];
   /** 1 is an open field, lower is a tighter maze. */
   mazeOpenness: number;
   richPatches: boolean;
@@ -119,10 +122,41 @@ export function raidSizeForDay(day: number): number {
   return Math.min(maxSize, baseSize + extra);
 }
 
+/**
+ * What a wave is made of on a given day.
+ *
+ * Composed rather than rolled, so the forecast can name it honestly and two
+ * waves on the same day are the same problem. The randomness in raids is in
+ * *when* they come and from *where* — making the contents a surprise too would
+ * spend the fairness budget twice over.
+ *
+ * Kinds arrive on a schedule like everything else in this file: raiders alone
+ * for two days, then drones, then hornets. One new thing to read at a time.
+ */
+export function waveForDay(day: number): WaspKind[] {
+  const size = raidSizeForDay(day);
+  if (size === 0) return [];
+
+  const { droneFromDay, hornetFromDay, droneShare, hornetShare } = TUNING.raid;
+  const hornets = day >= hornetFromDay ? Math.max(1, Math.round(size * hornetShare)) : 0;
+  const drones = day >= droneFromDay ? Math.max(1, Math.round(size * droneShare)) : 0;
+  // Raiders take whatever is left, and never fewer than one — a wave with no
+  // staple in it stops reading as "a raid" and starts reading as a special
+  // event, which is the wrong shape for the thing that happens twice a day.
+  const raiders = Math.max(1, size - hornets - drones);
+
+  const wave: WaspKind[] = [];
+  for (let i = 0; i < hornets; i += 1) wave.push('hornet');
+  for (let i = 0; i < drones; i += 1) wave.push('drone');
+  for (let i = 0; i < raiders; i += 1) wave.push('raider');
+  return wave;
+}
+
 export function featuresForDay(day: number): DayFeatures {
   return {
     wind: day >= TUNING.wind.startDay,
     raidSize: raidSizeForDay(day),
+    wave: waveForDay(day),
     mazeOpenness: mazeOpennessForDay(day),
     richPatches: day >= RICH_PATCH_DAY,
     nightBloom: day >= NIGHT_BLOOM_DAY,
@@ -139,11 +173,15 @@ export function dayIntroduction(day: number): string | null {
     case TUNING.wind.startDay:
       return 'Wind. Straight lines will bend.';
     case TUNING.wasp.startDay:
-      return 'Wasps raid the hive. Draw a line at one to send bees to fight.';
+      return 'Wasps raid in waves. Draw a line across their path to hold them.';
     case RICH_PATCH_DAY:
       return 'Rich patches bloom far away. Worth the distance?';
     case SECOND_WASP_DAY:
-      return 'Raids come two at a time now.';
+      return 'The waves are getting bigger.';
+    case TUNING.raid.droneFromDay:
+      return 'Drones. Fast, fragile, and they come for your bees.';
+    case TUNING.raid.hornetFromDay:
+      return 'Hornets. Slow, tough, and costly to ignore.';
     case NIGHT_BLOOM_DAY:
       return 'Night bloom. Brief, and worth a lot.';
     default:
@@ -176,8 +214,17 @@ export function forecastFor(day: number): string[] {
     );
   }
   if (features.wind) out.push('wind');
-  if (features.raidSize === 1) out.push('wasp raids');
-  else if (features.raidSize > 1) out.push(`raids of ${features.raidSize}`);
+  if (features.raidSize > 0) {
+    // Names the kinds, not just the count. Reading the forecast is how a player
+    // decides whether tomorrow wants Guard Bees or a Smoke Pot, and "4 wasps"
+    // does not tell them which.
+    const counts = new Map<WaspKind, number>();
+    for (const kind of features.wave) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    out.push(
+      `waves of ${features.raidSize}: ` +
+        [...counts].map(([kind, n]) => `${n} ${TUNING.wasp.kinds[kind].name}`).join(', '),
+    );
+  }
   if (features.richPatches) out.push('rich blooms');
   if (features.nightBloom) out.push('night bloom');
 
@@ -198,7 +245,9 @@ function unlockName(day: number): string | null {
   if (day === TUNING.wind.startDay) return 'wind';
   if (day === TUNING.wasp.startDay) return 'wasp raids';
   if (day === RICH_PATCH_DAY) return 'rich blooms';
-  if (day === SECOND_WASP_DAY) return 'bigger raids';
+  if (day === SECOND_WASP_DAY) return 'bigger waves';
+  if (day === TUNING.raid.droneFromDay) return 'drones';
+  if (day === TUNING.raid.hornetFromDay) return 'hornets';
   if (day === NIGHT_BLOOM_DAY) return 'night bloom';
   return null;
 }

@@ -192,23 +192,58 @@ export interface WindTuning {
   rotationSpeed: number;
 }
 
+/**
+ * One kind of wasp.
+ *
+ * Three of them, because one enemy that always behaves the same way is a
+ * timer with wings — the playtest called the single wasp "no skill, no real
+ * threat, and very boring", and being alone was half of why. A wave you have
+ * to *read* before you answer it is a different thing entirely.
+ */
+export interface WaspKindTuning {
+  speed: number;
+  /** Bee hits to bring one down. */
+  health: number;
+  /**
+   * Share of the **day's quota** one of these takes in a full uninterrupted
+   * raid.
+   *
+   * Expressed against the quota rather than as honey per second, which is the
+   * fix for the flattest note in the report: "even though you let the wasp in
+   * almost nothing happens". A flat 14/second was 6% of a day-ten quota and
+   * literal noise by day fifteen. A share stays a threat at every point in the
+   * run, and the arithmetic a player does is the one that matters — "that is a
+   * fifth of my day walking out of the door".
+   */
+  stealShare: number;
+  /** Seconds between this kind driving off one more bee at the hive. */
+  beeLossInterval: number;
+  /**
+   * Chance a bee that lands a hit is lost.
+   *
+   * The other half of "there is no fight". Bees used to strike for free, so
+   * defending was a button rather than a trade. Now a hornet costs real swarm
+   * to bring down, and whether to pay is the decision.
+   */
+  retaliation: number;
+  /** Drawn size, relative to the base sprite. */
+  scale: number;
+  tint: number;
+  /** Shown in the wave forecast. */
+  name: string;
+}
+
 export interface WaspTuning {
   startDay: number;
-  speed: number;
   safeRadius: number;
   interceptRadius: number;
   scatterSeconds: number;
-  /** Bee hits to bring one down. */
-  health: number;
-  /** Honey a wasp drains per second once it reaches the hive. */
-  stealPerSecond: number;
-  /** Seconds between a raiding wasp driving off one more bee. */
-  beeLossInterval: number;
+  kinds: { raider: WaspKindTuning; drone: WaspKindTuning; hornet: WaspKindTuning };
   /** How long a wasp lingers at the hive before leaving on its own. */
   raidSeconds: number;
   /** Damage one arriving bee does. */
   beeDamage: number;
-  /** How close a route's tip must be for its bees to reach the wasp. */
+  /** How close a bee has to be to strike, and a route's tip to be a guard. */
   reachRadius: number;
   /** How close a wasp must get to the hive to start robbing it. */
   arriveRadius: number;
@@ -225,9 +260,18 @@ export interface RaidTuning {
   maxGapSeconds: number;
   firstRaidEarliest: number;
   warningSeconds: number;
+  /** Wasps in the first wave. */
   baseSize: number;
+  /** One more wasp per this many days. */
   sizeEveryDays: number;
   maxSize: number;
+  /** Day the quick drones start turning up. */
+  droneFromDay: number;
+  /** Day the heavy hornets start turning up. */
+  hornetFromDay: number;
+  /** Fraction of a wave that is drones / hornets once they appear. */
+  droneShare: number;
+  hornetShare: number;
 }
 
 export interface MazeTuning {
@@ -518,31 +562,85 @@ export const TUNING: Tuning = {
    * point of putting an enemy on it. The warning is what keeps that fair —
    * surprise about *when*, never about *whether you had a chance*.
    */
+  /**
+   * Wasps, in three kinds.
+   *
+   * The single raider that used to turn up alone was reported as "no skill, no
+   * real threat, and very boring", and both halves of that were true in the
+   * numbers. It stole a flat 140 honey — six percent of a day-ten quota — and
+   * bees killed it for free, so there was no fight to have and nothing much
+   * lost by skipping it.
+   *
+   * What replaces it is a **wave you have to read**. Raiders go for the honey,
+   * drones are fast and go for the swarm, hornets are slow, tough and take a
+   * tenth of the day's quota each. Every one of them hits back, so a defence
+   * costs bees and choosing what to answer is the game.
+   */
   wasp: {
     startDay: 7,
-    speed: 95,
     safeRadius: 160,
     interceptRadius: 34,
     scatterSeconds: 1.2,
-    /** Bee hits to bring one down. */
-    health: 5,
-    /** Honey a wasp drains per second once it reaches the hive. */
-    stealPerSecond: 14,
-    // Sized against a whole raid rather than per second. An ignored raid costs
-    // roughly three bees and 140 honey — noticeable against a day-ten quota,
-    // survivable once, and genuinely bad three times. Defending early is what
-    // makes the difference, which is the decision the system exists for.
-    /** Seconds between a raiding wasp driving off one more bee. */
-    beeLossInterval: 2.8,
+
+    kinds: {
+      /** The staple. Middling everything; the wave is mostly these. */
+      raider: {
+        speed: 95,
+        health: 3,
+        stealShare: 0.05,
+        beeLossInterval: 3.2,
+        retaliation: 0.3,
+        scale: 1,
+        tint: 0xffffff,
+        name: 'raiders',
+      },
+      /**
+       * Fast and fragile, and after the swarm rather than the stores.
+       *
+       * The one that punishes a slow reaction. It is at the door before a
+       * comfortable defence is drawn, so the answer is a line already sitting
+       * across the approach — which is the whole reason placing a guard line
+       * early is a skill worth having.
+       */
+      drone: {
+        speed: 165,
+        health: 2,
+        stealShare: 0.02,
+        beeLossInterval: 1.5,
+        retaliation: 0.18,
+        scale: 0.78,
+        tint: 0xbfe06a,
+        name: 'drones',
+      },
+      /**
+       * Slow, tough, and expensive to leave alone.
+       *
+       * A tenth of the quota each, and it takes seven hits to drop while
+       * downing over half the bees that land them. Meeting one head-on is
+       * rarely right; the shape of the answer is a line placed where it has to
+       * pass, plus Guard Bees at the door for what gets through.
+       */
+      hornet: {
+        speed: 68,
+        health: 7,
+        stealShare: 0.1,
+        beeLossInterval: 4.5,
+        retaliation: 0.55,
+        scale: 1.4,
+        tint: 0xff8a5c,
+        name: 'hornets',
+      },
+    },
+
     /** How long a wasp lingers at the hive before leaving on its own. */
     raidSeconds: 10,
     /** Damage one arriving bee does. */
     beeDamage: 1,
-    /** How close a route's tip must be for its bees to reach the wasp. */
+    /** How close a bee has to be to strike, and a route's tip to be a guard. */
     reachRadius: 74,
     /** How close a wasp must get to the hive to start robbing it. */
     arriveRadius: 70,
-    // Two guards bring a wasp down in about two and a half seconds, so a
+    // Two guards bring a raider down in about a second and a half, so a
     // stacked defence genuinely holds the door while a single one only buys
     // time. That gap is what makes the second copy worth buying.
     guardInterval: 1.0,
@@ -553,29 +651,45 @@ export const TUNING: Tuning = {
     huntSeconds: 4,
     // Wider than the flower assist, because a wasp is a moving target. A drag
     // aimed squarely at one still ends well behind it: the wasp covers most of
-    // a corridor in the second the gesture takes. At the flower radius the
-    // defence gesture failed silently against exactly the raiders that most
-    // needed answering — the quick ones.
+    // a corridor in the second the gesture takes.
     aimRadius: 200,
   },
 
   raid: {
-    /** Gap between raids, sampled uniformly. Never a metronome. */
-    minGapSeconds: 16,
-    maxGapSeconds: 38,
-    /** Quiet opening so the first raid never lands before the day has started. */
+    // Wider than the old 16-38 because a wave is a bigger event than a single
+    // wasp was: two or three a day that each demand an answer, rather than
+    // three that could all be ignored.
+    /** Gap between waves, sampled uniformly. Never a metronome. */
+    minGapSeconds: 22,
+    maxGapSeconds: 46,
+    /** Quiet opening so the first wave never lands before the day has started. */
     firstRaidEarliest: 18,
     /**
-     * Seconds of warning before wasps appear.
+     * Seconds of warning before the wave appears.
      *
-     * The whole fairness budget. Long enough to break off what you were doing
-     * and draw a defence, short enough that the surprise survives.
+     * The whole fairness budget. Longer than it was, because there is now more
+     * to decide in it than "draw a line at the wasp" — the forecast names what
+     * is coming, and reading it is the point.
      */
-    warningSeconds: 2.6,
-    /** Wasps per raid: base, plus one more every `sizeEveryDays`. */
-    baseSize: 1,
-    sizeEveryDays: 3,
-    maxSize: 4,
+    warningSeconds: 3.4,
+    /**
+     * Wave size. Three on the day wasps arrive, growing to ten.
+     *
+     * "Why are there only 1 usually" was the other half of the report, and it
+     * was right: a lone enemy cannot make a board feel besieged however hard it
+     * hits. A wave can be triaged, funnelled and partly let through, which is
+     * where the skill lives.
+     */
+    baseSize: 3,
+    sizeEveryDays: 2,
+    maxSize: 10,
+    // Placed in the gaps the rest of the schedule leaves: rich patches take
+    // day nine and the night bloom takes day twelve, and the rule this repo
+    // has kept since the first draft is one new thing to learn at a time.
+    droneFromDay: 10,
+    hornetFromDay: 13,
+    droneShare: 0.35,
+    hornetShare: 0.2,
   },
 
   /**

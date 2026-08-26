@@ -46,6 +46,20 @@ export class Route {
    * every line you point at a wasp is a line that stopped earning.
    */
   targetWasp: Wasp | null = null;
+  /**
+   * Whether this line is a guard line: its bees fight instead of foraging.
+   *
+   * Set when a drag lands on a wasp and never cleared while the route lives,
+   * which is the whole point. The wasp it was aimed at will be dead or gone in
+   * seconds, but the *line* stays where the player put it, and every wasp that
+   * passes within reach of a bee on it gets hit.
+   *
+   * That is where the skill went. A wave crosses the maze through corridors,
+   * so a line laid across the corridor they must use is worth several lines
+   * laid on top of individual wasps — and reading the board for that corridor
+   * is a real decision made under a real clock.
+   */
+  guard = false;
   /** Bees currently assigned. Maintained by Field. */
   beeCount = 0;
   /**

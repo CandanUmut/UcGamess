@@ -55,6 +55,7 @@ describe('escalation schedule', () => {
     expect(features).toEqual({
       wind: false,
       raidSize: 0,
+      wave: [],
       mazeOpenness: 1,
       richPatches: false,
       nightBloom: false,
@@ -74,7 +75,11 @@ describe('escalation schedule', () => {
       // thing to learn — the same reason a third flower has never counted.
       const additions =
         (current.wind && !previous.wind ? 1 : 0) +
-        (current.raidSize > previous.raidSize ? 1 : 0) +
+        // A *new kind* of wasp is a new thing to learn. A bigger wave of the
+        // same kinds is intensity, exactly like the maze tightening — counting
+        // it here would make every other day an "introduction" and the rule
+        // meaningless.
+        (new Set(current.wave).size > new Set(previous.wave).size ? 1 : 0) +
         (current.mazeOpenness < 1 && previous.mazeOpenness >= 1 ? 1 : 0) +
         (current.richPatches && !previous.richPatches ? 1 : 0) +
         (current.nightBloom && !previous.nightBloom ? 1 : 0);
