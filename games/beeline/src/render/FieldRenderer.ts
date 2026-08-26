@@ -8,6 +8,11 @@ import {
 } from '../sim/Field.ts';
 import { FLOWER_TEX, TEX } from './textures.ts';
 
+// Nunito first, system stack behind it — the same fallback chain the rest of
+// the game uses, because the subset is small and a missing glyph (the trend
+// arrows here) has to be drawn by the next family along.
+const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
 /**
  * Overrides for the two flowers that are not ordinary.
  *
@@ -85,6 +90,7 @@ export class FieldRenderer {
   private readonly hiveSprite: Phaser.GameObjects.Image | null;
   /** One per wasp, reused. There are never more than a couple. */
   private wasps: Phaser.GameObjects.Image[] = [];
+  private buyerLabels: Phaser.GameObjects.Text[] = [];
   private warningPhase = 0;
   /**
    * One per visible wall bar, reused.
@@ -183,7 +189,73 @@ export class FieldRenderer {
     // a building that visibly inflates reads as a balloon.
     this.hiveSprite?.setScale(0.86 + (pulse - 1) * 0.35);
 
+    this.drawBuyers(field);
     this.drawWasps(field, alpha);
+  }
+
+  /**
+   * The two buyers, as coloured depots with their price over the door.
+   *
+   * Drawn on the board rather than only in the HUD because the choice between
+   * them is half geography and half arithmetic — how far the line has to run
+   * matters as much as what the number says, and the two only compare properly
+   * when they are in the same place on screen.
+   *
+   * Never hidden by fog: they are landmarks, not discoveries. A player who
+   * cannot see where to sell cannot play the loop at all.
+   */
+  private drawBuyers(field: Field): void {
+    const g = this.gfx;
+
+    let best = field.buyers[0];
+    for (const buyer of field.buyers) if (best && buyer.price > best.price) best = buyer;
+
+    while (this.buyerLabels.length < field.buyers.length) {
+      this.buyerLabels.push(
+        this.scene.add
+          .text(0, 0, '', {
+            fontFamily: FONT,
+            fontSize: '19px',
+            fontStyle: 'bold',
+            color: '#ffffff',
+            stroke: '#171208',
+            strokeThickness: 5,
+          })
+          .setOrigin(0.5)
+          .setDepth(this.depth + 4),
+      );
+    }
+
+    field.buyers.forEach((buyer, index) => {
+      const tint = buyer.tuning.tint;
+      const isBest = buyer === best;
+
+      // A ring the size of the reach, so "how close does my line have to get"
+      // is a thing you can see rather than a number you have to know.
+      g.fillStyle(tint, 0.12);
+      g.fillCircle(buyer.x, buyer.y, TUNING.honey.reachRadius);
+      g.lineStyle(isBest ? 4 : 2, tint, isBest ? 0.9 : 0.5);
+      g.strokeCircle(buyer.x, buyer.y, TUNING.honey.reachRadius);
+
+      // The depot itself: a squat building with a roof, drawn rather than
+      // shipped for the same reason everything else here is.
+      g.fillStyle(tint, 0.9);
+      g.fillRect(buyer.x - 26, buyer.y - 12, 52, 34);
+      g.fillStyle(tint, 0.6);
+      g.beginPath();
+      g.moveTo(buyer.x - 34, buyer.y - 12);
+      g.lineTo(buyer.x, buyer.y - 34);
+      g.lineTo(buyer.x + 34, buyer.y - 12);
+      g.closePath();
+      g.fillPath();
+
+      const label = this.buyerLabels[index];
+      const arrow = buyer.trend > 0 ? '▲' : buyer.trend < 0 ? '▼' : '';
+      label
+        ?.setText(`${buyer.price.toFixed(2)} ${arrow}`)
+        .setPosition(buyer.x, buyer.y + 40)
+        .setVisible(true);
+    });
   }
 
   private drawPatch(g: Phaser.GameObjects.Graphics, patch: Patch, time: number): void {
@@ -536,7 +608,12 @@ export class FieldRenderer {
 
       sprite.setVisible(true);
       sprite.setPosition(x, y);
-      sprite.setDisplaySize(46, 46 * (43 / 72));
+      // Size and tint per kind, so a wave can be read at a glance: a hornet is
+      // plainly the big orange one worth avoiding and a drone is the small pale
+      // one that will be at the door first.
+      const scale = wasp.tuning.scale;
+      sprite.setDisplaySize(46 * scale, 46 * (43 / 72) * scale);
+      sprite.setTint(wasp.tuning.tint);
 
       // Mirrored rather than spun, for the same reason the bees are: the wasp
       // is drawn in profile and rotating it by heading would fly it upside
@@ -598,6 +675,8 @@ export class FieldRenderer {
     this.hiveSprite?.destroy();
     for (const wasp of this.wasps) wasp.destroy();
     this.wasps = [];
+    for (const label of this.buyerLabels) label.destroy();
+    this.buyerLabels = [];
     for (const bar of this.wallBars) bar.destroy();
     this.wallBars = [];
   }

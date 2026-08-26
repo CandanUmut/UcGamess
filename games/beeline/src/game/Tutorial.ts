@@ -15,7 +15,7 @@
  *  - **Each step waits for evidence**, not for a timer. Advancing on a timer
  *    teaches the confident player nothing and abandons the hesitant one.
  */
-export type TutorialStepId = 'draw' | 'watch' | 'refresh' | 'done';
+export type TutorialStepId = 'draw' | 'watch' | 'sell' | 'refresh' | 'done';
 
 export interface TutorialStep {
   id: TutorialStepId;
@@ -37,6 +37,15 @@ const STEPS: readonly TutorialStep[] = [
     showHintLine: false,
   },
   {
+    // The step the whole economy hangs on, and the one a new player will not
+    // guess: honey in the combs is stock, not score, and it only becomes money
+    // when a line carries it to somebody who wants it. Taught immediately after
+    // the first honey arrives, while the connection is obvious.
+    id: 'sell',
+    text: 'Honey is not money yet — drag a line to a buyer to sell it',
+    showHintLine: false,
+  },
+  {
     id: 'refresh',
     text: 'The line fades from the far end — draw it again to keep it open',
     showHintLine: false,
@@ -48,6 +57,8 @@ export interface TutorialProgress {
   routesDrawn: number;
   /** Honey banked so far this day. */
   honey: number;
+  /** Money earned so far this day. */
+  money: number;
   /** Whether any live route has begun retreating. */
   anyRouteRetreating: boolean;
 }
@@ -90,11 +101,13 @@ export class Tutorial {
         ? progress.routesDrawn >= 1
         : step.id === 'watch'
           ? progress.honey > 0
-          : // The refresh step waits for a route to actually start retreating
-            // *and* for the player to have drawn again since — otherwise it
-            // would clear itself the moment decay began, before they had a
-            // chance to do the thing it is asking for.
-            progress.anyRouteRetreating && progress.routesDrawn >= 2;
+          : step.id === 'sell'
+            ? progress.money > 0
+            : // The refresh step waits for a route to actually start retreating
+              // *and* for the player to have drawn again since — otherwise it
+              // would clear itself the moment decay began, before they had a
+              // chance to do the thing it is asking for.
+              progress.anyRouteRetreating && progress.routesDrawn >= 3;
 
     if (satisfied) this.index += 1;
   }

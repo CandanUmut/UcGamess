@@ -8,6 +8,7 @@ import {
 } from './polyline.ts';
 import type { Patch } from './Patch.ts';
 import type { Wasp } from './Wasp.ts';
+import type { Buyer } from './Buyer.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -46,6 +47,30 @@ export class Route {
    * every line you point at a wasp is a line that stopped earning.
    */
   targetWasp: Wasp | null = null;
+  /**
+   * Whether this line is a guard line: its bees fight instead of foraging.
+   *
+   * Set when a drag lands on a wasp and never cleared while the route lives,
+   * which is the whole point. The wasp it was aimed at will be dead or gone in
+   * seconds, but the *line* stays where the player put it, and every wasp that
+   * passes within reach of a bee on it gets hit.
+   *
+   * That is where the skill went. A wave crosses the maze through corridors,
+   * so a line laid across the corridor they must use is worth several lines
+   * laid on top of individual wasps — and reading the board for that corridor
+   * is a real decision made under a real clock.
+   */
+  guard = false;
+  /**
+   * The buyer this line sells to, if it is a sell line.
+   *
+   * A route now has exactly one job: gather from a flower, hold a corridor
+   * against wasps, or carry honey to a buyer. Keeping them exclusive is what
+   * makes the five route slots the real budget of the game — every line spent
+   * on selling is a line not gathering, and a hive that is filling up while you
+   * decide is the clock on that choice.
+   */
+  targetBuyer: Buyer | null = null;
   /** Bees currently assigned. Maintained by Field. */
   beeCount = 0;
   /**
@@ -204,6 +229,23 @@ export class Route {
   markPinch(s: number): void {
     this.pinchAt = s;
     this.pinchTimer = TUNING.route.pinchSeconds;
+  }
+
+  /**
+   * Whether the live tip still reaches `targetBuyer`, so bees can trade.
+   *
+   * Measured from the **tip**, not from the bee. A bee eases toward its sample
+   * point rather than snapping to it, so it is always a little behind the line
+   * it is flying; testing the bee's own position meant a sell line that plainly
+   * touched the buyer paid nothing, which is the most confusing failure this
+   * game has available to it.
+   */
+  reachesBuyer(): boolean {
+    const buyer = this.targetBuyer;
+    if (!buyer) return false;
+    return (
+      Math.hypot(buyer.x - this.tipX, buyer.y - this.tipY) <= TUNING.honey.reachRadius
+    );
   }
 
   /** Whether the live tip still reaches `target`, so bees can collect. */

@@ -1,5 +1,6 @@
 import { TUNING } from '../config/tuning.ts';
 import type { DayFeatures } from './DayCycle.ts';
+import type { Glyph } from '../render/itemIcons.ts';
 
 /**
  * The run's item shop.
@@ -108,6 +109,10 @@ export interface ItemInfo {
   id: ItemId;
   name: string;
   rarity: Rarity;
+  /** The silhouette drawn on the card. See render/itemIcons.ts. */
+  glyph: Glyph;
+  /** Colour the glyph is drawn in. */
+  iconTint: number;
   /** The effect in a handful of characters, for the card. */
   effect: string;
   /**
@@ -126,6 +131,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   // ---- common: the everyday levers, useful on any board
   scoutBees: {
     id: 'scoutBees',
+    glyph: 'eye',
+    iconTint: 0x9bd3f0,
     name: 'Scout Bees',
     rarity: 'common',
     effect: 'field mapped at dawn',
@@ -138,6 +145,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   waxedTrails: {
     id: 'waxedTrails',
+    glyph: 'comb',
+    iconTint: 0xf0c14b,
     name: 'Waxed Trails',
     rarity: 'common',
     effect: '+5s route hold',
@@ -148,6 +157,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   earlyRise: {
     id: 'earlyRise',
+    glyph: 'sun',
+    iconTint: 0xffd76a,
     name: 'Early Rise',
     rarity: 'common',
     effect: '+8s daylight',
@@ -158,6 +169,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   richLoam: {
     id: 'richLoam',
+    glyph: 'leaf',
+    iconTint: 0x8fd06a,
     name: 'Rich Loam',
     rarity: 'common',
     effect: '+15% pollen',
@@ -168,6 +181,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   swiftWings: {
     id: 'swiftWings',
+    glyph: 'wing',
+    iconTint: 0xcfe6f7,
     name: 'Swift Wings',
     rarity: 'common',
     effect: '+8% bee speed',
@@ -178,6 +193,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   combFrames: {
     id: 'combFrames',
+    glyph: 'drop',
+    iconTint: 0xf0b429,
     name: 'Comb Frames',
     rarity: 'common',
     effect: '+7% honey',
@@ -190,6 +207,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   // ---- rare: the answers to a specific board
   pruningShears: {
     id: 'pruningShears',
+    glyph: 'shears',
+    iconTint: 0xb7c4cf,
     name: 'Pruning Shears',
     rarity: 'rare',
     effect: 'brambles cut back',
@@ -200,6 +219,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   smokePot: {
     id: 'smokePot',
+    glyph: 'smoke',
+    iconTint: 0xc9c1b4,
     name: 'Smoke Pot',
     rarity: 'rare',
     effect: 'wasps keep away',
@@ -211,6 +232,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   guardBees: {
     id: 'guardBees',
+    glyph: 'shield',
+    iconTint: 0xffc857,
     name: 'Guard Bees',
     rarity: 'rare',
     effect: 'a guard at the door',
@@ -224,6 +247,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   propolisSeal: {
     id: 'propolisSeal',
+    glyph: 'seal',
+    iconTint: 0xd08a4a,
     name: 'Propolis Seal',
     rarity: 'rare',
     effect: '-35% honey stolen',
@@ -234,6 +259,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   stingers: {
     id: 'stingers',
+    glyph: 'sting',
+    iconTint: 0xe8e2d6,
     name: 'Sharpened Stingers',
     rarity: 'rare',
     effect: '+1 damage per bee',
@@ -244,6 +271,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   lookouts: {
     id: 'lookouts',
+    glyph: 'flask',
+    iconTint: 0x8fd0c4,
     name: 'Lookouts',
     rarity: 'rare',
     effect: '+2s raid warning',
@@ -256,6 +285,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   // ---- epic: the ones that change what the hive is
   queensGift: {
     id: 'queensGift',
+    glyph: 'crown',
+    iconTint: 0xffd166,
     name: "Queen's Gift",
     rarity: 'epic',
     effect: '+5 bees',
@@ -266,6 +297,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   windbreak: {
     id: 'windbreak',
+    glyph: 'wind',
+    iconTint: 0xa9d6e5,
     name: 'Windbreak',
     rarity: 'epic',
     effect: 'routes resist wind',
@@ -276,6 +309,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
   royalJelly: {
     id: 'royalJelly',
+    glyph: 'drop',
+    iconTint: 0xfff0a8,
     name: 'Royal Jelly',
     rarity: 'epic',
     effect: '+18% honey, +12% speed',

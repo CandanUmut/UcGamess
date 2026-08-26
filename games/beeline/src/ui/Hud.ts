@@ -32,6 +32,16 @@ export class Hud {
   private readonly alertText: Phaser.GameObjects.Text;
   private alertPhase = 0;
 
+  /** The comb gauge: how full the hive is, and whether it is spilling. */
+  private readonly combBg: Phaser.GameObjects.Rectangle;
+  private readonly combFill: Phaser.GameObjects.Rectangle;
+  private readonly combLabel: Phaser.GameObjects.Text;
+  private combShown = 0;
+  private spillPhase = 0;
+
+  /** One row per buyer: name, price, and which way it is going. */
+  private readonly priceTexts: Phaser.GameObjects.Text[] = [];
+
   /**
    * Wind readout.
    *
@@ -131,7 +141,28 @@ export class Hud {
       .setOrigin(0.5, 0)
       .setAlpha(0);
 
+    // Drawn from the bottom up, because a filling vessel that grows downward
+    // reads as draining. `setOrigin(0.5, 1)` pins it to its own base so only
+    // the height has to be animated.
+    this.combBg = scene.add.rectangle(0, 0, 26, 96, 0x3c3524, 0.22).setOrigin(0.5, 1);
+    this.combFill = scene.add.rectangle(0, 0, 22, 0, 0xf0b429, 0.95).setOrigin(0.5, 1);
+    this.combLabel = scene.add
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '13px', color: COLORS.dim })
+      .setOrigin(0.5, 0);
+
+    for (let i = 0; i < 2; i += 1) {
+      this.priceTexts.push(
+        scene.add
+          .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: COLORS.text })
+          .setOrigin(1, 0.5),
+      );
+    }
+
     this.root.add([
+      this.combBg,
+      this.combFill,
+      this.combLabel,
+      ...this.priceTexts,
       this.dayText,
       this.timerText,
       this.barBg,
@@ -233,6 +264,18 @@ export class Hud {
     this.banner.setPosition(safe.centerX, safe.y + 140);
     this.alertText.setPosition(safe.centerX, top + 42);
 
+    // Hard against the left edge under the day label, where nothing else lives
+    // and a glance costs no eye travel from the board.
+    const combX = safe.x + 40;
+    const combBottom = safe.y + 190;
+    this.combBg.setPosition(combX, combBottom);
+    this.combFill.setPosition(combX, combBottom);
+    this.combLabel.setPosition(combX, combBottom + 6);
+
+    this.priceTexts.forEach((text, index) => {
+      text.setPosition(safe.right - 24, top + 34 + index * 22);
+    });
+
     this.swarmText.setPosition(safe.x + 24, top + 34);
     this.unfoundText.setPosition(safe.x + 24, top + 56);
     this.windAnchorX = safe.right - 62;
@@ -294,6 +337,66 @@ export class Hud {
     this.alertPhase += deltaSeconds * 6;
     this.alertText.setText(text);
     this.alertText.setAlpha(0.72 + 0.28 * Math.abs(Math.sin(this.alertPhase)));
+  }
+
+  /**
+   * The comb gauge, and the prices.
+   *
+   * The gauge is eased rather than set, so honey visibly *fills* the comb as
+   * bees arrive instead of stepping. That animation is not decoration: the
+   * whole selling loop is a race between a filling vessel and a moving price,
+   * and neither is worth watching if the vessel jumps.
+   */
+  setHive(
+    fullness: number,
+    honey: number,
+    cap: number,
+    spilling: boolean,
+    deltaSeconds: number,
+  ): void {
+    // Eased toward the true value rather than snapped. Fast enough to feel
+    // responsive, slow enough that the last delivery before the brim reads as
+    // a rise rather than a jump.
+    this.combShown += (fullness - this.combShown) * Math.min(1, deltaSeconds * 7);
+
+    const height = Math.max(0, Math.round(96 * this.combShown));
+    this.combFill.setSize(22, height);
+
+    if (spilling) {
+      // A brimming hive is an emergency, and it says so in the one colour the
+      // rest of the HUD reserves for losing something.
+      this.spillPhase += deltaSeconds * 7;
+      this.combFill.setFillStyle(
+        0xff7043,
+        0.75 + 0.25 * Math.abs(Math.sin(this.spillPhase)),
+      );
+      this.combLabel.setText('SPILLING').setColor('#ff8a70');
+    } else {
+      this.spillPhase = 0;
+      this.combFill.setFillStyle(0xf0b429, 0.95);
+      this.combLabel
+        .setText(`${Math.round(honey)}/${Math.round(cap)}`)
+        .setColor(COLORS.dim);
+    }
+  }
+
+  /** The two buyers' prices, best one highlighted. */
+  setPrices(
+    rows: ReadonlyArray<{ name: string; price: number; trend: number; tint: number }>,
+  ): void {
+    let best = rows[0];
+    for (const row of rows) if (best && row.price > best.price) best = row;
+    rows.forEach((row, index) => {
+      const text = this.priceTexts[index];
+      if (!text) return;
+      const arrow = row.trend > 0 ? '▲' : row.trend < 0 ? '▼' : '·';
+      text.setText(`${row.name}  ${row.price.toFixed(2)} ${arrow}`);
+      // Tinted by buyer so the number on the HUD and the depot on the board are
+      // obviously the same thing, and brightened when it is the better offer.
+      text.setColor(
+        row === best ? `#${row.tint.toString(16).padStart(6, '0')}` : COLORS.dim,
+      );
+    });
   }
 
   /** One-line announcement for a day that introduces something new. */

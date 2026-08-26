@@ -80,7 +80,7 @@ export class MenuScene extends BaseScene {
       })
       .setOrigin(0.5);
 
-    const resuming = this.save.day > 1 || this.save.honey > 0 || this.save.bestRunDay > 0;
+    const resuming = this.save.day > 1 || this.save.money > 0 || this.save.bestRunDay > 0;
 
     new Button(this, {
       x: cx,

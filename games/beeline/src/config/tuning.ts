@@ -192,23 +192,58 @@ export interface WindTuning {
   rotationSpeed: number;
 }
 
+/**
+ * One kind of wasp.
+ *
+ * Three of them, because one enemy that always behaves the same way is a
+ * timer with wings — the playtest called the single wasp "no skill, no real
+ * threat, and very boring", and being alone was half of why. A wave you have
+ * to *read* before you answer it is a different thing entirely.
+ */
+export interface WaspKindTuning {
+  speed: number;
+  /** Bee hits to bring one down. */
+  health: number;
+  /**
+   * Share of the **day's quota** one of these takes in a full uninterrupted
+   * raid.
+   *
+   * Expressed against the quota rather than as honey per second, which is the
+   * fix for the flattest note in the report: "even though you let the wasp in
+   * almost nothing happens". A flat 14/second was 6% of a day-ten quota and
+   * literal noise by day fifteen. A share stays a threat at every point in the
+   * run, and the arithmetic a player does is the one that matters — "that is a
+   * fifth of my day walking out of the door".
+   */
+  stealShare: number;
+  /** Seconds between this kind driving off one more bee at the hive. */
+  beeLossInterval: number;
+  /**
+   * Chance a bee that lands a hit is lost.
+   *
+   * The other half of "there is no fight". Bees used to strike for free, so
+   * defending was a button rather than a trade. Now a hornet costs real swarm
+   * to bring down, and whether to pay is the decision.
+   */
+  retaliation: number;
+  /** Drawn size, relative to the base sprite. */
+  scale: number;
+  tint: number;
+  /** Shown in the wave forecast. */
+  name: string;
+}
+
 export interface WaspTuning {
   startDay: number;
-  speed: number;
   safeRadius: number;
   interceptRadius: number;
   scatterSeconds: number;
-  /** Bee hits to bring one down. */
-  health: number;
-  /** Honey a wasp drains per second once it reaches the hive. */
-  stealPerSecond: number;
-  /** Seconds between a raiding wasp driving off one more bee. */
-  beeLossInterval: number;
+  kinds: { raider: WaspKindTuning; drone: WaspKindTuning; hornet: WaspKindTuning };
   /** How long a wasp lingers at the hive before leaving on its own. */
   raidSeconds: number;
   /** Damage one arriving bee does. */
   beeDamage: number;
-  /** How close a route's tip must be for its bees to reach the wasp. */
+  /** How close a bee has to be to strike, and a route's tip to be a guard. */
   reachRadius: number;
   /** How close a wasp must get to the hive to start robbing it. */
   arriveRadius: number;
@@ -225,9 +260,52 @@ export interface RaidTuning {
   maxGapSeconds: number;
   firstRaidEarliest: number;
   warningSeconds: number;
+  /** Wasps in the first wave. */
   baseSize: number;
+  /** One more wasp per this many days. */
   sizeEveryDays: number;
   maxSize: number;
+  /** Day the quick drones start turning up. */
+  droneFromDay: number;
+  /** Day the heavy hornets start turning up. */
+  hornetFromDay: number;
+  /** Fraction of a wave that is drones / hornets once they appear. */
+  droneShare: number;
+  hornetShare: number;
+}
+
+export interface BuyerTuning {
+  name: string;
+  /** Money paid per unit of honey at this buyer's own normal. */
+  basePrice: number;
+  /** Seconds for the slow wave and the fast one. */
+  periodSlow: number;
+  periodFast: number;
+  /** How far each wave moves the price, as a fraction of base. */
+  swingSlow: number;
+  swingFast: number;
+  /** Price floor, as a fraction of base. Nobody ever pays nothing. */
+  floorFraction: number;
+  /** How much one unit of honey sold here depresses the price. */
+  saturationPerHoney: number;
+  /** How fast that wears off, per second. */
+  saturationRecovery: number;
+  maxSaturation: number;
+  /** Board position, in design units. */
+  x: number;
+  y: number;
+  tint: number;
+}
+
+export interface HoneyTuning {
+  /** Hive capacity at level zero. Deliberately small — see the runtime note. */
+  baseCap: number;
+  /** Honey one bee carries to a buyer per trip. */
+  perSellTrip: number;
+  /** How near a route's tip must be for its bees to trade. */
+  reachRadius: number;
+  /** How near a drag has to end to count as aimed at a buyer. */
+  aimRadius: number;
 }
 
 export interface MazeTuning {
@@ -304,6 +382,8 @@ export interface Tuning {
   day: DayTuning;
   wind: WindTuning;
   wasp: WaspTuning;
+  buyers: Record<'market' | 'apothecary', BuyerTuning>;
+  honey: HoneyTuning;
   raid: RaidTuning;
   fog: {
     cellSize: number;
@@ -491,7 +571,15 @@ export const TUNING: Tuning = {
     //
     // Days one to seven are untouched. That is where a new player decides
     // whether to keep going, and none of this problem lives there.
-    quotas: [60, 110, 460, 700, 860, 1050, 1300, 1550, 1800, 2150, 2500, 2900],
+    // In money now, not honey.
+    //
+    // Derived rather than guessed, but **not yet playtested** — see DESIGN.md
+    // §29. A scripted seller converts 55-70% of the honey it gathers at an
+    // effective 1.3 money per unit, so money lands at roughly 0.78x what the
+    // same board used to yield in honey. These are the old honey figures at
+    // two thirds, which leaves a competent day comfortably clear and a sloppy
+    // one short. The first real run is what settles it.
+    quotas: [40, 75, 300, 460, 570, 700, 860, 1030, 1200, 1420, 1650, 1920],
     quotaGrowthAfterTable: 1.18,
   },
 
@@ -518,31 +606,85 @@ export const TUNING: Tuning = {
    * point of putting an enemy on it. The warning is what keeps that fair —
    * surprise about *when*, never about *whether you had a chance*.
    */
+  /**
+   * Wasps, in three kinds.
+   *
+   * The single raider that used to turn up alone was reported as "no skill, no
+   * real threat, and very boring", and both halves of that were true in the
+   * numbers. It stole a flat 140 honey — six percent of a day-ten quota — and
+   * bees killed it for free, so there was no fight to have and nothing much
+   * lost by skipping it.
+   *
+   * What replaces it is a **wave you have to read**. Raiders go for the honey,
+   * drones are fast and go for the swarm, hornets are slow, tough and take a
+   * tenth of the day's quota each. Every one of them hits back, so a defence
+   * costs bees and choosing what to answer is the game.
+   */
   wasp: {
     startDay: 7,
-    speed: 95,
     safeRadius: 160,
     interceptRadius: 34,
     scatterSeconds: 1.2,
-    /** Bee hits to bring one down. */
-    health: 5,
-    /** Honey a wasp drains per second once it reaches the hive. */
-    stealPerSecond: 14,
-    // Sized against a whole raid rather than per second. An ignored raid costs
-    // roughly three bees and 140 honey — noticeable against a day-ten quota,
-    // survivable once, and genuinely bad three times. Defending early is what
-    // makes the difference, which is the decision the system exists for.
-    /** Seconds between a raiding wasp driving off one more bee. */
-    beeLossInterval: 2.8,
+
+    kinds: {
+      /** The staple. Middling everything; the wave is mostly these. */
+      raider: {
+        speed: 95,
+        health: 3,
+        stealShare: 0.05,
+        beeLossInterval: 3.2,
+        retaliation: 0.3,
+        scale: 1,
+        tint: 0xffffff,
+        name: 'raiders',
+      },
+      /**
+       * Fast and fragile, and after the swarm rather than the stores.
+       *
+       * The one that punishes a slow reaction. It is at the door before a
+       * comfortable defence is drawn, so the answer is a line already sitting
+       * across the approach — which is the whole reason placing a guard line
+       * early is a skill worth having.
+       */
+      drone: {
+        speed: 165,
+        health: 2,
+        stealShare: 0.02,
+        beeLossInterval: 1.5,
+        retaliation: 0.18,
+        scale: 0.78,
+        tint: 0xbfe06a,
+        name: 'drones',
+      },
+      /**
+       * Slow, tough, and expensive to leave alone.
+       *
+       * A tenth of the quota each, and it takes seven hits to drop while
+       * downing over half the bees that land them. Meeting one head-on is
+       * rarely right; the shape of the answer is a line placed where it has to
+       * pass, plus Guard Bees at the door for what gets through.
+       */
+      hornet: {
+        speed: 68,
+        health: 7,
+        stealShare: 0.1,
+        beeLossInterval: 4.5,
+        retaliation: 0.55,
+        scale: 1.4,
+        tint: 0xff8a5c,
+        name: 'hornets',
+      },
+    },
+
     /** How long a wasp lingers at the hive before leaving on its own. */
     raidSeconds: 10,
     /** Damage one arriving bee does. */
     beeDamage: 1,
-    /** How close a route's tip must be for its bees to reach the wasp. */
+    /** How close a bee has to be to strike, and a route's tip to be a guard. */
     reachRadius: 74,
     /** How close a wasp must get to the hive to start robbing it. */
     arriveRadius: 70,
-    // Two guards bring a wasp down in about two and a half seconds, so a
+    // Two guards bring a raider down in about a second and a half, so a
     // stacked defence genuinely holds the door while a single one only buys
     // time. That gap is what makes the second copy worth buying.
     guardInterval: 1.0,
@@ -553,29 +695,45 @@ export const TUNING: Tuning = {
     huntSeconds: 4,
     // Wider than the flower assist, because a wasp is a moving target. A drag
     // aimed squarely at one still ends well behind it: the wasp covers most of
-    // a corridor in the second the gesture takes. At the flower radius the
-    // defence gesture failed silently against exactly the raiders that most
-    // needed answering — the quick ones.
+    // a corridor in the second the gesture takes.
     aimRadius: 200,
   },
 
   raid: {
-    /** Gap between raids, sampled uniformly. Never a metronome. */
-    minGapSeconds: 16,
-    maxGapSeconds: 38,
-    /** Quiet opening so the first raid never lands before the day has started. */
+    // Wider than the old 16-38 because a wave is a bigger event than a single
+    // wasp was: two or three a day that each demand an answer, rather than
+    // three that could all be ignored.
+    /** Gap between waves, sampled uniformly. Never a metronome. */
+    minGapSeconds: 22,
+    maxGapSeconds: 46,
+    /** Quiet opening so the first wave never lands before the day has started. */
     firstRaidEarliest: 18,
     /**
-     * Seconds of warning before wasps appear.
+     * Seconds of warning before the wave appears.
      *
-     * The whole fairness budget. Long enough to break off what you were doing
-     * and draw a defence, short enough that the surprise survives.
+     * The whole fairness budget. Longer than it was, because there is now more
+     * to decide in it than "draw a line at the wasp" — the forecast names what
+     * is coming, and reading it is the point.
      */
-    warningSeconds: 2.6,
-    /** Wasps per raid: base, plus one more every `sizeEveryDays`. */
-    baseSize: 1,
-    sizeEveryDays: 3,
-    maxSize: 4,
+    warningSeconds: 3.4,
+    /**
+     * Wave size. Three on the day wasps arrive, growing to ten.
+     *
+     * "Why are there only 1 usually" was the other half of the report, and it
+     * was right: a lone enemy cannot make a board feel besieged however hard it
+     * hits. A wave can be triaged, funnelled and partly let through, which is
+     * where the skill lives.
+     */
+    baseSize: 3,
+    sizeEveryDays: 2,
+    maxSize: 10,
+    // Placed in the gaps the rest of the schedule leaves: rich patches take
+    // day nine and the night bloom takes day twelve, and the rule this repo
+    // has kept since the first draft is one new thing to learn at a time.
+    droneFromDay: 10,
+    hornetFromDay: 13,
+    droneShare: 0.35,
+    hornetShare: 0.2,
   },
 
   /**
@@ -676,7 +834,10 @@ export const TUNING: Tuning = {
     // ceiling nothing reaches. Level seven puts it at 2,300, just under. There
     // is a test that fails the moment this line raises a ceiling that does not
     // bind, which is what caught an eighth level being added here.
-    honeyStore: { base: 70, growth: 1.5, levels: 7, perLevel: 300 },
+    // Re-sized when this line stopped being an offline curiosity and became
+    // the hive's actual capacity: 220 at level zero to 710 at the top, so the
+    // pressure to sell eases across a run without ever going away.
+    honeyStore: { base: 70, growth: 1.5, levels: 7, perLevel: 70 },
     /**
      * The line that never runs out.
      *
@@ -712,6 +873,83 @@ export const TUNING: Tuning = {
    * The window stays fixed and generous; it exists only to stop a device clock
    * set years forward from paying out years of honey.
    */
+  /**
+   * The two buyers.
+   *
+   * The Market is close, steady and cheap; the Apothecary is far, wild and
+   * pays much better at its peaks. That contrast is the decision — not "which
+   * number is bigger right now", but whether a long run to a swinging price is
+   * worth the trips it costs, with a hive that is filling up while you decide.
+   *
+   * Both sit on the far side of the board from the hive's corner, so selling is
+   * always a real journey through the maze rather than a formality.
+   */
+  buyers: {
+    market: {
+      name: 'The Market',
+      basePrice: 1,
+      // A slow wave you can plan around and a small fast one so the number is
+      // never quite still. Steady enough to be the answer when the hive is
+      // brimming and there is no time to gamble.
+      periodSlow: 26,
+      periodFast: 11,
+      swingSlow: 0.2,
+      swingFast: 0.08,
+      floorFraction: 0.45,
+      saturationPerHoney: 0.0011,
+      saturationRecovery: 0.055,
+      maxSaturation: 0.45,
+      // Close, in the same lower band as the hive. A sell line here is about a
+      // third of the board — cheap enough to keep standing all day, which is
+      // exactly what the safe buyer should be.
+      x: 700,
+      y: 620,
+      tint: 0xf0a83c,
+    },
+    apothecary: {
+      name: 'The Apothecary',
+      // Half again as much at its own normal, and it swings by more than half
+      // that on top. Catching a peak here is the best thing that happens in a
+      // day; arriving at a trough after a long flight is the worst.
+      basePrice: 1.5,
+      periodSlow: 19,
+      periodFast: 7,
+      swingSlow: 0.34,
+      swingFast: 0.16,
+      floorFraction: 0.35,
+      // Saturates faster as well as harder: the Apothecary is a specialist, not
+      // a warehouse, and dumping a whole hive into one is meant to be the wrong
+      // shape of sale even when the price is good.
+      saturationPerHoney: 0.0019,
+      saturationRecovery: 0.045,
+      maxSaturation: 0.55,
+      // Across the board and up. Half again the flight of the Market, which is
+      // what its better price is buying — and what makes arriving at a trough
+      // hurt, because the line cost real bees to lay and real bees to hold.
+      x: 900,
+      y: 175,
+      tint: 0xa87ce0,
+    },
+  },
+
+  /**
+   * The hive's own stores.
+   *
+   * The cap is deliberately small — a little over three full bee-loads' worth
+   * of trips — and it is now actually enforced: a full hive **spills**, and
+   * every second it spills is money walking away. That is the pressure the
+   * whole selling loop hangs on. A generous cap would mean gathering all day
+   * and selling once at dusk, which is not a loop, it is two chores.
+   */
+  honey: {
+    baseCap: 220,
+    // Six trips to empty a full hive at level zero, so a sell line is a
+    // commitment of several bees for several seconds rather than one errand.
+    perSellTrip: 38,
+    reachRadius: 88,
+    aimRadius: 150,
+  },
+
   offline: {
     baseCapHoney: 200,
     baseWindowHours: 12,

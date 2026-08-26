@@ -1662,6 +1662,94 @@ fixed shelf, because there is no shelf to learn.
 
 ---
 
+## 29. Honey is stock, money is score
+
+The loop the game shipped with had one step: gather honey, and honey _was_ the
+score. Every upgrade, every item and every quota was denominated in the same
+thing the bees were carrying, so the only question a day ever asked was "how
+much can you carry". This section is the second step.
+
+**The loop is now: find the flowers → gather pollen → choose where to sell →
+carry the honey there → bring the money home → spend it.**
+
+### The hive fills, and it spills
+
+The hive holds 220 honey at level zero — about six sell-loads — and the cap is
+now actually enforced. A full hive **spills**: bees keep flying and keep
+arriving, and everything past the brim is lost, with the comb gauge turning red
+and saying so.
+
+Three options were on the table and this is the hardest of them. Pausing the
+swarm at the brim would waste nothing and would turn a full hive into a quiet
+lull; spoiling slowly would give a grace period. Spilling makes a full hive an
+emergency, and an emergency is what makes selling urgent rather than optional.
+The gauge is eased rather than stepped for the same reason — the whole loop is
+a race between a filling vessel and a moving price, and neither is worth
+watching if the vessel jumps.
+
+### Two buyers, and why their prices are waves
+
+**The Market** is close, steady and cheap. **The Apothecary** is across the
+board, swings by more than half its own base, and pays half again as much at
+its normal. The contrast is the decision: not "which number is bigger right
+now", but whether a long line to a volatile price is worth the bees it costs to
+lay and to hold, with the combs filling while you decide.
+
+The price is the **sum of two sine waves with per-day random phases**, not a
+random walk. A walk is unreadable: the player sees a number twitch, cannot tell
+a dip from a slide, and the only strategy it supports is "sell to whoever is
+higher", which is a comparison rather than a decision. Waves are smooth, so a
+rising price visibly keeps rising and holding for six more seconds is a
+judgement you can make; bounded, so no day is decided by one freak number; and
+rhythmic, so there is something to learn while the phases keep each day's shape
+unknown. It is also what makes the trend arrow honest — an arrow on a random
+walk is a lie.
+
+Anti-correlating the two was considered and rejected. It would mean there is
+always exactly one right answer, and the read becomes trivial.
+
+**Selling depresses the price.** A buyer you have just emptied a hive into pays
+less for the next load and takes about twenty seconds to recover. Without this
+the game is "find the peak, dump everything, repeat" and the near buyer is
+pointless; with it, alternating is worth something and one huge sale is worth
+less per unit than two timed ones.
+
+### What a route is for
+
+A line now has exactly one job: **gather** from a flower, **guard** a corridor
+against wasps, or **sell** to a buyer. They are mutually exclusive, and that is
+what turns five route slots into the real budget of the game — every line spent
+selling is a line not gathering, and the filling hive is the clock on that
+choice. Each job has its own colour: amber for gathering, red for a guard line,
+and the buyer's own colour for a sell line, so "which of my lines is doing
+what" is answered without any screen furniture at all.
+
+### Balance — derived, not yet playtested
+
+Quotas are in money now. A scripted seller converts 55–70% of the honey it
+gathers, at an effective 1.3 money per unit, so a day's money lands at roughly
+0.78x what the same board used to yield in honey. The new table is the old
+honey figures at about two thirds, which should leave a competent day clear and
+a sloppy one short.
+
+**That is arithmetic, not evidence.** The probe behind it is a much weaker
+player than a human — it does not read prices, time a peak, or triage a wave —
+so it bounds the loop rather than measuring it. The first real run is what
+settles the table, and it is the single thing about this change most likely to
+need moving.
+
+### The shop got icons
+
+Fifteen items rendered as fifteen identical rectangles with different words in
+them, which the playtest called "very same and not interesting really". Words
+are the slowest thing on a screen to tell apart and the shop is the screen a
+player most wants to get through quickly. Each item now carries a silhouette in
+its own colour, drawn to a canvas at boot like everything else here. The glyph
+vocabulary is deliberately small and reused: fifteen unique little paintings
+would be fifteen things to get right and would still not read at 44px.
+
+---
+
 ## 25. Success criteria
 
 Not submission-ready until all of these hold:

@@ -25,6 +25,14 @@ export interface ButtonOptions {
   tint: number;
   onClick: () => void;
   enabled?: boolean;
+  /**
+   * Texture key for an icon drawn at the left of the card.
+   *
+   * Optional because most buttons in the game are words — "Next day", "Reroll"
+   * — and an icon on those would be noise. It exists for the shop, where four
+   * cards have to be told apart faster than four names can be read.
+   */
+  icon?: string;
 }
 
 /**
@@ -40,6 +48,7 @@ export class Button {
   private readonly bg: Phaser.GameObjects.Rectangle;
   private readonly hitZone: Phaser.GameObjects.Zone;
   private readonly labelText: Phaser.GameObjects.Text;
+  private readonly iconImage: Phaser.GameObjects.Image | undefined;
   private readonly subText: Phaser.GameObjects.Text | undefined;
   private tint: number;
   private readonly onClick: () => void;
@@ -51,6 +60,8 @@ export class Button {
     this.onClick = options.onClick;
 
     const height = options.sublabel ? MIN_HEIGHT + 22 : MIN_HEIGHT;
+    // Text shifts right to make room, so an icon never overlaps a long name.
+    const textShift = options.icon ? 22 : 0;
 
     this.bg = scene.add
       .rectangle(options.x, options.y, options.width, height, options.tint, 0.14)
@@ -70,17 +81,29 @@ export class Button {
     // are rather than guessing coordinates that shift with layout.
     this.hitZone.setName(options.label);
 
+    if (options.icon && scene.textures.exists(options.icon)) {
+      this.iconImage = scene.add
+        .image(options.x - options.width / 2 + 30, options.y, options.icon)
+        .setOrigin(0.5)
+        .setDisplaySize(34, 34);
+    }
+
     this.labelText = scene.add
-      .text(options.x, options.y + (options.sublabel ? -11 : 0), options.label, {
-        fontFamily: FONT,
-        fontSize: '24px',
-        color: '#3c3524',
-      })
+      .text(
+        options.x + textShift,
+        options.y + (options.sublabel ? -11 : 0),
+        options.label,
+        {
+          fontFamily: FONT,
+          fontSize: '24px',
+          color: '#3c3524',
+        },
+      )
       .setOrigin(0.5);
 
     if (options.sublabel) {
       this.subText = scene.add
-        .text(options.x, options.y + 15, options.sublabel, {
+        .text(options.x + textShift, options.y + 15, options.sublabel, {
           fontFamily: FONT,
           fontSize: '17px',
           color: '#7b7358',
@@ -123,6 +146,7 @@ export class Button {
     this.bg.setStrokeStyle(2, this.tint, enabled ? 0.8 : 0.25);
     this.labelText.setColor(enabled ? '#3c3524' : '#a49a80');
     this.subText?.setColor(enabled ? '#7b7358' : '#b0a893');
+    this.iconImage?.setAlpha(enabled ? 1 : 0.35);
   }
 
   setLabel(label: string, sublabel?: string): void {
@@ -135,5 +159,6 @@ export class Button {
     this.bg.destroy();
     this.labelText.destroy();
     this.subText?.destroy();
+    this.iconImage?.destroy();
   }
 }

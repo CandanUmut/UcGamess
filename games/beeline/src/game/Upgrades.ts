@@ -59,9 +59,14 @@ export const UPGRADES: Record<UpgradeId, UpgradeInfo> = {
   honeyStore: {
     id: 'honeyStore',
     name: 'Honey Store',
-    blurb: 'Hold more honey collected while you are away',
+    // Repurposed, and it is now one of the most important lines on the board.
+    // It used to raise a cap that only applied to honey earned while the game
+    // was closed, which nobody could feel. It now raises the cap on the hive
+    // itself — how much you can hold before the combs spill and a good price
+    // has to be taken rather than waited for.
+    blurb: 'The hive holds more honey before it spills',
     format: (level) =>
-      `${TUNING.offline.baseCapHoney + level * upgradeStep('honeyStore')} max`,
+      `${TUNING.honey.baseCap + level * upgradeStep('honeyStore')} capacity`,
   },
   combWax: {
     id: 'combWax',
@@ -122,7 +127,9 @@ export interface DerivedStats {
   beeSpeed: number;
   routeHoldSeconds: number;
   patchCount: number;
-  offlineCapHoney: number;
+  /** How much honey the hive holds before it spills. */
+  honeyCap: number;
+  offlineCapMoney: number;
   offlineWindowHours: number;
   /** Multiplier on honey banked per delivery. 1 at level zero. */
   honeyMultiplier: number;
@@ -136,8 +143,12 @@ export function deriveStats(levels: UpgradeLevels): DerivedStats {
     routeHoldSeconds:
       TUNING.route.holdSeconds + levels.routePersistence * u.routePersistence.perLevel,
     patchCount: TUNING.patch.baseCount + levels.bloom * u.bloom.perLevel,
-    offlineCapHoney:
-      TUNING.offline.baseCapHoney + levels.honeyStore * u.honeyStore.perLevel,
+    honeyCap: TUNING.honey.baseCap + levels.honeyStore * u.honeyStore.perLevel,
+    // Offline earnings are money the swarm sold while you were away, and the
+    // same Honey Store level that lets the hive hold more is what lets them
+    // bank more of it before the combs back up.
+    offlineCapMoney:
+      TUNING.offline.baseCapHoney + levels.honeyStore * u.honeyStore.perLevel * 4,
     // Fixed: the cap is the limit the upgrade moves. See TUNING.offline.
     offlineWindowHours: TUNING.offline.baseWindowHours,
     honeyMultiplier: 1 + levels.combWax * u.combWax.perLevel,

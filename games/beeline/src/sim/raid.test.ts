@@ -199,7 +199,7 @@ describe('drawing a line at a wasp fights it', () => {
     const route = field.createRoute(coords);
     expect(route!.targetWasp).toBe(wasp);
 
-    wasp.hit(TUNING.wasp.health);
+    wasp.hit(TUNING.wasp.kinds.raider.health);
     field.step(DT);
     expect(route!.targetWasp).toBeNull();
   });
@@ -280,7 +280,7 @@ describe('hive defences fight without the player', () => {
     wasp.beginRaid();
     field.wasps.push(wasp);
 
-    advance(field, TUNING.wasp.health * TUNING.wasp.guardInterval + 1);
+    advance(field, TUNING.wasp.kinds.raider.health * TUNING.wasp.guardInterval + 1);
     expect(wasp.health).toBe(0);
   });
 
@@ -303,7 +303,7 @@ describe('hive defences fight without the player', () => {
     field.wasps.push(wasp);
     field.step(DT);
 
-    expect(wasp.health).toBe(TUNING.wasp.health);
+    expect(wasp.health).toBe(TUNING.wasp.kinds.raider.health);
   });
 
   it('slows the theft when the hive is sealed', () => {

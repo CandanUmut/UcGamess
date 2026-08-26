@@ -26,6 +26,7 @@ import {
 } from '../game/Items.ts';
 import type { BeelineSave } from '../game/SaveState.ts';
 import { Button } from '../ui/Button.ts';
+import { itemTextureKey } from '../render/itemIcons.ts';
 import type { Sfx } from '../audio/Sfx.ts';
 
 // Nunito first, system stack behind it. The fallback is load-bearing twice
@@ -77,7 +78,7 @@ export class NightScene extends BaseScene {
   private rerollButton: Button | null = null;
   private inventoryText!: Phaser.GameObjects.Text;
   private offered: ItemId[] = [];
-  private honeyText!: Phaser.GameObjects.Text;
+  private moneyText!: Phaser.GameObjects.Text;
   private busy = false;
   private rewardTaken = false;
 
@@ -137,8 +138,8 @@ export class NightScene extends BaseScene {
         DESIGN_WIDTH / 2,
         106,
         met
-          ? `${Math.floor(result.honey)} honey — quota ${result.quota} met`
-          : `${Math.floor(result.honey)} of ${result.quota} needed — run ended on day ${result.day}`,
+          ? `${Math.floor(result.money)} coin — target ${result.quota} met`
+          : `${Math.floor(result.money)} of ${result.quota} needed — run ended on day ${result.day}`,
         { fontFamily: FONT, fontSize: '21px', color: COLORS.dim },
       )
       .setOrigin(0.5);
@@ -166,8 +167,8 @@ export class NightScene extends BaseScene {
         .setOrigin(0.5);
     }
 
-    this.honeyText = this.add
-      .text(DESIGN_WIDTH / 2, 178, `${Math.floor(save.honey)} honey to spend`, {
+    this.moneyText = this.add
+      .text(DESIGN_WIDTH / 2, 178, `${Math.floor(save.money)} coin to spend`, {
         fontFamily: FONT,
         fontSize: '25px',
         color: COLORS.text,
@@ -208,7 +209,7 @@ export class NightScene extends BaseScene {
     });
 
     this.add
-      .text(DESIGN_WIDTH / 2, 198, 'Permanent — spend honey', {
+      .text(DESIGN_WIDTH / 2, 198, 'Permanent — spend coin', {
         fontFamily: FONT,
         fontSize: '17px',
         color: COLORS.dim,
@@ -308,6 +309,7 @@ export class NightScene extends BaseScene {
           label: ITEMS[id].name,
           sublabel: this.itemSublabel(id),
           tint: RARITY_TINT[ITEMS[id].rarity],
+          icon: itemTextureKey(id),
           enabled: this.canBuyItem(id),
           onClick: () => this.buyItem(id),
         }),
@@ -347,19 +349,19 @@ export class NightScene extends BaseScene {
   }
 
   private canBuyItem(id: ItemId): boolean {
-    return this.nightData.save.honey >= itemCost(id, this.nextDay);
+    return this.nightData.save.money >= itemCost(id, this.nextDay);
   }
 
   private canReroll(): boolean {
     const save = this.nightData.save;
-    return save.honey >= rerollCost(this.nextDay, save.rerolls);
+    return save.money >= rerollCost(this.nextDay, save.rerolls);
   }
 
   private buyItem(id: ItemId): void {
     if (this.busy || !this.canBuyItem(id)) return;
     const { save, sfx } = this.nightData;
 
-    save.honey -= itemCost(id, this.nextDay);
+    save.money -= itemCost(id, this.nextDay);
     save.items.push(id);
     // The card goes, the row does not refill. Buying is meant to cost you the
     // rest of the table's attention, not open a slot.
@@ -374,7 +376,7 @@ export class NightScene extends BaseScene {
     if (this.busy || !this.canReroll()) return;
     const { save, sfx } = this.nightData;
 
-    save.honey -= rerollCost(this.nextDay, save.rerolls);
+    save.money -= rerollCost(this.nextDay, save.rerolls);
     save.rerolls += 1;
     save.offer = rollOffer(this.nextDay, featuresForDay(this.nextDay));
     sfx.play('draw', 0.3);
@@ -411,6 +413,7 @@ export class NightScene extends BaseScene {
           label: ITEMS[id].name,
           sublabel: this.itemSublabel(id),
           tint: RARITY_TINT[ITEMS[id].rarity],
+          icon: itemTextureKey(id),
           enabled: this.canBuyItem(id),
           onClick: () => this.buyItem(id),
         }),
@@ -442,18 +445,18 @@ export class NightScene extends BaseScene {
   }
 
   private canAfford(id: UpgradeId): boolean {
-    const { levels, honey } = this.nightData.save;
+    const { levels, money } = this.nightData.save;
     const cost = upgradeCost(id, levels[id]);
-    return cost !== null && honey >= cost;
+    return cost !== null && money >= cost;
   }
 
   private buy(id: UpgradeId): void {
     const { save, sfx } = this.nightData;
     const level = save.levels[id];
     const cost = upgradeCost(id, level);
-    if (cost === null || save.honey < cost) return;
+    if (cost === null || save.money < cost) return;
 
-    save.honey -= cost;
+    save.money -= cost;
     save.levels[id] = Math.min(level + 1, maxLevel(id));
     sfx.play('upgrade', 0.4);
 
@@ -462,7 +465,7 @@ export class NightScene extends BaseScene {
   }
 
   private refresh(): void {
-    this.honeyText.setText(`${Math.floor(this.nightData.save.honey)} honey to spend`);
+    this.moneyText.setText(`${Math.floor(this.nightData.save.money)} coin to spend`);
 
     UPGRADE_ORDER.forEach((id, index) => {
       const button = this.upgradeButtons[index];
@@ -487,7 +490,7 @@ export class NightScene extends BaseScene {
     // At most one rewarded offer per night, and only when it buys something the
     // player visibly wants right now. A near miss wants more time; a completed
     // day wants more honey.
-    const offering = adsAvailable && (result.nearMiss || result.honey > 0);
+    const offering = adsAvailable && (result.nearMiss || result.money > 0);
 
     if (adsAvailable && result.nearMiss) {
       new Button(this, {
@@ -499,12 +502,12 @@ export class NightScene extends BaseScene {
         tint: 0x7fd1ae,
         onClick: () => void this.onRewarded('extend'),
       });
-    } else if (adsAvailable && result.honey > 0) {
+    } else if (adsAvailable && result.money > 0) {
       new Button(this, {
         x: DESIGN_WIDTH / 2 - 190,
         y,
         width: 350,
-        label: `▶  Double to ${Math.floor(result.honey * 2)}`,
+        label: `▶  Double to ${Math.floor(result.money * 2)}`,
         sublabel: 'watch a short ad',
         tint: 0xffd966,
         onClick: () => void this.onRewarded('double'),
@@ -546,8 +549,8 @@ export class NightScene extends BaseScene {
     this.rewardTaken = true;
 
     if (kind === 'double') {
-      const bonus = Math.floor(this.nightData.result.honey);
-      this.nightData.save.honey += bonus;
+      const bonus = Math.floor(this.nightData.result.money);
+      this.nightData.save.money += bonus;
       this.nightData.onChanged();
       this.busy = false;
       this.refresh();
