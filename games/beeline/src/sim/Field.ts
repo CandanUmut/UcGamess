@@ -1269,20 +1269,64 @@ export class Field {
 
     const next = this.aim.nextStep(dt);
 
-    // Out of flight, off the board, or into a hedge: the shot lands here.
+    // Out of flight, or off the board: the shot lands here.
     if (
       next.distance <= 0 ||
       next.x < 6 ||
       next.y < 6 ||
       next.x > WORLD_WIDTH - 6 ||
-      next.y > WORLD_HEIGHT - 6 ||
-      this.maze.segmentBlocked(this.aim.headX, this.aim.headY, next.x, next.y)
+      next.y > WORLD_HEIGHT - 6
     ) {
       this.landShot();
       return;
     }
 
-    this.aim.advanceTo(next.x, next.y, next.distance);
+    // A hedge turns a shot rather than stopping it.
+    //
+    // Stopping dead was measured to make the whole economy unreachable: a shot
+    // travels in a straight line and a maze does not, so on any dense day a
+    // line fired at a shop grazed the first hedge, stopped, and the day earned
+    // nothing at all. Sliding is the rule drawn paths have always used — take
+    // the part of the step the wall permits and drop the part it does not — so
+    // a shot down a corridor follows the corridor.
+    //
+    // A shot pressed into a corner takes neither axis, and *that* is where it
+    // lands. The wall still ends the shot; it just has to be a wall the shot
+    // cannot go along rather than one it merely touched.
+    let { x, y } = next;
+    if (this.maze.segmentBlocked(this.aim.headX, this.aim.headY, x, y)) {
+      const dx = x - this.aim.headX;
+      const dy = y - this.aim.headY;
+      const freeX =
+        dx !== 0 &&
+        !this.maze.segmentBlocked(
+          this.aim.headX,
+          this.aim.headY,
+          this.aim.headX + dx,
+          this.aim.headY,
+        );
+      const freeY =
+        dy !== 0 &&
+        !this.maze.segmentBlocked(
+          this.aim.headX,
+          this.aim.headY,
+          this.aim.headX,
+          this.aim.headY + dy,
+        );
+
+      if (freeX) {
+        x = this.aim.headX + dx;
+        y = this.aim.headY;
+      } else if (freeY) {
+        x = this.aim.headX;
+        y = this.aim.headY + dy;
+      } else {
+        this.landShot();
+        return;
+      }
+    }
+
+    this.aim.advanceTo(x, y, next.distance);
 
     // Arriving at something worth arriving at stops the shot on its own.
     //
@@ -1296,9 +1340,9 @@ export class Field {
     if (this.aim.flownLength < TUNING.route.minLength) return;
 
     if (
-      this.nearestPatchTo(next.x, next.y, TUNING.patch.reachRadius, true) ||
-      this.nearestBuyerTo(next.x, next.y, TUNING.honey.reachRadius) ||
-      this.nearestWaspTo(next.x, next.y, TUNING.wasp.reachRadius)
+      this.nearestPatchTo(x, y, TUNING.patch.reachRadius, true) ||
+      this.nearestBuyerTo(x, y, TUNING.honey.reachRadius) ||
+      this.nearestWaspTo(x, y, TUNING.wasp.reachRadius)
     ) {
       this.landShot();
     }
