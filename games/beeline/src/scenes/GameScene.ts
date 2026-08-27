@@ -686,9 +686,6 @@ export class GameScene extends BaseGameplayScene {
     if (this.phase === 'playing') {
       this.hud.update(this.day, this.field.money, dayQuota(this.day), this.secondsLeft);
 
-      const wind = this.field.windVector;
-      this.hud.setWind(wind.x, wind.y, wind.strength);
-
       // A bee goes past now and then. Only while there is a swarm to hear —
       // a buzz over an empty board is a sound with nothing making it.
       if (this.field.time >= this.nextBuzzAt && this.field.bees.length > 0) {
@@ -709,12 +706,17 @@ export class GameScene extends BaseGameplayScene {
         routesDrawn: this.routesDrawn,
         honey: this.field.honey,
         money: this.field.money,
-        anyRouteRetreating: this.field.routes.some((r) => r.isRetreating),
+        missed: this.field.missed,
       });
       this.tutorialText.setText(this.tutorial.current?.text ?? '');
 
       const building = this.field.countBuilders();
       this.hud.setSwarm(this.field.bees.length - building, building, this.field.beesLost);
+      this.hud.setLines(
+        this.field.routes.length,
+        this.field.stats.routeSlots,
+        this.field.missed,
+      );
       this.hud.setUnfound(
         this.field.patches.filter((p) => p.alive && !p.discovered).length,
       );
@@ -810,6 +812,22 @@ export class GameScene extends BaseGameplayScene {
     }
 
     for (const lost of events.pollenLost) this.showLoss(lost.x, lost.y, 'pollen!');
+
+    // A bloom nobody reached. The clearest possible statement of what the game
+    // wants from the player, and the only loss they can always have prevented.
+    for (const gone of events.wilted) {
+      this.showLoss(gone.x, gone.y, 'wilted');
+      this.juice.scatter(gone.x, gone.y);
+    }
+    if (events.wilted.length > 0) this.sfx.playVaried('wasp', 0.16, 420);
+
+    // A new bloom, where the last one is not.
+    for (const bloom of events.bloomed) {
+      for (let i = 0; i < 4; i += 1) this.juice.collect(bloom.x, bloom.y, 2);
+    }
+    if (events.bloomed.length > 0) this.sfx.playNote('collect', 0.11);
+
+    for (const gone of events.replaced) this.showLoss(gone.x, gone.y, 'line dropped');
 
     // A sale is the payoff of the whole loop, so it lands where it happened —
     // at the buyer, in that buyer's colour, with the money it made.
@@ -1009,7 +1027,6 @@ export class GameScene extends BaseGameplayScene {
         this.field.fog.cells.fill(1);
         this.field.fog.dirty = true;
       },
-      wind: () => this.field.windVector,
       stats: () => this.field.getStats(),
       routes: () =>
         this.field.routes.map((r) => ({

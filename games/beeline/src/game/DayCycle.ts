@@ -97,7 +97,6 @@ export function mazeOpennessForDay(day: number): number {
 }
 
 export interface DayFeatures {
-  wind: boolean;
   /**
    * Wasps in a single raid, or 0 on a day with no raids.
    *
@@ -160,7 +159,6 @@ export function waveForDay(day: number): WaspKind[] {
 
 export function featuresForDay(day: number): DayFeatures {
   return {
-    wind: day >= TUNING.wind.startDay,
     raidSize: raidSizeForDay(day),
     wave: waveForDay(day),
     mazeOpenness: mazeOpennessForDay(day),
@@ -176,8 +174,6 @@ export function dayIntroduction(day: number): string | null {
       return 'A second patch. Your swarm splits between routes.';
     case TUNING.maze.startDay:
       return 'Brambles close in. Your lines cannot cross them — find a way round.';
-    case TUNING.wind.startDay:
-      return 'Wind. Straight lines will bend.';
     case TUNING.wasp.startDay:
       return 'Wasps raid in waves. Draw a line across their path to hold them.';
     case RICH_PATCH_DAY:
@@ -219,7 +215,6 @@ export function forecastFor(day: number): string[] {
           : 'a dense maze',
     );
   }
-  if (features.wind) out.push('wind');
   if (features.raidSize > 0) {
     // Names the kinds, not just the count. Reading the forecast is how a player
     // decides whether tomorrow wants Guard Bees or a Smoke Pot, and "4 wasps"
@@ -248,7 +243,6 @@ export function nextUnlock(day: number): { day: number; what: string } | null {
 
 function unlockName(day: number): string | null {
   if (day === TUNING.maze.startDay) return 'brambles';
-  if (day === TUNING.wind.startDay) return 'wind';
   if (day === TUNING.wasp.startDay) return 'wasp raids';
   if (day === RICH_PATCH_DAY) return 'rich blooms';
   if (day === SECOND_WASP_DAY) return 'bigger waves';

@@ -201,7 +201,7 @@ export class NightScene extends BaseScene {
           width: cardWidth,
           label: UPGRADES[id].name,
           sublabel: this.upgradeSublabel(id),
-          tint: id === 'routePersistence' ? 0xffd966 : 0x60a5fa,
+          tint: id === 'routeSlots' ? 0xffd966 : 0x60a5fa,
           enabled: this.canAfford(id),
           onClick: () => this.buy(id),
         }),

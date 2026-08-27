@@ -53,7 +53,6 @@ describe('escalation schedule', () => {
   it('introduces nothing on day one', () => {
     const features = featuresForDay(1);
     expect(features).toEqual({
-      wind: false,
       raidSize: 0,
       wave: [],
       mazeOpenness: 1,
@@ -74,7 +73,6 @@ describe('escalation schedule', () => {
       // maze tightening a little each day after that is intensity, not a new
       // thing to learn — the same reason a third flower has never counted.
       const additions =
-        (current.wind && !previous.wind ? 1 : 0) +
         // A *new kind* of wasp is a new thing to learn. A bigger wave of the
         // same kinds is intensity, exactly like the maze tightening — counting
         // it here would make every other day an "introduction" and the rule
@@ -139,26 +137,26 @@ describe('upgrades', () => {
   it('feeds purchased levels into the simulation stats', () => {
     const base = deriveStats(emptyLevels());
     expect(base.beeCount).toBe(TUNING.bee.baseCount);
-    expect(base.routeHoldSeconds).toBe(TUNING.route.holdSeconds);
+    expect(base.routeSlots).toBe(TUNING.route.maxCount);
 
-    const upgraded = deriveStats({ ...emptyLevels(), swarmSize: 2, routePersistence: 3 });
+    const upgraded = deriveStats({ ...emptyLevels(), swarmSize: 2, routeSlots: 3 });
     expect(upgraded.beeCount).toBe(
       TUNING.bee.baseCount + 2 * TUNING.upgrades.swarmSize.perLevel,
     );
-    expect(upgraded.routeHoldSeconds).toBeCloseTo(
-      TUNING.route.holdSeconds + 3 * TUNING.upgrades.routePersistence.perLevel,
-      5,
+    expect(upgraded.routeSlots).toBe(
+      TUNING.route.maxCount + 3 * TUNING.upgrades.routeSlots.perLevel,
     );
   });
 
-  it('makes route persistence the biggest relief per level', () => {
-    // The flagship upgrade must actually be worth its price: maxing it should
-    // roughly double how long a route survives untouched.
+  it('makes lines the flagship — maxing it more than doubles your reach', () => {
+    // A line is how much of the board you can hold at once, and the board
+    // always blooms faster than the lines you own. If the flagship did not
+    // change that materially it would not be the flagship.
     const maxed = deriveStats({
       ...emptyLevels(),
-      routePersistence: maxLevel('routePersistence'),
+      routeSlots: maxLevel('routeSlots'),
     });
-    expect(maxed.routeHoldSeconds).toBeGreaterThanOrEqual(TUNING.route.holdSeconds * 1.7);
+    expect(maxed.routeSlots).toBeGreaterThanOrEqual(TUNING.route.maxCount * 2);
   });
 });
 

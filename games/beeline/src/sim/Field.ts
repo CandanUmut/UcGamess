@@ -111,6 +111,12 @@ export interface FieldEvents {
   raidLanded: number;
   /** Guard lines retired because the fight was over. */
   stoodDown: Array<{ x: number; y: number }>;
+  /** A line was dropped to make room for a new one. */
+  replaced: Array<{ x: number; y: number }>;
+  /** Blooms nobody reached in time. The thing a day is lost to. */
+  wilted: Array<{ x: number; y: number; honey: number }>;
+  /** Blooms that opened this step. */
+  bloomed: Array<{ x: number; y: number }>;
   /** Honey lost over the brim this step. */
   spilled: number;
   /** Sales completed this step, for the coin burst and the sound. */
@@ -126,7 +132,6 @@ export interface FieldEvents {
 }
 
 const NO_FEATURES: DayFeatures = {
-  wind: false,
   raidSize: 0,
   wave: [],
   mazeOpenness: 1,
@@ -212,6 +217,9 @@ export class Field {
     stolen: 0,
     raidLanded: 0,
     stoodDown: [],
+    replaced: [],
+    wilted: [],
+    bloomed: [],
     spilled: 0,
     sold: [],
     banked: 0,
@@ -236,6 +244,14 @@ export class Field {
   waspsDowned = 0;
   /** Honey lost over the brim today. The number that shames you into selling. */
   spilled = 0;
+  /** Blooms nobody reached today. The number a run is really judged by. */
+  missed = 0;
+  /** How long an unserved bloom lasts today. Shortens as the run goes on. */
+  private wiltSeconds = TUNING.patch.wiltSeconds;
+  /** Counts down to the next bloom opening. */
+  private bloomTimer = 0;
+  /** How many blooms may be open at once today. */
+  private maxBlooms = 2;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
   /** Bees this wave has taken, against the budget below. */
@@ -246,8 +262,6 @@ export class Field {
   private guardTimer = TUNING.wasp.guardInterval;
 
   private elapsed = 0;
-  private windAngle = Math.random() * Math.PI * 2;
-  private windStrength = 0;
   private patchPool = TUNING.patch.basePool;
   /** Current day, used to widen the field and size flower pools. */
   private day = 1;
@@ -281,10 +295,6 @@ export class Field {
   /** True once the hive is brimming and deliveries are being lost. */
   get isSpilling(): boolean {
     return this.honey >= this.honeyCap - 1e-6;
-  }
-
-  get routeHoldSeconds(): number {
-    return this.stats.routeHoldSeconds + this.modifiers.extraHoldSeconds;
   }
 
   // ---------------------------------------------------------------- setup
@@ -358,21 +368,36 @@ export class Field {
       this.maze.rowAt(this.hiveY),
     );
 
-    for (let i = 0; i < patchCount; i += 1) {
+    // Today's clock, and how much board the player is being asked to hold.
+    this.missed = 0;
+    this.maxBlooms = patchCount;
+    this.wiltSeconds = Math.max(
+      TUNING.patch.minWiltSeconds,
+      TUNING.patch.wiltSeconds - TUNING.patch.wiltSecondsPerDay * (day - 1),
+    );
+    this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
+
+    // Two to open with, and the rest arrive across the day.
+    //
+    // Opening the whole board at dawn would make the day one puzzle solved
+    // once; blooms arriving one at a time means the board keeps changing under
+    // a fixed number of lines, which is the decision the game is now about.
+    const opening = Math.min(2, patchCount);
+    for (let i = 0; i < opening; i += 1) {
       const kind: PatchKind =
-        features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
+        features.richPatches && i === opening - 1 ? 'rich' : 'normal';
       this.spawnPatch(kind);
     }
 
-    this.windStrength = features.wind
-      ? Math.min(
-          TUNING.wind.baseStrength +
-            (day - TUNING.wind.startDay) * TUNING.wind.strengthPerDay,
-          TUNING.wind.maxStrength,
-        )
-      : 0;
-
     this.fog.clear();
+    // The whole board, lit at dawn.
+    //
+    // Planning is the game now, and a board you cannot see cannot be planned
+    // against — you would be choosing which blooms to give up without knowing
+    // what the alternatives were. Blooms that open later in the day still
+    // arrive with their own little burst, which keeps the discovery beat
+    // without taking the plan away.
+    this.fog.revealAll();
     // The hive lights its own neighbourhood, and Scout Bees light a great deal
     // more. Day one's flowers spawn inside the hive's light, so the first
     // thirty seconds are exactly what they were before fog existed.
@@ -649,7 +674,7 @@ export class Field {
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
     const spot = this.randomPatchPosition(kind);
-    const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
+    const patch = new Patch(spot.x, spot.y, this.patchPool, kind, this.wiltSeconds);
     patch.distanceMultiplier = this.distanceMultiplierAt(spot.x, spot.y);
     patch.species = this.nextSpecies();
     this.patches.push(patch);
@@ -862,15 +887,24 @@ export class Field {
   createRoute(coords: readonly number[]): Route | null {
     if (coordsLength(coords) < TUNING.route.minLength) return null;
 
-    if (this.routes.length >= TUNING.route.maxCount) {
+    if (this.routes.length >= this.stats.routeSlots) {
+      // At the cap, the *least worked* line is the one that goes.
+      //
+      // Refusing the drag was the alternative and it is worse: a gesture that
+      // does nothing on a touchscreen is indistinguishable from a broken game.
+      // Strength is traffic the road has actually carried, so the line the
+      // swarm has used least is the one the player would have picked anyway.
       let weakest = this.routes[0];
       for (const route of this.routes) {
-        if (weakest && route.vitality < weakest.vitality) weakest = route;
+        if (weakest && route.strength < weakest.strength) weakest = route;
       }
-      if (weakest) this.killRoute(weakest);
+      if (weakest) {
+        this.events.replaced.push({ x: weakest.tipX, y: weakest.tipY });
+        this.killRoute(weakest);
+      }
     }
 
-    const route = new Route(coords, this.routeHoldSeconds);
+    const route = new Route(coords);
     route.updateTip();
     this.retarget(route);
     this.routes.push(route);
@@ -1104,10 +1138,22 @@ export class Field {
   step(dt: number): void {
     this.elapsed += dt;
 
-    for (const patch of this.patches) patch.step(dt);
+    this.markServedPatches();
+    for (const patch of this.patches) {
+      const wasAlive = patch.alive;
+      patch.step(dt);
+      if (wasAlive && !patch.alive && patch.pool > 0) {
+        // Wilted with nectar still in it: a bloom nobody got to.
+        this.missed += 1;
+        this.events.wilted.push({
+          x: patch.x,
+          y: patch.y,
+          honey: Math.round(patch.honeyLeft),
+        });
+      }
+    }
+    this.stepBlooms(dt);
     for (const buyer of this.buyers) buyer.step(dt);
-
-    if (this.windStrength > 0) this.stepWind(dt);
 
     this.stepRaid(dt);
 
@@ -1148,8 +1194,47 @@ export class Field {
 
     for (const bee of this.bees) this.stepBee(bee, dt);
 
-    this.revealFromSwarm();
     this.updateDiscoveries();
+  }
+
+  /**
+   * Marks which blooms a line is currently reaching.
+   *
+   * A served bloom's clock holds, so this is the difference between a flower
+   * you kept and one you watched die. Computed once per step for every patch
+   * rather than asked per bee, because "is anything reaching it" is a property
+   * of the board, not of any one insect.
+   */
+  private markServedPatches(): void {
+    for (const patch of this.patches) patch.served = false;
+    for (const route of this.routes) {
+      if (route.dead || !route.target) continue;
+      if (route.reachesTarget()) route.target.served = true;
+    }
+  }
+
+  /**
+   * Opens the next bloom when there is room for one.
+   *
+   * The board filling up *is* the pressure. Blooms arrive faster than a fixed
+   * number of lines can absorb, so falling behind is visible long before it is
+   * fatal and the player can see exactly which flower they are giving up.
+   */
+  private stepBlooms(dt: number): void {
+    const open = this.patches.filter((p) => p.alive).length;
+    if (open >= this.maxBlooms) {
+      this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
+      return;
+    }
+
+    this.bloomTimer -= dt;
+    if (this.bloomTimer > 0) return;
+    this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
+
+    const kind: PatchKind =
+      this.features.richPatches && Math.random() < 0.25 ? 'rich' : 'normal';
+    const patch = this.spawnPatch(kind);
+    this.events.bloomed.push({ x: patch.x, y: patch.y });
   }
 
   // ---------------------------------------------------------------- raids
@@ -1505,77 +1590,6 @@ export class Field {
   }
 
   /**
-   * Lights the board around every bee that is actually out in the field.
-   *
-   * Idle bees drifting at the hive are skipped: they are already inside the
-   * hive's own light, and sweeping them would be a few hundred wasted disc
-   * fills a second for ground that is permanently lit anyway.
-   */
-  private revealFromSwarm(): void {
-    const radius = TUNING.bee.sightRadius;
-    for (const bee of this.bees) {
-      if (bee.state === 'idle' || bee.state === 'queued') continue;
-      this.fog.reveal(bee.x, bee.y, radius);
-    }
-  }
-
-  /**
-   * Bends stored route points sideways.
-   *
-   * The wind moves the *line the player drew*, not the bees. Pushing the bees
-   * off the line instead would desynchronise them from the visible route, and
-   * the player would have no way to see or counter what was happening. Bending
-   * the route keeps cause and effect on screen: your straight line becomes an
-   * arc, so it gets longer, so throughput drops.
-   */
-  private stepWind(dt: number): void {
-    this.windAngle += TUNING.wind.rotationSpeed * dt;
-    const nx = Math.cos(this.windAngle);
-    const ny = Math.sin(this.windAngle);
-    const basePush = this.windStrength * dt * this.modifiers.windResist;
-
-    for (const route of this.routes) {
-      // A road to a shop does not bend. The buyers are buildings that have
-      // been there all run and the road to one is a trade route, not a line
-      // scribbled across a meadow — and a sell line that wandered off its own
-      // depot would break the one part of the loop the player cannot improvise
-      // around, since there is nowhere else to sell.
-      if (route.targetBuyer) continue;
-
-      const poly = route.poly;
-      // A beaten track holds its shape. This is the counterplay the player
-      // asked for: wind is no longer something that simply happens to you, it
-      // is something a road you have invested in resists.
-      const push = basePush * route.windExposure;
-      for (let i = 1; i < poly.count; i += 1) {
-        // Points further from the hive bend more, so the route bows rather
-        // than sliding sideways as a rigid whole.
-        const influence = i / poly.count;
-        const x = poly.pts[i * 2] ?? 0;
-        const y = poly.pts[i * 2 + 1] ?? 0;
-        const toX = x + nx * push * influence;
-        const toY = y + ny * push * influence;
-
-        // **Hedges break the wind.** A point the gale would push through a wall
-        // simply does not move.
-        //
-        // This is the fix for the complaint that there was "no way to prevent"
-        // a route being blown into a wall. There was not: wind pushed a line
-        // into a hedge, the hedge shortened it, and nothing the player could do
-        // changed that. Now a corridor *shelters* the line inside it, so the
-        // maze is somewhere to take cover rather than only something to get
-        // around — and routing through the lee of a wall is a real read on a
-        // real board, which is exactly the kind of skill this was missing.
-        if (this.maze.segmentBlocked(x, y, toX, toY)) continue;
-
-        poly.pts[i * 2] = toX;
-        poly.pts[i * 2 + 1] = toY;
-      }
-      route.rebuildLengths();
-    }
-  }
-
-  /**
    * Cuts a route back to where it now meets a wall.
    *
    * Checked every step rather than only on commit, because the wind bows a
@@ -1607,14 +1621,6 @@ export class Field {
    */
   slidePath(coords: readonly number[]): WallSlide {
     return slideAlongWalls(coords, this.maze);
-  }
-
-  get windVector(): { x: number; y: number; strength: number } {
-    return {
-      x: Math.cos(this.windAngle),
-      y: Math.sin(this.windAngle),
-      strength: this.windStrength,
-    };
   }
 
   private assignBee(bee: Bee): void {
@@ -2061,6 +2067,9 @@ export class Field {
       stolen: 0,
       raidLanded: 0,
       stoodDown: [],
+      replaced: [],
+      wilted: [],
+      bloomed: [],
       spilled: 0,
       sold: [],
       banked: 0,

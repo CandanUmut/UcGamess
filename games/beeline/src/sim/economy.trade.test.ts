@@ -250,6 +250,9 @@ describe('where the buyers stand', () => {
 
     for (let trial = 0; trial < 200; trial += 1) {
       const field = newDay(1 + (trial % 15));
+      // Blooms open across the day now, so let a few arrive before checking
+      // where they landed.
+      for (let t = 0; t < 60 * 40; t += 1) field.step(1 / 60);
       for (const patch of field.patches) {
         checked += 1;
         const col = field.maze.colAt(patch.x);
@@ -273,6 +276,9 @@ describe('where the buyers stand', () => {
     for (let trial = 0; trial < 200; trial += 1) {
       const day = 1 + (trial % 15);
       const field = newDay(day);
+      // Blooms open across the day now, so let a few arrive before checking
+      // where they landed.
+      for (let t = 0; t < 60 * 40; t += 1) field.step(1 / 60);
       for (const patch of field.patches) {
         checked += 1;
         for (const buyer of field.buyers) {

@@ -30,24 +30,11 @@ export class Hud {
   private readonly timerText: Phaser.GameObjects.Text;
   private readonly banner: Phaser.GameObjects.Text;
   private readonly alertText: Phaser.GameObjects.Text;
+  private readonly linesText: Phaser.GameObjects.Text;
   private alertPhase = 0;
 
   /** One row per buyer: name, price, and which way it is going. */
   private readonly priceTexts: Phaser.GameObjects.Text[] = [];
-
-  /**
-   * Wind readout.
-   *
-   * Wasp threat radii are drawn on the field so danger is never invisible, but
-   * wind shipped with no indicator at all — the player could only react to
-   * routes bending, never plan around them. An arrow pointing where the wind
-   * pushes, sized by strength, makes it something to route around.
-   */
-  private readonly windArrow: Phaser.GameObjects.Graphics;
-  private readonly windLabel: Phaser.GameObjects.Text;
-  private windX = 0;
-  private windY = 0;
-  private windStrength = 0;
 
   /** Swarm split between carrying and opening new routes. */
   private readonly swarmText: Phaser.GameObjects.Text;
@@ -113,13 +100,12 @@ export class Hud {
       .setOrigin(0.5)
       .setAlpha(0);
 
-    this.windArrow = scene.add.graphics();
-    this.windLabel = scene.add
-      .text(0, 0, '', { fontFamily: FONT, fontSize: '14px', color: COLORS.dim })
-      .setOrigin(0.5, 0);
-
     this.swarmText = scene.add
       .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: COLORS.dim })
+      .setOrigin(0, 0.5);
+
+    this.linesText = scene.add
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '18px', color: COLORS.text })
       .setOrigin(0, 0.5);
 
     this.unfoundText = scene.add
@@ -151,60 +137,13 @@ export class Hud {
       this.quotaTick,
       this.honeyText,
       this.banner,
-      this.windArrow,
-      this.windLabel,
       this.swarmText,
       this.unfoundText,
+      this.linesText,
       this.alertText,
     ]);
   }
 
-  /** Wind direction and strength, in field units. Strength 0 hides it. */
-  setWind(x: number, y: number, strength: number): void {
-    this.windX = x;
-    this.windY = y;
-    this.windStrength = strength;
-    this.redrawWind();
-  }
-
-  private redrawWind(): void {
-    const g = this.windArrow;
-    g.clear();
-
-    const visible = this.windStrength > 0.01;
-    this.windLabel.setVisible(visible);
-    if (!visible) return;
-
-    const cx = this.windAnchorX;
-    const cy = this.windAnchorY;
-    // Length carries strength, so a glance gives both facts at once.
-    const len = 16 + Math.min(1, this.windStrength / 34) * 20;
-    const tipX = cx + this.windX * len;
-    const tipY = cy + this.windY * len;
-
-    g.lineStyle(3, 0x1f6f9c, 0.85);
-    g.beginPath();
-    g.moveTo(cx - this.windX * len, cy - this.windY * len);
-    g.lineTo(tipX, tipY);
-    g.strokePath();
-
-    // Arrowhead.
-    const nx = -this.windY;
-    const ny = this.windX;
-    g.fillStyle(0x1f6f9c, 0.95);
-    g.fillTriangle(
-      tipX + this.windX * 8,
-      tipY + this.windY * 8,
-      tipX - this.windX * 4 + nx * 6,
-      tipY - this.windY * 4 + ny * 6,
-      tipX - this.windX * 4 - nx * 6,
-      tipY - this.windY * 4 - ny * 6,
-    );
-
-    this.windLabel.setText('wind').setPosition(cx, cy + 24);
-  }
-
-  /** How many flowers remain undiscovered. Hidden at zero. */
   setUnfound(count: number): void {
     this.unfoundText.setText(
       count > 0 ? `${count} flower${count === 1 ? '' : 's'} still out there` : '',
@@ -212,6 +151,16 @@ export class Hud {
   }
 
   /** Bees carrying versus bees opening routes — what a draw just cost. */
+  /** Lines in use against lines owned, and blooms lost today. */
+  setLines(used: number, owned: number, missed: number): void {
+    // The two numbers a player checks constantly once lines are the budget:
+    // how much of the board am I holding, and how much have I already dropped.
+    this.linesText.setText(
+      missed > 0 ? `${used}/${owned} lines · ${missed} wilted` : `${used}/${owned} lines`,
+    );
+    this.linesText.setColor(used >= owned ? '#e0523c' : COLORS.text);
+  }
+
   setSwarm(foraging: number, building: number, lost = 0): void {
     this.swarmText.setText(
       [
@@ -226,9 +175,6 @@ export class Hud {
     );
     this.swarmText.setColor(lost > 0 ? '#e0523c' : building > 0 ? '#b9761c' : COLORS.dim);
   }
-
-  private windAnchorX = 0;
-  private windAnchorY = 0;
 
   layout(safe: Phaser.Geom.Rectangle): void {
     const top = safe.y + 26;
@@ -251,9 +197,7 @@ export class Hud {
 
     this.swarmText.setPosition(safe.x + 24, top + 34);
     this.unfoundText.setPosition(safe.x + 24, top + 56);
-    this.windAnchorX = safe.right - 62;
-    this.windAnchorY = top + 46;
-    this.redrawWind();
+    this.linesText.setPosition(safe.x + 24, top + 78);
   }
 
   update(day: number, honey: number, quota: number, secondsLeft: number): void {
