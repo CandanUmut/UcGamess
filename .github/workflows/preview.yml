@@ -61,3 +61,13 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # Twenty minutes rather than the default ten.
+          #
+          # A deploy failed here with "Timeout reached, aborting" after sitting
+          # in `updating_pages` for the whole default window. Nothing was wrong
+          # with the build or the artifact — it is 4.8 MB across 44 files — and
+          # the previous run of the same workflow had succeeded. Pages simply
+          # took longer than usual to roll over, and a red build for that is a
+          # false alarm that costs somebody an investigation every time.
+          timeout: 1200000

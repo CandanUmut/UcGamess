@@ -623,20 +623,22 @@ export const TUNING: Tuning = {
     //
     // Days one to seven are untouched. That is where a new player decides
     // whether to keep going, and none of this problem lives there.
-    // Re-measured against the bloom-and-wilt board.
+    // Provisional, and lower than they were. **Not properly calibrated.**
     //
-    // The previous table was fitted to a game where production was flat,
-    // because lines decayed and the swarm spent the day repairing them. With
-    // lines permanent and blooms triaged, production compounds properly —
-    // 267 on day one to 1,840 by day sixteen — so the quota can climb again.
+    // The previous table was fitted to a player who drew a line instantly.
+    // Firing shots takes real time — a scripted player lays four to nine lines
+    // in a whole day where drawing laid a dozen — so the same board yields far
+    // less, and against the old figures a measured run scored between 0.0 and
+    // 0.4 of quota on every day past the third. That is unplayable rather than
+    // hard.
     //
-    // Shaped rather than scaled: roughly 3x a scripted player's take on day
-    // one, easing to 1.2x by day ten and crossing 1.0 somewhere around day
-    // thirteen to sixteen. That is where a run should end — not at a wall, but
-    // at the point where the board finally opens flowers faster than the
-    // player can hold them.
-    quotas: [90, 155, 210, 325, 425, 535, 685, 775, 1160, 1225, 1290, 1575],
-    quotaGrowthAfterTable: 1.09,
+    // These are roughly half the old ones, which makes an ordinary day
+    // winnable while the mechanic settles. They are a stopgap and should be
+    // re-derived once the dial's own numbers stop moving: a probe that plays
+    // the dial badly measures the probe, not the game, and mine plays it
+    // badly. The first real run is worth more than another afternoon of this.
+    quotas: [70, 110, 150, 195, 240, 290, 340, 395, 450, 505, 560, 620],
+    quotaGrowthAfterTable: 1.06,
   },
 
   // Shifted a day later than the original schedule to make room for brambles on
