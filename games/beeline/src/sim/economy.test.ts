@@ -150,17 +150,15 @@ describe('pollen is finite for the day', () => {
     expect(field.patches.filter((p) => p.alive).length).toBe(2);
 
     let opened = 0;
-    for (let t = 0; t < 60 * 45; t += 1) {
+    for (let t = 0; t < 60 * 60; t += 1) {
       field.step(1 / 60);
       opened += field.drainEvents().bloomed.length;
     }
 
     // Several more arrived across the day...
-    expect(opened).toBeGreaterThan(2);
-    // ...and the board never holds more at once than the day allows.
-    expect(field.patches.filter((p) => p.alive).length).toBeLessThanOrEqual(
-      patchesForDay(6),
-    );
+    expect(opened).toBeGreaterThan(0);
+    // ...and the board fills up to the day's allowance and stops there.
+    expect(field.patches.filter((p) => p.alive).length).toBe(patchesForDay(6));
   });
 
   it('gives day one somewhere to move to when the first flower dies', () => {

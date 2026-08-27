@@ -23,23 +23,17 @@ export class Patch {
   /** Drives the bloom-in and wilt-out animations. 0..1. */
   bloomT = 0;
   /**
-   * Seconds this bloom has left if nobody comes.
+   * Seconds left before a night-bloom patch closes regardless of its pool.
+   * Infinity for patches that do not expire.
    *
-   * **This is the game.** A flower is not a resource sitting there waiting; it
-   * is a bloom on a clock, and the clock is visible. Reach it in time and it
-   * pays; leave it and it wilts and you get nothing, and the board keeps
-   * blooming whether or not you kept up.
-   *
-   * That single rule is what the design was missing. It puts the pressure
-   * somewhere the player can see it, makes it spatial — which flowers, in what
-   * order, with how many lines — and makes losing legible: you did not fail a
-   * dice roll, you failed to get there.
+   * Ordinary flowers no longer expire at all. A wilting clock on every bloom
+   * was tried and removed: it made the board a chore list rather than a place,
+   * and a flower vanishing for no reason the player caused reads as the game
+   * tidying up after itself.
    */
   windowRemaining: number;
   /** The window this bloom started with, for the drain ring. */
   readonly windowTotal: number;
-  /** True while a route is reaching it, which holds the clock. */
-  served = false;
 
   /**
    * Which flower this is, as an index into `COLORS.species`.
@@ -55,13 +49,7 @@ export class Patch {
    */
   species = 0;
 
-  constructor(
-    x: number,
-    y: number,
-    pool: number,
-    kind: PatchKind = 'normal',
-    wiltSeconds = TUNING.patch.wiltSeconds,
-  ) {
+  constructor(x: number, y: number, pool: number, kind: PatchKind = 'normal') {
     this.id = nextPatchId++;
     this.x = x;
     this.y = y;
@@ -69,7 +57,7 @@ export class Patch {
     this.maxPool = pool;
     this.kind = kind;
     this.windowTotal =
-      kind === 'night' ? TUNING.patch.nightBloomWindowSeconds : wiltSeconds;
+      kind === 'night' ? TUNING.patch.nightBloomWindowSeconds : Number.POSITIVE_INFINITY;
     this.windowRemaining = this.windowTotal;
   }
 
@@ -127,9 +115,9 @@ export class Patch {
     return Math.max(0, Math.min(1, this.windowRemaining / this.windowTotal));
   }
 
-  /** True once the clock is short enough that the ring should shout. */
+  /** True once a night bloom's window is short enough that the ring shouts. */
   get isFading(): boolean {
-    return this.alive && !this.served && this.windowFraction < 0.35;
+    return this.alive && this.windowFraction < 0.35;
   }
 
   /** Removes up to `amount` nectar. Returns honey earned, after the kind bonus. */
@@ -165,11 +153,7 @@ export class Patch {
     // Ease in on bloom so a new patch draws the eye rather than popping.
     this.bloomT = Math.min(1, this.bloomT + dt * 2.5);
 
-    // A served bloom holds. Not refills — pausing is the readable rule, and it
-    // means a line that arrives in time keeps the flower for as long as the
-    // swarm is actually working it, which is exactly the promise the visible
-    // clock makes.
-    if (!this.served && Number.isFinite(this.windowRemaining)) {
+    if (Number.isFinite(this.windowRemaining)) {
       this.windowRemaining -= dt;
       if (this.windowRemaining <= 0) this.wilt();
     }

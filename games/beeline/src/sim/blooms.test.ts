@@ -4,16 +4,10 @@ import { Field } from './Field.ts';
 import { featuresForDay, patchesForDay } from '../game/DayCycle.ts';
 import { deriveStats, emptyLevels } from '../game/Upgrades.ts';
 
-const DT = 1 / 60;
-
 function newDay(day = 1): Field {
   const field = new Field();
   field.beginDay(day, featuresForDay(day), patchesForDay(day), 1);
   return field;
-}
-
-function advance(field: Field, seconds: number): void {
-  for (let t = 0; t < seconds; t += DT) field.step(DT);
 }
 
 /** A line from the hive to a point, cleared of the walls in the way. */
@@ -28,50 +22,6 @@ function lineTo(field: Field, x: number, y: number): number[] {
   }
   return field.slidePath(coords).coords;
 }
-
-describe('a bloom is on a clock', () => {
-  it('wilts if nothing reaches it, and says so', () => {
-    // The star mechanic. A flower is not a resource waiting to be collected,
-    // it is an offer with a deadline — which is what makes a fixed number of
-    // lines a real budget and losing legible.
-    const field = newDay(1);
-    const patch = field.patches[0]!;
-    expect(patch.alive).toBe(true);
-
-    advance(field, TUNING.patch.wiltSeconds + 1);
-
-    expect(patch.alive).toBe(false);
-    expect(field.missed).toBeGreaterThan(0);
-  });
-
-  it('holds for as long as a line is reaching it', () => {
-    // The promise the visible clock makes: get there in time and it is yours.
-    const field = newDay(1);
-    const patch = field.patches[0]!;
-    const route = field.createRoute(lineTo(field, patch.x, patch.y));
-    expect(route).not.toBeNull();
-
-    advance(field, TUNING.patch.wiltSeconds + 4);
-
-    // Either still blooming, or drained by the swarm — never *wilted* while a
-    // line was on it.
-    expect(patch.pool === 0 || patch.alive).toBe(true);
-  });
-
-  it('gives every bloom the same clock it started with', () => {
-    const field = newDay(1);
-    for (const patch of field.patches) {
-      expect(patch.windowFraction).toBeCloseTo(1, 3);
-    }
-  });
-
-  it('shortens the clock as the run goes on, but never below the floor', () => {
-    const early = newDay(1).patches[0]!;
-    const late = newDay(30).patches[0]!;
-    expect(late.windowTotal).toBeLessThan(early.windowTotal);
-    expect(late.windowTotal).toBeGreaterThanOrEqual(TUNING.patch.minWiltSeconds);
-  });
-});
 
 describe('lines are the budget', () => {
   it('starts with only a few, and the upgrade is what buys more', () => {
