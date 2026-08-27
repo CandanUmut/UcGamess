@@ -134,19 +134,6 @@ export interface PatchTuning {
    * toward a flower" always mean what it looks like it means.
    */
   aimAssistRadius: number;
-  /**
-   * Seconds an unserved bloom lasts before it wilts.
-   *
-   * The single most important number in the game now. Long enough to cross the
-   * board and lay a line — a bloom you could never have reached is not a
-   * decision, it is a tax — and short enough that a board with more flowers
-   * than lines forces a choice about which ones you give up.
-   */
-  wiltSeconds: number;
-  /** How much shorter the window gets per day, in seconds. */
-  wiltSecondsPerDay: number;
-  /** The shortest a bloom's window may ever get. */
-  minWiltSeconds: number;
   /** Seconds between one bloom opening and the next. */
   bloomIntervalSeconds: number;
   basePool: number;
@@ -311,6 +298,25 @@ export interface BuyerTuning {
   tint: number;
 }
 
+export interface AimTuning {
+  /** Radians per second the arrow sweeps on day one. */
+  spinBase: number;
+  /** How much faster it starts each day. */
+  spinPerDay: number;
+  /** How much it accelerates per second the dial is left open. */
+  spinAccel: number;
+  spinMaxUnused?: never;
+  maxSpin: number;
+  /** How fast a fired path travels, in px per second. */
+  launchSpeed: number;
+  /** How far one shot may travel before it runs out. */
+  maxFlightLength: number;
+  /** Drawn size of the dial. */
+  dialRadius: number;
+  /** How near a tap has to land to carry on from a line's end. */
+  tipTapRadius: number;
+}
+
 export interface HoneyTuning {
   /** Hive capacity at level zero. Deliberately small — see the runtime note. */
   baseCap: number;
@@ -408,6 +414,7 @@ export interface Tuning {
   day: DayTuning;
   wasp: WaspTuning;
   buyers: Record<'market' | 'apothecary', BuyerTuning>;
+  aim: AimTuning;
   honey: HoneyTuning;
   raid: RaidTuning;
   fog: {
@@ -510,10 +517,7 @@ export const TUNING: Tuning = {
   // produces for ~15s and dies at ~22s: about half the hand traffic, and the
   // grace window between "stopped paying" and "gone" grows from 3s to 7s.
   route: {
-    // Three to start. Small on purpose: the whole game is which flowers you
-    // can hold with the lines you have, and five was enough to hold everything
-    // the early board could offer, which is the same as no decision at all.
-    maxCount: 3,
+    maxCount: 5,
     // Tuned as an equilibrium, not as a count. A route carrying D deliveries a
     // second settles at D x perDelivery / decay, and reaches it with a time
     // constant of 1/decay — about ten seconds.
@@ -548,14 +552,6 @@ export const TUNING: Tuning = {
     maxRadius: 300,
     reachRadius: 85,
     aimAssistRadius: 130,
-    // Twenty-two seconds is a little over two round trips to the far side of
-    // the board at starting speed, so the first flowers are comfortable and a
-    // distant one is a real commitment. It tightens by a second a day and
-    // floors at twelve, which is where the board starts asking for more lines
-    // than you own — and buying one is then the best moment in the run.
-    wiltSeconds: 22,
-    wiltSecondsPerDay: 1,
-    minWiltSeconds: 12,
     // Slower than the wilt, so the board fills up rather than churning: blooms
     // accumulate until you are behind, which is the pressure being visible.
     bloomIntervalSeconds: 7,
@@ -1047,6 +1043,31 @@ export const TUNING: Tuning = {
       y: 516,
       tint: 0x1fd6c4,
     },
+  },
+
+  /**
+   * The dial.
+   *
+   * The most important numbers in the game: this mechanic is the whole verb
+   * now. Base spin is slow enough that a first-time player lands a shot on
+   * their second or third try, and the acceleration is what turns it from a
+   * button into a skill — leave the dial open and the arrow runs away from you.
+   */
+  aim: {
+    spinBase: 1.7,
+    // A little faster every day, so a run that lasts is visibly harder to aim
+    // rather than merely more expensive.
+    spinPerDay: 0.14,
+    // The half of "gitgide hızlanmalı" that lives inside a single shot:
+    // hesitate for three seconds and the arrow is spinning half again as fast.
+    spinAccel: 0.85,
+    maxSpin: 7,
+    launchSpeed: 640,
+    // About a third of the board per shot, so crossing it is three or four
+    // well-aimed shots and a corner is something you go round deliberately.
+    maxFlightLength: 460,
+    dialRadius: 58,
+    tipTapRadius: 150,
   },
 
   /**

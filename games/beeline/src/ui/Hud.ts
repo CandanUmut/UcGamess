@@ -152,12 +152,8 @@ export class Hud {
 
   /** Bees carrying versus bees opening routes — what a draw just cost. */
   /** Lines in use against lines owned, and blooms lost today. */
-  setLines(used: number, owned: number, missed: number): void {
-    // The two numbers a player checks constantly once lines are the budget:
-    // how much of the board am I holding, and how much have I already dropped.
-    this.linesText.setText(
-      missed > 0 ? `${used}/${owned} lines · ${missed} wilted` : `${used}/${owned} lines`,
-    );
+  setLines(used: number, owned: number): void {
+    this.linesText.setText(`${used}/${owned} lines`);
     this.linesText.setColor(used >= owned ? '#e0523c' : COLORS.text);
   }
 

@@ -4,6 +4,7 @@ import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp, type WaspKind } from './Wasp.ts';
 import { Buyer, type BuyerId } from './Buyer.ts';
+import { Aimer } from './Aimer.ts';
 import { RaidClock } from './Raid.ts';
 import { Maze } from './Maze.ts';
 import { slideAlongWalls, type WallSlide } from './deflect.ts';
@@ -109,6 +110,8 @@ export interface FieldEvents {
   stolen: number;
   /** Wasps that arrived on the board this step. */
   raidLanded: number;
+  /** A shot came to rest here. */
+  shotLanded: Array<{ x: number; y: number }>;
   /** Guard lines retired because the fight was over. */
   stoodDown: Array<{ x: number; y: number }>;
   /** A line was dropped to make room for a new one. */
@@ -216,6 +219,7 @@ export class Field {
     waspDown: [],
     stolen: 0,
     raidLanded: 0,
+    shotLanded: [],
     stoodDown: [],
     replaced: [],
     wilted: [],
@@ -227,6 +231,9 @@ export class Field {
     pollenLost: [],
     droppedBuyer: null,
   };
+
+  /** The dial. One tap opens it, one fires, one stops. See sim/Aimer.ts. */
+  readonly aim = new Aimer();
 
   /** Decides when the next raid lands. See sim/Raid.ts. */
   readonly raid = new RaidClock();
@@ -244,10 +251,6 @@ export class Field {
   waspsDowned = 0;
   /** Honey lost over the brim today. The number that shames you into selling. */
   spilled = 0;
-  /** Blooms nobody reached today. The number a run is really judged by. */
-  missed = 0;
-  /** How long an unserved bloom lasts today. Shortens as the run goes on. */
-  private wiltSeconds = TUNING.patch.wiltSeconds;
   /** Counts down to the next bloom opening. */
   private bloomTimer = 0;
   /** How many blooms may be open at once today. */
@@ -347,6 +350,7 @@ export class Field {
     this.waspsDowned = 0;
     this.raidEntry = null;
     this.raid.begin(features.raidSize, modifiers.extraWarningSeconds);
+    this.aim.beginDay(day);
 
     this.patchPool = Math.round(
       (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
@@ -369,12 +373,7 @@ export class Field {
     );
 
     // Today's clock, and how much board the player is being asked to hold.
-    this.missed = 0;
     this.maxBlooms = patchCount;
-    this.wiltSeconds = Math.max(
-      TUNING.patch.minWiltSeconds,
-      TUNING.patch.wiltSeconds - TUNING.patch.wiltSecondsPerDay * (day - 1),
-    );
     this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
 
     // Two to open with, and the rest arrive across the day.
@@ -390,14 +389,6 @@ export class Field {
     }
 
     this.fog.clear();
-    // The whole board, lit at dawn.
-    //
-    // Planning is the game now, and a board you cannot see cannot be planned
-    // against — you would be choosing which blooms to give up without knowing
-    // what the alternatives were. Blooms that open later in the day still
-    // arrive with their own little burst, which keeps the discovery beat
-    // without taking the plan away.
-    this.fog.revealAll();
     // The hive lights its own neighbourhood, and Scout Bees light a great deal
     // more. Day one's flowers spawn inside the hive's light, so the first
     // thirty seconds are exactly what they were before fog existed.
@@ -446,6 +437,21 @@ export class Field {
         y: patch.y,
         honey: Math.round(patch.honeyLeft),
       });
+    }
+  }
+
+  /**
+   * Lights the board around every bee that is actually out in the field.
+   *
+   * Idle bees drifting at the hive are skipped: they are already inside the
+   * hive's own light, and sweeping them would be a few hundred wasted disc
+   * fills a second for ground that is permanently lit anyway.
+   */
+  private revealFromSwarm(): void {
+    const radius = TUNING.bee.sightRadius;
+    for (const bee of this.bees) {
+      if (bee.state === 'idle' || bee.state === 'queued') continue;
+      this.fog.reveal(bee.x, bee.y, radius);
     }
   }
 
@@ -674,7 +680,7 @@ export class Field {
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
     const spot = this.randomPatchPosition(kind);
-    const patch = new Patch(spot.x, spot.y, this.patchPool, kind, this.wiltSeconds);
+    const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
     patch.distanceMultiplier = this.distanceMultiplierAt(spot.x, spot.y);
     patch.species = this.nextSpecies();
     this.patches.push(patch);
@@ -826,9 +832,13 @@ export class Field {
    * gesture undiscoverable, so the rule is now "if you started anywhere near
    * the end of a route, you probably meant to continue it".
    */
-  routeToExtendAt(x: number, y: number): Route | null {
+  routeToExtendAt(
+    x: number,
+    y: number,
+    radius = TUNING.route.refreshSnapRadius,
+  ): Route | null {
     let best: Route | null = null;
-    let bestDist = TUNING.route.refreshSnapRadius;
+    let bestDist = radius;
 
     for (const route of this.routes) {
       if (route.dead) continue;
@@ -1138,20 +1148,7 @@ export class Field {
   step(dt: number): void {
     this.elapsed += dt;
 
-    this.markServedPatches();
-    for (const patch of this.patches) {
-      const wasAlive = patch.alive;
-      patch.step(dt);
-      if (wasAlive && !patch.alive && patch.pool > 0) {
-        // Wilted with nectar still in it: a bloom nobody got to.
-        this.missed += 1;
-        this.events.wilted.push({
-          x: patch.x,
-          y: patch.y,
-          honey: Math.round(patch.honeyLeft),
-        });
-      }
-    }
+    for (const patch of this.patches) patch.step(dt);
     this.stepBlooms(dt);
     for (const buyer of this.buyers) buyer.step(dt);
 
@@ -1194,23 +1191,9 @@ export class Field {
 
     for (const bee of this.bees) this.stepBee(bee, dt);
 
+    this.stepAim(dt);
+    this.revealFromSwarm();
     this.updateDiscoveries();
-  }
-
-  /**
-   * Marks which blooms a line is currently reaching.
-   *
-   * A served bloom's clock holds, so this is the difference between a flower
-   * you kept and one you watched die. Computed once per step for every patch
-   * rather than asked per bee, because "is anything reaching it" is a property
-   * of the board, not of any one insect.
-   */
-  private markServedPatches(): void {
-    for (const patch of this.patches) patch.served = false;
-    for (const route of this.routes) {
-      if (route.dead || !route.target) continue;
-      if (route.reachesTarget()) route.target.served = true;
-    }
   }
 
   /**
@@ -1235,6 +1218,121 @@ export class Field {
       this.features.richPatches && Math.random() < 0.25 ? 'rich' : 'normal';
     const patch = this.spawnPatch(kind);
     this.events.bloomed.push({ x: patch.x, y: patch.y });
+  }
+
+  // ---------------------------------------------------------------- the dial
+
+  /**
+   * One tap does whatever the moment calls for.
+   *
+   * Deliberately a single verb. The old input had a drag, a hold and a
+   * tip-grab, all overlapping, and the player had to know which one they were
+   * performing. Here every tap is the next step of the same little ritual:
+   * open, fire, stop.
+   */
+  tap(x: number, y: number): void {
+    if (this.aim.mode === 'aiming') {
+      this.aim.launch();
+      return;
+    }
+    if (this.aim.mode === 'flying') {
+      this.landShot();
+      return;
+    }
+
+    // Carrying on from the end of a line you already own beats starting a new
+    // one, because that is the more precise thing to want — a stray tap near
+    // the hive can always start a fresh line, but only a tap by the tip can
+    // mean "keep going from there".
+    const tip = this.routeToExtendAt(x, y, TUNING.aim.tipTapRadius);
+    if (tip) {
+      this.aim.open(tip.tipX, tip.tipY, tip.id);
+      return;
+    }
+
+    // Anything else opens at the hive. A tap that does nothing is the worst
+    // possible answer on a touchscreen, and starting a line is never wrong.
+    this.aim.open(this.hiveX, this.hiveY, 0);
+  }
+
+  /** Puts the dial away without firing. */
+  cancelAim(): void {
+    this.aim.cancel();
+  }
+
+  private stepAim(dt: number): void {
+    if (this.aim.mode === 'aiming') {
+      this.aim.spin(dt);
+      return;
+    }
+    if (this.aim.mode !== 'flying') return;
+
+    const next = this.aim.nextStep(dt);
+
+    // Out of flight, off the board, or into a hedge: the shot lands here.
+    if (
+      next.distance <= 0 ||
+      next.x < 6 ||
+      next.y < 6 ||
+      next.x > WORLD_WIDTH - 6 ||
+      next.y > WORLD_HEIGHT - 6 ||
+      this.maze.segmentBlocked(this.aim.headX, this.aim.headY, next.x, next.y)
+    ) {
+      this.landShot();
+      return;
+    }
+
+    this.aim.advanceTo(next.x, next.y, next.distance);
+
+    // Arriving at something worth arriving at stops the shot on its own.
+    //
+    // Asking the player to also tap at the exact instant the path crosses a
+    // flower would be two pieces of timing for one decision, and the second
+    // one is not interesting. Landing on the target is the reward for aiming
+    // well, so the game takes it for them.
+    // Not until the shot has actually gone somewhere, or a line that just
+    // landed on a flower would stop dead the instant it set off again — the
+    // head starts inside the reach of the very thing it arrived at.
+    if (this.aim.flownLength < TUNING.route.minLength) return;
+
+    if (
+      this.nearestPatchTo(next.x, next.y, TUNING.patch.reachRadius, true) ||
+      this.nearestBuyerTo(next.x, next.y, TUNING.honey.reachRadius) ||
+      this.nearestWaspTo(next.x, next.y, TUNING.wasp.reachRadius)
+    ) {
+      this.landShot();
+    }
+  }
+
+  /**
+   * Turns the shot in flight into road.
+   *
+   * A shot that never got going is simply forgotten — firing into a wall from
+   * point blank should cost the player the shot, not one of their lines.
+   */
+  private landShot(): void {
+    const coords = this.aim.coords;
+    const routeId = this.aim.routeId;
+    this.aim.cancel();
+
+    if (coordsLength(coords) < TUNING.route.minLength) return;
+
+    const slid = this.slidePath(coords);
+    if (coordsLength(slid.coords) < TUNING.route.minLength) return;
+
+    const existing = routeId !== 0 ? this.routeById(routeId) : undefined;
+    if (existing && !existing.dead) {
+      existing.extendWith(slid.coords);
+      this.retarget(existing);
+      this.events.shotLanded.push({ x: existing.tipX, y: existing.tipY });
+      return;
+    }
+
+    const route = this.createRoute(slid.coords);
+    if (route) {
+      this.dispatchBuilders(route, coordsLength(slid.coords));
+      this.events.shotLanded.push({ x: route.tipX, y: route.tipY });
+    }
   }
 
   // ---------------------------------------------------------------- raids
@@ -2066,6 +2164,7 @@ export class Field {
       waspDown: [],
       stolen: 0,
       raidLanded: 0,
+      shotLanded: [],
       stoodDown: [],
       replaced: [],
       wilted: [],

@@ -70,27 +70,22 @@ describe('discovery', () => {
     }
   });
 
-  it('shows the player the whole board at dawn', () => {
-    // Planning is the game now, and a board you cannot see cannot be planned
-    // against: choosing which blooms to give up is not a decision if the
-    // alternatives are invisible. The dark used to be the challenge; the
-    // challenge is now that there are more flowers than you have lines.
-    for (const day of [1, 4, 9, 15]) {
-      const field = newDay(day);
-      expect(field.knownPatches.length).toBe(field.patches.filter((p) => p.alive).length);
-    }
-  });
-
-  it('shows a bloom that opens mid-day straight away', () => {
-    // The discovery beat survives the fog going: a flower still arrives with
-    // its own moment, it just arrives where you can act on it.
-    const field = newDay(6);
-    for (let t = 0; t < 60 * 40; t += 1) {
-      field.step(1 / 60);
-      for (const patch of field.patches) {
-        if (patch.alive) expect(patch.discovered).toBe(true);
+  it('keeps most of the board dark, and more of it each day', () => {
+    // The fog is back. Removing it made planning easy and the board boring —
+    // knowing where everything is turns a meadow into a checklist. Finding a
+    // flower is one of the few moments in this game that feels like a reward.
+    const known = (day: number): number => {
+      let total = 0;
+      const trials = 120;
+      for (let t = 0; t < trials; t += 1) {
+        const field = newDay(day);
+        total += field.knownPatches.length / Math.max(1, field.patches.length);
       }
-    }
+      return total / trials;
+    };
+
+    expect(known(2)).toBeGreaterThan(0.4);
+    expect(known(9)).toBeLessThan(known(2));
   });
 
   it('finds a flower once a bee has been near it, and reports it once', () => {

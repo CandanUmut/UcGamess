@@ -9,7 +9,7 @@ import {
 import { COLORS, TUNING } from '../config/tuning.ts';
 import { Field, WORLD_HEIGHT, WORLD_WIDTH } from '../sim/Field.ts';
 import type { Route } from '../sim/Route.ts';
-import { pushIfSpaced, type SamplePoint } from '../sim/polyline.ts';
+import { type SamplePoint } from '../sim/polyline.ts';
 import { createGeneratedTextures, TEX_FILES } from '../render/textures.ts';
 import { createItemIcons } from '../render/itemIcons.ts';
 import { createBeeRenderer, type BeeRenderer } from '../render/BeeRenderer.ts';
@@ -32,7 +32,6 @@ import { modifiersFor } from '../game/Items.ts';
 import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import { computeOffline, formatAway } from '../game/Offline.ts';
-import { commitDrag, resolveDragStart, type DragIntent } from '../game/RouteIntent.ts';
 import type { NightData } from './NightScene.ts';
 
 /**
@@ -133,9 +132,6 @@ export class GameScene extends BaseGameplayScene {
   private phase: 'loading' | 'playing' | 'ended' = 'loading';
 
   // --- drag state -------------------------------------------------------
-  private drawing = false;
-  private drawCoords: number[] = [];
-  private intent: DragIntent | null = null;
   private previewGfx!: Phaser.GameObjects.Graphics;
 
   // --- press-and-hold erase ---------------------------------------------
@@ -457,71 +453,47 @@ export class GameScene extends BaseGameplayScene {
       this.pressY = p.worldY;
       this.holdSeconds = 0;
 
-      // A press that lands on an existing route *might* be an erase. It only
-      // becomes one if the finger stays put; any real movement turns it back
-      // into a draw. That keeps one gesture from stealing the other.
+      // A press that lands on an existing line *might* be an erase. It only
+      // becomes one if the finger stays put; lifting turns it back into a tap.
       this.eraseCandidate = this.field.routeNear(p.worldX, p.worldY);
-
-      this.intent = resolveDragStart(this.field, p.worldX, p.worldY);
-      this.drawing = true;
-      this.hasDrawnEver = true;
-      this.drawCoords = [this.intent.anchorX, this.intent.anchorY, p.worldX, p.worldY];
-      this.sfx.playVaried('draw', 0.22, 180);
     });
 
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
-      if (!this.drawing) return;
-
-      // Moved far enough that this is unambiguously a drag, not a hold.
+      if (!this.eraseCandidate) return;
       if (
-        this.eraseCandidate &&
         Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY) > ERASE_MOVE_TOLERANCE
       ) {
         this.eraseCandidate = null;
         this.holdSeconds = 0;
       }
-
-      if (pushIfSpaced(this.drawCoords, p.worldX, p.worldY, TUNING.route.pointSpacing)) {
-        this.juice.trail(p.worldX, p.worldY);
-      }
     });
 
-    this.input.on(Phaser.Input.Events.POINTER_UP, () => this.endDraw());
-    // A pointer leaving the canvas mid-drag must commit, not strand the gesture.
-    this.input.on(Phaser.Input.Events.GAME_OUT, () => this.endDraw());
-  }
+    this.input.on(Phaser.Input.Events.POINTER_UP, (p: Phaser.Input.Pointer) => {
+      if (this.phase !== 'playing') return;
 
-  private endDraw(): void {
-    if (!this.drawing) return;
-    this.drawing = false;
-    this.previewGfx.clear();
+      const wasErasing = this.eraseCandidate;
+      this.eraseCandidate = null;
+      const held = this.holdSeconds;
+      this.holdSeconds = 0;
 
-    const coords = this.drawCoords;
-    const intent = this.intent;
-    const wasErasing = this.eraseCandidate;
-    this.drawCoords = [];
-    this.intent = null;
-    this.eraseCandidate = null;
-    this.holdSeconds = 0;
+      // The hold already erased it; do not also fire the dial.
+      if (wasErasing && held >= ERASE_HOLD_SECONDS) return;
 
-    // Released before the hold completed: neither an erase nor a meaningful
-    // drag. Do nothing rather than dropping a stub route where they tapped.
-    if (wasErasing) return;
+      this.hasDrawnEver = true;
+      const before = this.field.aim.mode;
+      this.field.tap(p.worldX, p.worldY);
 
-    if (!intent || coords.length < 4) return;
+      // One sound per step of the ritual, each a little different, so the
+      // three taps are audibly three different things.
+      if (before === 'idle') this.sfx.playVaried('draw', 0.2, 180);
+      else if (before === 'aiming') this.sfx.playVaried('draw', 0.3, 60);
+    });
 
-    const result = commitDrag(this.field, intent, coords);
-    if (result.deflectedAt) {
-      this.showDeflect(result.deflectedAt.x, result.deflectedAt.y);
-    }
-    if (result.kind === 'rejected') return;
-
-    // Drawing costs workers, charged on what the gesture actually covered.
-    const route = this.field.routeById(result.routeId);
-    if (route) this.field.dispatchBuilders(route, result.drawnLength);
-    this.routesDrawn += 1;
-
-    if (result.connected) this.sfx.playNote('collect', 0.2);
+    // A pointer leaving the canvas mid-aim should not strand the dial.
+    this.input.on(Phaser.Input.Events.GAME_OUT, () => {
+      this.eraseCandidate = null;
+      this.holdSeconds = 0;
+    });
   }
 
   /**
@@ -591,9 +563,6 @@ export class GameScene extends BaseGameplayScene {
 
     // Consume the whole gesture so releasing does not also draw something.
     this.eraseCandidate = null;
-    this.drawing = false;
-    this.drawCoords = [];
-    this.intent = null;
     this.holdSeconds = 0;
     this.previewGfx.clear();
   }
@@ -630,11 +599,7 @@ export class GameScene extends BaseGameplayScene {
   protected override renderUpdate(alpha: number): void {
     this.beeRenderer.sync(this.field.bees, alpha);
     this.routeRenderer.draw(this.field.routes, this.field.time);
-    this.fieldRenderer.draw(
-      this.field,
-      alpha,
-      this.drawing && this.intent?.kind === 'fresh',
-    );
+    this.fieldRenderer.draw(this.field, alpha, this.field.aim.mode !== 'idle');
     this.fogRenderer.draw(this.field.fog);
     this.drawPreview();
     this.drawHint();
@@ -706,17 +671,12 @@ export class GameScene extends BaseGameplayScene {
         routesDrawn: this.routesDrawn,
         honey: this.field.honey,
         money: this.field.money,
-        missed: this.field.missed,
       });
       this.tutorialText.setText(this.tutorial.current?.text ?? '');
 
       const building = this.field.countBuilders();
       this.hud.setSwarm(this.field.bees.length - building, building, this.field.beesLost);
-      this.hud.setLines(
-        this.field.routes.length,
-        this.field.stats.routeSlots,
-        this.field.missed,
-      );
+      this.hud.setLines(this.field.routes.length, this.field.stats.routeSlots);
       this.hud.setUnfound(
         this.field.patches.filter((p) => p.alive && !p.discovered).length,
       );
@@ -926,24 +886,82 @@ export class GameScene extends BaseGameplayScene {
     });
   }
 
+  /**
+   * The dial, and the shot in flight.
+   *
+   * Drawn on the preview layer because that is exactly what it is: the thing
+   * the player is about to commit. The arrow reddens as the dial winds up, so
+   * "it is getting away from me" is visible before it is felt.
+   */
   private drawPreview(): void {
     const g = this.previewGfx;
     g.clear();
-    // While a hold is pending, the erase ring owns this layer.
     if (this.eraseCandidate) return;
-    if (!this.drawing || this.drawCoords.length < 4) return;
 
-    // Extending is drawn in the route's own colour and fresh draws slightly
-    // dimmer, so the player can see which of the two the game decided on —
-    // that feedback is how the cheap gesture gets discovered.
-    const extending = this.intent?.kind === 'extend';
-    g.lineStyle(extending ? 6 : 4, COLORS.route, extending ? 0.75 : 0.45);
-    g.beginPath();
-    g.moveTo(this.drawCoords[0] ?? 0, this.drawCoords[1] ?? 0);
-    for (let i = 2; i < this.drawCoords.length; i += 2) {
-      g.lineTo(this.drawCoords[i] ?? 0, this.drawCoords[i + 1] ?? 0);
+    const aim = this.field.aim;
+    if (aim.mode === 'idle') return;
+
+    if (aim.mode === 'aiming') {
+      const r = TUNING.aim.dialRadius;
+      const heat = aim.tension;
+      const tint = blendTint(0xffd166, 0xff5a3c, heat);
+
+      g.lineStyle(3, tint, 0.35);
+      g.strokeCircle(aim.anchorX, aim.anchorY, r);
+      g.lineStyle(2, tint, 0.16);
+      g.strokeCircle(aim.anchorX, aim.anchorY, r * 0.55);
+
+      // The arrow. Drawn as a stalk with a head so the direction reads at a
+      // glance rather than having to be inferred from a line's far end.
+      const tipX = aim.anchorX + Math.cos(aim.angle) * (r + 26);
+      const tipY = aim.anchorY + Math.sin(aim.angle) * (r + 26);
+      g.lineStyle(6, tint, 0.95);
+      g.beginPath();
+      g.moveTo(aim.anchorX, aim.anchorY);
+      g.lineTo(tipX, tipY);
+      g.strokePath();
+
+      const wing = 0.42;
+      g.fillStyle(tint, 0.95);
+      g.beginPath();
+      g.moveTo(tipX, tipY);
+      g.lineTo(
+        tipX - Math.cos(aim.angle - wing) * 22,
+        tipY - Math.sin(aim.angle - wing) * 22,
+      );
+      g.lineTo(
+        tipX - Math.cos(aim.angle + wing) * 22,
+        tipY - Math.sin(aim.angle + wing) * 22,
+      );
+      g.closePath();
+      g.fillPath();
+      return;
     }
+
+    // In flight: the road so far, plus how much of the shot is left.
+    const coords = aim.coords;
+    if (coords.length >= 4) {
+      g.lineStyle(7, 0xffd166, 0.9);
+      g.beginPath();
+      g.moveTo(coords[0] ?? 0, coords[1] ?? 0);
+      for (let i = 2; i < coords.length; i += 2) {
+        g.lineTo(coords[i] ?? 0, coords[i + 1] ?? 0);
+      }
+      g.strokePath();
+    }
+
+    // A ghost of the distance still available, so stopping early is an
+    // informed choice rather than a guess.
+    const leftX = aim.headX + Math.cos(aim.angle) * aim.flightLeft;
+    const leftY = aim.headY + Math.sin(aim.angle) * aim.flightLeft;
+    g.lineStyle(2, 0xffffff, 0.18);
+    g.beginPath();
+    g.moveTo(aim.headX, aim.headY);
+    g.lineTo(leftX, leftY);
     g.strokePath();
+
+    g.fillStyle(0xffffff, 0.9);
+    g.fillCircle(aim.headX, aim.headY, 6);
   }
 
   /**
@@ -1056,6 +1074,11 @@ export class GameScene extends BaseGameplayScene {
           y: b.y,
           price: Number(b.price.toFixed(2)),
         })),
+      aim: () => ({
+        mode: this.field.aim.mode,
+        angle: Number(this.field.aim.angle.toFixed(2)),
+        spin: Number(this.field.aim.spinSpeed.toFixed(2)),
+      }),
       save: () => this.save,
       // Lands a raid on demand. The clock is deliberately random, so without
       // this a harness check of the raid would be a check of the dice.
@@ -1072,4 +1095,17 @@ export class GameScene extends BaseGameplayScene {
       },
     };
   }
+}
+
+/** Linear blend between two packed RGB colours, for the dial's heat. */
+function blendTint(from: number, to: number, t: number): number {
+  const k = Math.max(0, Math.min(1, t));
+  const r = Math.round(
+    ((from >> 16) & 0xff) + (((to >> 16) & 0xff) - ((from >> 16) & 0xff)) * k,
+  );
+  const g = Math.round(
+    ((from >> 8) & 0xff) + (((to >> 8) & 0xff) - ((from >> 8) & 0xff)) * k,
+  );
+  const b = Math.round((from & 0xff) + ((to & 0xff) - (from & 0xff)) * k);
+  return (r << 16) | (g << 8) | b;
 }

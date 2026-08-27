@@ -134,6 +134,14 @@ export class Maze {
 
   /** Whether a step between two edge-adjacent cells is legal. */
   canStep(fromCol: number, fromRow: number, toCol: number, toRow: number): boolean {
+    // Anything off the grid is open meadow.
+    //
+    // The board is wider than the maze — there is a margin above it for the
+    // HUD and a strip down each side — and that margin used to be **solid and
+    // invisible**. A player could see clear grass above a hedge, aim a line
+    // over it and be stopped by nothing at all. An obstacle you cannot see is
+    // the worst kind there is, and this one was not even meant to exist.
+    if (!this.inside(fromCol, fromRow) || !this.inside(toCol, toRow)) return true;
     if (fromCol === toCol && fromRow === toRow) return true;
     if (!this.inside(toCol, toRow)) return false;
 

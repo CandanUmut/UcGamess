@@ -15,7 +15,7 @@
  *  - **Each step waits for evidence**, not for a timer. Advancing on a timer
  *    teaches the confident player nothing and abandons the hesitant one.
  */
-export type TutorialStepId = 'draw' | 'watch' | 'sell' | 'wilt' | 'done';
+export type TutorialStepId = 'aim' | 'watch' | 'sell' | 'done';
 
 export interface TutorialStep {
   id: TutorialStepId;
@@ -27,8 +27,8 @@ export interface TutorialStep {
 
 const STEPS: readonly TutorialStep[] = [
   {
-    id: 'draw',
-    text: 'Drag from the hive out to a flower',
+    id: 'aim',
+    text: 'Tap the hive to open the dial, tap again to fire the path',
     showHintLine: true,
   },
   {
@@ -45,14 +45,6 @@ const STEPS: readonly TutorialStep[] = [
     text: 'Honey is not money yet — drag a line to a buyer to sell it',
     showHintLine: false,
   },
-  {
-    // The last thing to teach, and the whole game: blooms are on a clock, you
-    // have fewer lines than flowers, and choosing which to give up is the
-    // decision every day is made of.
-    id: 'wilt',
-    text: 'Flowers wilt if no line reaches them — you cannot hold them all',
-    showHintLine: false,
-  },
 ];
 
 export interface TutorialProgress {
@@ -62,8 +54,6 @@ export interface TutorialProgress {
   honey: number;
   /** Money earned so far this day. */
   money: number;
-  /** Blooms lost to the clock so far. */
-  missed: number;
 }
 
 /**
@@ -100,19 +90,13 @@ export class Tutorial {
     if (!step) return;
 
     const satisfied =
-      step.id === 'draw'
+      step.id === 'aim'
         ? progress.routesDrawn >= 1
         : step.id === 'watch'
           ? progress.honey > 0
-          : step.id === 'sell'
-            ? progress.money > 0
-            : // The refresh step waits for a route to actually start retreating
-              // *and* for the player to have drawn again since — otherwise it
-              // would clear itself the moment decay began, before they had a
-              // chance to do the thing it is asking for.
-              // Cleared once they have seen a bloom die, or drawn enough that
-              // they are plainly managing the board on their own.
-              progress.missed > 0 || progress.routesDrawn >= 4;
+          : // Honey in the combs is not the lesson: money is. A player who
+            // never sells never sees the loop close.
+            progress.money > 0;
 
     if (satisfied) this.index += 1;
   }
