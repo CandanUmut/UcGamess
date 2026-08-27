@@ -150,17 +150,17 @@ export class RouteRenderer {
     }
   }
 
-  /** The grab handle: where a refresh drag must start. */
+  /** The grab handle: where an extending drag must start. */
   private drawTip(route: Route, time: number): void {
     const g = this.gfx;
 
-    // Pulses only once decay has actually begun, so a freshly drawn route is
-    // calm and a retreating one asks for attention.
-    const urgency = route.isRetreating ? 1 : 0.25;
-    const pulse = 0.7 + Math.sin(time * 6) * 0.3 * urgency;
+    // A steady, quiet pulse. It used to grow urgent as decay ate the line;
+    // with lines permanent there is nothing to be urgent about, and the handle
+    // is simply saying "start here to carry this line further".
+    const pulse = 0.85 + Math.sin(time * 2.2) * 0.15;
     const radius = TUNING.route.refreshSnapRadius * 0.11 * pulse;
 
-    g.fillStyle(COLORS.route, 0.08 * urgency + 0.03);
+    g.fillStyle(COLORS.route, 0.08);
     g.fillCircle(route.tipX, route.tipY, radius * 2.2);
 
     g.fillStyle(COLORS.route, 0.85);

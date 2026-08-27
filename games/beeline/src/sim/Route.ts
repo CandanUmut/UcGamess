@@ -33,10 +33,13 @@ export class Route {
   readonly id: number;
 
   poly: Polyline;
-  /** Usable length. Shrinks from `poly.length` toward zero as the tip retreats. */
+  /**
+   * Usable length. Always the whole drawn path now that lines are permanent.
+   *
+   * Kept as a field rather than a getter because every bee reads it every step
+   * and because a redraw still has to clamp it to `maxLength`.
+   */
   liveLength: number;
-  /** Seconds of grace left before the tip starts retreating. */
-  holdRemaining: number;
   /** The patch this route was aimed at, if any. */
   target: Patch | null = null;
   /**
@@ -105,21 +108,10 @@ export class Route {
    */
   strength = 0;
 
-  constructor(coords: readonly number[], holdSeconds: number) {
+  constructor(coords: readonly number[]) {
     this.id = nextRouteId++;
     this.poly = buildPolyline(coords);
     this.liveLength = this.poly.length;
-    this.holdRemaining = holdSeconds;
-  }
-
-  /** 0..1, how much of the drawn length is still alive. Used for the fade. */
-  get vitality(): number {
-    return this.poly.length > 0 ? this.liveLength / this.poly.length : 0;
-  }
-
-  /** True once decay has begun eating into the drawn length. */
-  get isRetreating(): boolean {
-    return this.holdRemaining <= 0;
   }
 
   tipX = 0;
@@ -130,13 +122,6 @@ export class Route {
     sampleAt(this.poly, this.liveLength, scratch);
     this.tipX = scratch.x;
     this.tipY = scratch.y;
-  }
-
-  /** Retreat speed right now, after the road's own resistance. */
-  get decaySpeed(): number {
-    return (
-      TUNING.route.decaySpeed * (1 - this.strength * TUNING.route.strengthDecayResist)
-    );
   }
 
   /** Multiplier on the speed of a bee flying this route. */
@@ -166,17 +151,6 @@ export class Route {
       this.strength - this.strength * TUNING.route.strengthDecayPerSecond * dt,
     );
 
-    if (this.holdRemaining > 0) {
-      this.holdRemaining -= dt;
-    } else {
-      this.liveLength -= this.decaySpeed * dt;
-    }
-
-    if (this.liveLength <= TUNING.route.minLength) {
-      this.liveLength = Math.max(this.liveLength, 0);
-      this.dead = true;
-    }
-
     this.updateTip();
   }
 
@@ -197,13 +171,10 @@ export class Route {
    * exists to reward.
    */
   deflectTo(coords: readonly number[]): void {
-    const live = this.liveLength;
-
     this.poly = buildPolyline(coords);
-    this.liveLength = Math.min(live, this.poly.length);
+    this.liveLength = this.poly.length;
 
     if (this.liveLength <= TUNING.route.minLength) {
-      this.liveLength = Math.max(this.liveLength, 0);
       this.dead = true;
     }
 
@@ -237,36 +208,37 @@ export class Route {
   }
 
   /**
-   * Rebuilds the route as "everything still alive" + "what the player just
+   * Rebuilds the route as "what is already there" + "what the player just
    * drew", keeping the road's strength intact.
    *
-   * Extending is maintenance, so it costs nothing. That is the whole reason the
-   * refresh gesture is now worth finding: it is not merely a shorter drag, it
-   * is the one that does not throw away what the swarm has built.
+   * Now that lines are permanent this is no longer maintenance, it is
+   * **extension**: reaching an existing line on to a flower that has just
+   * bloomed further out. That is the cheap gesture worth finding, because it
+   * keeps the traffic the road has already earned.
    */
-  extendWith(appended: readonly number[], holdSeconds: number): void {
+  extendWith(appended: readonly number[]): void {
     const kept = truncateCoords(this.poly, this.liveLength);
     const merged = kept.concat(appended as number[]);
 
     this.poly = buildPolyline(merged);
     this.liveLength = Math.min(this.poly.length, TUNING.route.maxLength);
-    this.holdRemaining = holdSeconds;
     this.dead = false;
     this.updateTip();
   }
 
   /**
-   * Replaces the path entirely, at full length, at the cost of half the road.
+   * Replaces the path entirely, at the cost of half the road.
    *
-   * Starting over is not free. The line is new ground even where it happens to
-   * lie on top of the old one, and charging for it is what makes "refresh from
-   * the tip" a decision rather than a tip for the manual nobody reads.
+   * Re-routing a line is the main verb now that lines are permanent: the board
+   * keeps changing and a line that was well placed two blooms ago is not. It
+   * costs half the traffic the road had earned, which is enough to make
+   * extending the better move where extending is possible, and never enough to
+   * make re-planning feel forbidden.
    */
-  replaceWith(coords: readonly number[], holdSeconds: number): void {
+  replaceWith(coords: readonly number[]): void {
     this.strength *= TUNING.route.strengthKeptOnRedraw;
     this.poly = buildPolyline(coords);
     this.liveLength = Math.min(this.poly.length, TUNING.route.maxLength);
-    this.holdRemaining = holdSeconds;
     this.dead = false;
     this.updateTip();
   }

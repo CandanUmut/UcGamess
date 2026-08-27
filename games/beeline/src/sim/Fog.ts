@@ -44,6 +44,17 @@ export class Fog {
     this.cells = new Float32Array(this.cols * this.rows);
   }
 
+  /**
+   * Lights the whole board.
+   *
+   * Used at dawn now that planning is the game: choosing which blooms to give
+   * up is not a decision if the alternatives are invisible.
+   */
+  revealAll(): void {
+    this.cells.fill(1);
+    this.dirty = true;
+  }
+
   clear(): void {
     this.cells.fill(0);
     this.dirty = true;

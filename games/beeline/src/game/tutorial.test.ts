@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Tutorial } from './Tutorial.ts';
 
-const nothing = { routesDrawn: 0, honey: 0, money: 0, anyRouteRetreating: false };
+const nothing = { routesDrawn: 0, honey: 0, money: 0, missed: 0 };
 
 describe('tutorial', () => {
   it('does not exist for a returning player', () => {
@@ -28,7 +28,7 @@ describe('tutorial', () => {
     expect(tutorial.current?.id).toBe('watch');
   });
 
-  it('walks the whole loop — draw, gather, sell, refresh — then gets out of the way', () => {
+  it('walks the whole loop — draw, gather, sell, and losing one — then gets out of the way', () => {
     const tutorial = new Tutorial(true);
 
     tutorial.update({ ...nothing, routesDrawn: 1 });
@@ -43,24 +43,11 @@ describe('tutorial', () => {
     expect(tutorial.current?.id).toBe('sell');
 
     tutorial.update({ ...nothing, routesDrawn: 2, honey: 20, money: 18 });
-    expect(tutorial.current?.id).toBe('refresh');
+    expect(tutorial.current?.id).toBe('wilt');
 
-    // Decay starting is not enough on its own — the step is asking the player
-    // to draw again, so it must not clear itself before they have.
-    tutorial.update({
-      routesDrawn: 2,
-      honey: 40,
-      money: 18,
-      anyRouteRetreating: true,
-    });
-    expect(tutorial.current?.id).toBe('refresh');
-
-    tutorial.update({
-      routesDrawn: 3,
-      honey: 40,
-      money: 18,
-      anyRouteRetreating: true,
-    });
+    // The last step clears once a bloom has actually been lost — the lesson is
+    // "you cannot hold them all", and it only lands once one gets away.
+    tutorial.update({ ...nothing, routesDrawn: 2, money: 18, missed: 1 });
     expect(tutorial.current).toBeNull();
     expect(tutorial.finished).toBe(true);
   });

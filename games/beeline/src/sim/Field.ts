@@ -111,6 +111,12 @@ export interface FieldEvents {
   raidLanded: number;
   /** Guard lines retired because the fight was over. */
   stoodDown: Array<{ x: number; y: number }>;
+  /** A line was dropped to make room for a new one. */
+  replaced: Array<{ x: number; y: number }>;
+  /** Blooms nobody reached in time. The thing a day is lost to. */
+  wilted: Array<{ x: number; y: number; honey: number }>;
+  /** Blooms that opened this step. */
+  bloomed: Array<{ x: number; y: number }>;
   /** Honey lost over the brim this step. */
   spilled: number;
   /** Sales completed this step, for the coin burst and the sound. */
@@ -211,6 +217,9 @@ export class Field {
     stolen: 0,
     raidLanded: 0,
     stoodDown: [],
+    replaced: [],
+    wilted: [],
+    bloomed: [],
     spilled: 0,
     sold: [],
     banked: 0,
@@ -235,6 +244,14 @@ export class Field {
   waspsDowned = 0;
   /** Honey lost over the brim today. The number that shames you into selling. */
   spilled = 0;
+  /** Blooms nobody reached today. The number a run is really judged by. */
+  missed = 0;
+  /** How long an unserved bloom lasts today. Shortens as the run goes on. */
+  private wiltSeconds = TUNING.patch.wiltSeconds;
+  /** Counts down to the next bloom opening. */
+  private bloomTimer = 0;
+  /** How many blooms may be open at once today. */
+  private maxBlooms = 2;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
   /** Bees this wave has taken, against the budget below. */
@@ -278,10 +295,6 @@ export class Field {
   /** True once the hive is brimming and deliveries are being lost. */
   get isSpilling(): boolean {
     return this.honey >= this.honeyCap - 1e-6;
-  }
-
-  get routeHoldSeconds(): number {
-    return this.stats.routeHoldSeconds + this.modifiers.extraHoldSeconds;
   }
 
   // ---------------------------------------------------------------- setup
@@ -355,13 +368,36 @@ export class Field {
       this.maze.rowAt(this.hiveY),
     );
 
-    for (let i = 0; i < patchCount; i += 1) {
+    // Today's clock, and how much board the player is being asked to hold.
+    this.missed = 0;
+    this.maxBlooms = patchCount;
+    this.wiltSeconds = Math.max(
+      TUNING.patch.minWiltSeconds,
+      TUNING.patch.wiltSeconds - TUNING.patch.wiltSecondsPerDay * (day - 1),
+    );
+    this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
+
+    // Two to open with, and the rest arrive across the day.
+    //
+    // Opening the whole board at dawn would make the day one puzzle solved
+    // once; blooms arriving one at a time means the board keeps changing under
+    // a fixed number of lines, which is the decision the game is now about.
+    const opening = Math.min(2, patchCount);
+    for (let i = 0; i < opening; i += 1) {
       const kind: PatchKind =
-        features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
+        features.richPatches && i === opening - 1 ? 'rich' : 'normal';
       this.spawnPatch(kind);
     }
 
     this.fog.clear();
+    // The whole board, lit at dawn.
+    //
+    // Planning is the game now, and a board you cannot see cannot be planned
+    // against — you would be choosing which blooms to give up without knowing
+    // what the alternatives were. Blooms that open later in the day still
+    // arrive with their own little burst, which keeps the discovery beat
+    // without taking the plan away.
+    this.fog.revealAll();
     // The hive lights its own neighbourhood, and Scout Bees light a great deal
     // more. Day one's flowers spawn inside the hive's light, so the first
     // thirty seconds are exactly what they were before fog existed.
@@ -638,7 +674,7 @@ export class Field {
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
     const spot = this.randomPatchPosition(kind);
-    const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
+    const patch = new Patch(spot.x, spot.y, this.patchPool, kind, this.wiltSeconds);
     patch.distanceMultiplier = this.distanceMultiplierAt(spot.x, spot.y);
     patch.species = this.nextSpecies();
     this.patches.push(patch);
@@ -851,15 +887,24 @@ export class Field {
   createRoute(coords: readonly number[]): Route | null {
     if (coordsLength(coords) < TUNING.route.minLength) return null;
 
-    if (this.routes.length >= TUNING.route.maxCount) {
+    if (this.routes.length >= this.stats.routeSlots) {
+      // At the cap, the *least worked* line is the one that goes.
+      //
+      // Refusing the drag was the alternative and it is worse: a gesture that
+      // does nothing on a touchscreen is indistinguishable from a broken game.
+      // Strength is traffic the road has actually carried, so the line the
+      // swarm has used least is the one the player would have picked anyway.
       let weakest = this.routes[0];
       for (const route of this.routes) {
-        if (weakest && route.vitality < weakest.vitality) weakest = route;
+        if (weakest && route.strength < weakest.strength) weakest = route;
       }
-      if (weakest) this.killRoute(weakest);
+      if (weakest) {
+        this.events.replaced.push({ x: weakest.tipX, y: weakest.tipY });
+        this.killRoute(weakest);
+      }
     }
 
-    const route = new Route(coords, this.routeHoldSeconds);
+    const route = new Route(coords);
     route.updateTip();
     this.retarget(route);
     this.routes.push(route);
@@ -1093,7 +1138,21 @@ export class Field {
   step(dt: number): void {
     this.elapsed += dt;
 
-    for (const patch of this.patches) patch.step(dt);
+    this.markServedPatches();
+    for (const patch of this.patches) {
+      const wasAlive = patch.alive;
+      patch.step(dt);
+      if (wasAlive && !patch.alive && patch.pool > 0) {
+        // Wilted with nectar still in it: a bloom nobody got to.
+        this.missed += 1;
+        this.events.wilted.push({
+          x: patch.x,
+          y: patch.y,
+          honey: Math.round(patch.honeyLeft),
+        });
+      }
+    }
+    this.stepBlooms(dt);
     for (const buyer of this.buyers) buyer.step(dt);
 
     this.stepRaid(dt);
@@ -1135,8 +1194,47 @@ export class Field {
 
     for (const bee of this.bees) this.stepBee(bee, dt);
 
-    this.revealFromSwarm();
     this.updateDiscoveries();
+  }
+
+  /**
+   * Marks which blooms a line is currently reaching.
+   *
+   * A served bloom's clock holds, so this is the difference between a flower
+   * you kept and one you watched die. Computed once per step for every patch
+   * rather than asked per bee, because "is anything reaching it" is a property
+   * of the board, not of any one insect.
+   */
+  private markServedPatches(): void {
+    for (const patch of this.patches) patch.served = false;
+    for (const route of this.routes) {
+      if (route.dead || !route.target) continue;
+      if (route.reachesTarget()) route.target.served = true;
+    }
+  }
+
+  /**
+   * Opens the next bloom when there is room for one.
+   *
+   * The board filling up *is* the pressure. Blooms arrive faster than a fixed
+   * number of lines can absorb, so falling behind is visible long before it is
+   * fatal and the player can see exactly which flower they are giving up.
+   */
+  private stepBlooms(dt: number): void {
+    const open = this.patches.filter((p) => p.alive).length;
+    if (open >= this.maxBlooms) {
+      this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
+      return;
+    }
+
+    this.bloomTimer -= dt;
+    if (this.bloomTimer > 0) return;
+    this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
+
+    const kind: PatchKind =
+      this.features.richPatches && Math.random() < 0.25 ? 'rich' : 'normal';
+    const patch = this.spawnPatch(kind);
+    this.events.bloomed.push({ x: patch.x, y: patch.y });
   }
 
   // ---------------------------------------------------------------- raids
@@ -1489,21 +1587,6 @@ export class Field {
   /** True while at least one wasp is actually robbing the hive. */
   get underAttack(): boolean {
     return this.wasps.some((w) => w.isRaiding);
-  }
-
-  /**
-   * Lights the board around every bee that is actually out in the field.
-   *
-   * Idle bees drifting at the hive are skipped: they are already inside the
-   * hive's own light, and sweeping them would be a few hundred wasted disc
-   * fills a second for ground that is permanently lit anyway.
-   */
-  private revealFromSwarm(): void {
-    const radius = TUNING.bee.sightRadius;
-    for (const bee of this.bees) {
-      if (bee.state === 'idle' || bee.state === 'queued') continue;
-      this.fog.reveal(bee.x, bee.y, radius);
-    }
   }
 
   /**
@@ -1984,6 +2067,9 @@ export class Field {
       stolen: 0,
       raidLanded: 0,
       stoodDown: [],
+      replaced: [],
+      wilted: [],
+      bloomed: [],
       spilled: 0,
       sold: [],
       banked: 0,

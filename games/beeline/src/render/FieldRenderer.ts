@@ -580,11 +580,25 @@ export class FieldRenderer {
       g.strokeCircle(patch.x, patch.y, radius * 1.35);
     }
 
-    if (patch.kind === 'night' && patch.alive) {
-      // A closing arc: the window is the whole point of a night bloom, so it
-      // gets the only countdown in the game.
+    if (patch.alive) {
+      // The wilt clock, as a closing arc.
+      //
+      // Every bloom carries one now, because the clock **is** the game: the
+      // board opens flowers faster than a fixed number of lines can hold, and
+      // choosing which to give up is only a decision if you can see how long
+      // each one has. A number would be unreadable at a glance across six
+      // flowers; an arc is legible in peripheral vision, which is where the
+      // player actually is while they are dragging a line somewhere else.
       const sweep = Math.PI * 2 * patch.windowFraction;
-      g.lineStyle(4, tint, 0.9);
+      const served = patch.served;
+      // Green while a line is holding it, amber while it is running down, red
+      // once it is nearly gone. Three states, no legend needed.
+      const ringTint = served ? 0x8fd06a : patch.isFading ? 0xff7043 : tint;
+      const urgency = patch.isFading && !served ? 0.75 + 0.25 * Math.sin(time * 9) : 0.9;
+
+      g.lineStyle(2, ringTint, 0.16);
+      g.strokeCircle(patch.x, patch.y, radius * 1.5);
+      g.lineStyle(served ? 3 : 5, ringTint, urgency);
       g.beginPath();
       g.arc(patch.x, patch.y, radius * 1.5, -Math.PI / 2, -Math.PI / 2 + sweep, false);
       g.strokePath();

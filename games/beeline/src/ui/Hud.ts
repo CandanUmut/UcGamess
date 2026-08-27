@@ -30,6 +30,7 @@ export class Hud {
   private readonly timerText: Phaser.GameObjects.Text;
   private readonly banner: Phaser.GameObjects.Text;
   private readonly alertText: Phaser.GameObjects.Text;
+  private readonly linesText: Phaser.GameObjects.Text;
   private alertPhase = 0;
 
   /** One row per buyer: name, price, and which way it is going. */
@@ -103,6 +104,10 @@ export class Hud {
       .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: COLORS.dim })
       .setOrigin(0, 0.5);
 
+    this.linesText = scene.add
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '18px', color: COLORS.text })
+      .setOrigin(0, 0.5);
+
     this.unfoundText = scene.add
       .text(0, 0, '', { fontFamily: FONT, fontSize: '16px', color: '#1f6f9c' })
       .setOrigin(0, 0.5);
@@ -134,6 +139,7 @@ export class Hud {
       this.banner,
       this.swarmText,
       this.unfoundText,
+      this.linesText,
       this.alertText,
     ]);
   }
@@ -145,6 +151,16 @@ export class Hud {
   }
 
   /** Bees carrying versus bees opening routes — what a draw just cost. */
+  /** Lines in use against lines owned, and blooms lost today. */
+  setLines(used: number, owned: number, missed: number): void {
+    // The two numbers a player checks constantly once lines are the budget:
+    // how much of the board am I holding, and how much have I already dropped.
+    this.linesText.setText(
+      missed > 0 ? `${used}/${owned} lines · ${missed} wilted` : `${used}/${owned} lines`,
+    );
+    this.linesText.setColor(used >= owned ? '#e0523c' : COLORS.text);
+  }
+
   setSwarm(foraging: number, building: number, lost = 0): void {
     this.swarmText.setText(
       [
@@ -181,6 +197,7 @@ export class Hud {
 
     this.swarmText.setPosition(safe.x + 24, top + 34);
     this.unfoundText.setPosition(safe.x + 24, top + 56);
+    this.linesText.setPosition(safe.x + 24, top + 78);
   }
 
   update(day: number, honey: number, quota: number, secondsLeft: number): void {

@@ -15,7 +15,7 @@
  *  - **Each step waits for evidence**, not for a timer. Advancing on a timer
  *    teaches the confident player nothing and abandons the hesitant one.
  */
-export type TutorialStepId = 'draw' | 'watch' | 'sell' | 'refresh' | 'done';
+export type TutorialStepId = 'draw' | 'watch' | 'sell' | 'wilt' | 'done';
 
 export interface TutorialStep {
   id: TutorialStepId;
@@ -46,8 +46,11 @@ const STEPS: readonly TutorialStep[] = [
     showHintLine: false,
   },
   {
-    id: 'refresh',
-    text: 'The line fades from the far end — draw it again to keep it open',
+    // The last thing to teach, and the whole game: blooms are on a clock, you
+    // have fewer lines than flowers, and choosing which to give up is the
+    // decision every day is made of.
+    id: 'wilt',
+    text: 'Flowers wilt if no line reaches them — you cannot hold them all',
     showHintLine: false,
   },
 ];
@@ -59,8 +62,8 @@ export interface TutorialProgress {
   honey: number;
   /** Money earned so far this day. */
   money: number;
-  /** Whether any live route has begun retreating. */
-  anyRouteRetreating: boolean;
+  /** Blooms lost to the clock so far. */
+  missed: number;
 }
 
 /**
@@ -107,7 +110,9 @@ export class Tutorial {
               // *and* for the player to have drawn again since — otherwise it
               // would clear itself the moment decay began, before they had a
               // chance to do the thing it is asking for.
-              progress.anyRouteRetreating && progress.routesDrawn >= 3;
+              // Cleared once they have seen a bloom die, or drawn enough that
+              // they are plainly managing the board on their own.
+              progress.missed > 0 || progress.routesDrawn >= 4;
 
     if (satisfied) this.index += 1;
   }

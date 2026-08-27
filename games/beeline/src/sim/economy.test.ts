@@ -142,14 +142,25 @@ describe('pollen is finite for the day', () => {
     expect(patch.pool).toBe(0);
   });
 
-  it('refills only at dawn', () => {
-    const field = newDay(1);
-    for (const patch of field.patches) patch.drain(patch.pool);
-    expect(field.patches.every((p) => !p.alive)).toBe(true);
+  it('opens with a couple of blooms and fills the board across the day', () => {
+    // Opening the whole board at dawn would make a day one puzzle solved once.
+    // Blooms arriving across the day is what keeps a fixed number of lines
+    // making a new decision every few seconds.
+    const field = newDay(6);
+    expect(field.patches.filter((p) => p.alive).length).toBe(2);
 
-    field.beginDay(2, featuresForDay(2), patchesForDay(2), 1);
-    expect(field.patches.every((p) => p.alive)).toBe(true);
-    expect(field.patches.length).toBe(patchesForDay(2));
+    let opened = 0;
+    for (let t = 0; t < 60 * 45; t += 1) {
+      field.step(1 / 60);
+      opened += field.drainEvents().bloomed.length;
+    }
+
+    // Several more arrived across the day...
+    expect(opened).toBeGreaterThan(2);
+    // ...and the board never holds more at once than the day allows.
+    expect(field.patches.filter((p) => p.alive).length).toBeLessThanOrEqual(
+      patchesForDay(6),
+    );
   });
 
   it('gives day one somewhere to move to when the first flower dies', () => {

@@ -134,6 +134,21 @@ export interface PatchTuning {
    * toward a flower" always mean what it looks like it means.
    */
   aimAssistRadius: number;
+  /**
+   * Seconds an unserved bloom lasts before it wilts.
+   *
+   * The single most important number in the game now. Long enough to cross the
+   * board and lay a line — a bloom you could never have reached is not a
+   * decision, it is a tax — and short enough that a board with more flowers
+   * than lines forces a choice about which ones you give up.
+   */
+  wiltSeconds: number;
+  /** How much shorter the window gets per day, in seconds. */
+  wiltSecondsPerDay: number;
+  /** The shortest a bloom's window may ever get. */
+  minWiltSeconds: number;
+  /** Seconds between one bloom opening and the next. */
+  bloomIntervalSeconds: number;
   basePool: number;
   poolPerDay: number;
   /**
@@ -407,7 +422,7 @@ export interface Tuning {
   maze: MazeTuning;
   items: ItemShopTuning;
   upgrades: Record<
-    'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'combWax',
+    'swarmSize' | 'beeSpeed' | 'routeSlots' | 'bloom' | 'honeyStore' | 'combWax',
     UpgradeTuning
   >;
   offline: { baseCapHoney: number; baseWindowHours: number; honeyPerHour: number };
@@ -495,7 +510,10 @@ export const TUNING: Tuning = {
   // produces for ~15s and dies at ~22s: about half the hand traffic, and the
   // grace window between "stopped paying" and "gone" grows from 3s to 7s.
   route: {
-    maxCount: 5,
+    // Three to start. Small on purpose: the whole game is which flowers you
+    // can hold with the lines you have, and five was enough to hold everything
+    // the early board could offer, which is the same as no decision at all.
+    maxCount: 3,
     // Tuned as an equilibrium, not as a count. A route carrying D deliveries a
     // second settles at D x perDelivery / decay, and reaches it with a time
     // constant of 1/decay — about ten seconds.
@@ -530,6 +548,17 @@ export const TUNING: Tuning = {
     maxRadius: 300,
     reachRadius: 85,
     aimAssistRadius: 130,
+    // Twenty-two seconds is a little over two round trips to the far side of
+    // the board at starting speed, so the first flowers are comfortable and a
+    // distant one is a real commitment. It tightens by a second a day and
+    // floors at twelve, which is where the board starts asking for more lines
+    // than you own — and buying one is then the best moment in the run.
+    wiltSeconds: 22,
+    wiltSecondsPerDay: 1,
+    minWiltSeconds: 12,
+    // Slower than the wilt, so the board fills up rather than churning: blooms
+    // accumulate until you are behind, which is the pressure being visible.
+    bloomIntervalSeconds: 7,
     // Sized so one flower under the full swarm's attention runs dry in roughly
     // 25-35 seconds at any point in the progression. Big enough that a day is
     // never lost to an empty field, small enough that standing still is wrong.
@@ -598,21 +627,20 @@ export const TUNING: Tuning = {
     //
     // Days one to seven are untouched. That is where a new player decides
     // whether to keep going, and none of this problem lives there.
-    // Rebuilt from measurement rather than from the old honey figures.
+    // Re-measured against the bloom-and-wilt board.
     //
-    // The previous table asked for 3,722 on day sixteen against a swarm that
-    // measurably earns about 600, so every run died on day seven and stayed
-    // dead — which is most of why the game did not make anyone want another
-    // one. A scripted player that gathers, sells and **never defends** now
-    // sits just under the line from day seven and comfortably over it before
-    // that, so ignoring the wasps is survivable early and fatal later, and
-    // answering them is what buys the rest of the run.
+    // The previous table was fitted to a game where production was flat,
+    // because lines decayed and the swarm spent the day repairing them. With
+    // lines permanent and blooms triaged, production compounds properly —
+    // 267 on day one to 1,840 by day sixteen — so the quota can climb again.
     //
-    // Growth after the table is 5% a day, not 18%. Throughput grows with the
-    // swarm and the swarm grows linearly; a compounding quota against linear
-    // production has exactly one outcome and it is the one we had.
-    quotas: [70, 140, 240, 340, 430, 520, 580, 640, 700, 760, 820, 880],
-    quotaGrowthAfterTable: 1.05,
+    // Shaped rather than scaled: roughly 3x a scripted player's take on day
+    // one, easing to 1.2x by day ten and crossing 1.0 somewhere around day
+    // thirteen to sixteen. That is where a run should end — not at a wall, but
+    // at the point where the board finally opens flowers faster than the
+    // player can hold them.
+    quotas: [90, 155, 210, 325, 425, 535, 685, 775, 1160, 1225, 1290, 1575],
+    quotaGrowthAfterTable: 1.09,
   },
 
   // Shifted a day later than the original schedule to make room for brambles on
@@ -879,7 +907,10 @@ export const TUNING: Tuning = {
     beeSpeed: { base: 100, growth: 1.6, levels: 9, perLevel: 16 },
     // 12s → 26s of grace. Still the flagship: the only upgrade that directly
     // buys relief from the core pressure rather than more throughput.
-    routePersistence: { base: 140, growth: 1.75, levels: 7, perLevel: 2.0 },
+    // The flagship. Priced steeply and worth every coin: a line is how much of
+    // the board you can hold at once, and the board always blooms faster than
+    // the lines you own.
+    routeSlots: { base: 260, growth: 1.75, levels: 5, perLevel: 1 },
     bloom: { base: 120, growth: 1.8, levels: 6, perLevel: 1 },
     // Seven, not more: the offline window can only ever earn
     // `baseWindowHours * honeyPerHour` = 2,400, and a cap above that is a

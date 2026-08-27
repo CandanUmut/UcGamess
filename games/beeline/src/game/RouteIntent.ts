@@ -195,7 +195,7 @@ export function commitDrag(
     const route = field.routeById(intent.routeId);
     if (route && !route.dead) {
       const before = route.poly.length;
-      route.extendWith(coords, field.routeHoldSeconds);
+      route.extendWith(coords);
       field.retarget(route);
       field.aimRouteAt(route, assisted.wasp, assisted.buyer);
       return {
@@ -219,7 +219,7 @@ export function commitDrag(
   // thing to want, and it is how a big raid is actually beaten.
   const existing = patch ? field.routeTargeting(patch) : null;
   if (existing) {
-    existing.replaceWith(coords, field.routeHoldSeconds);
+    existing.replaceWith(coords);
     field.retarget(existing);
     field.aimRouteAt(existing, assisted.wasp, assisted.buyer);
     return {

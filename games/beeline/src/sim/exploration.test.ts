@@ -70,25 +70,27 @@ describe('discovery', () => {
     }
   });
 
-  it('walks the player into the dark rather than dropping them in it', () => {
-    const known = (day: number): number => {
-      let total = 0;
-      // Enough trials that the mean is stable: at three flowers a day, sixty
-      // runs left this wobbling either side of its own threshold.
-      const trials = 200;
-      for (let t = 0; t < trials; t += 1) {
-        const field = newDay(day);
-        total += field.knownPatches.length / field.patches.length;
-      }
-      return total / trials;
-    };
+  it('shows the player the whole board at dawn', () => {
+    // Planning is the game now, and a board you cannot see cannot be planned
+    // against: choosing which blooms to give up is not a decision if the
+    // alternatives are invisible. The dark used to be the challenge; the
+    // challenge is now that there are more flowers than you have lines.
+    for (const day of [1, 4, 9, 15]) {
+      const field = newDay(day);
+      expect(field.knownPatches.length).toBe(field.patches.filter((p) => p.alive).length);
+    }
+  });
 
-    // Day two is still effectively free; by the late game most of the field has
-    // to be found. Only the outer edge of the spawn band moves, so the ramp
-    // comes from the frontier opening up rather than from a new mechanic.
-    expect(known(2)).toBeGreaterThan(0.5);
-    expect(known(4)).toBeLessThan(known(2));
-    expect(known(9)).toBeLessThan(0.45);
+  it('shows a bloom that opens mid-day straight away', () => {
+    // The discovery beat survives the fog going: a flower still arrives with
+    // its own moment, it just arrives where you can act on it.
+    const field = newDay(6);
+    for (let t = 0; t < 60 * 40; t += 1) {
+      field.step(1 / 60);
+      for (const patch of field.patches) {
+        if (patch.alive) expect(patch.discovered).toBe(true);
+      }
+    }
   });
 
   it('finds a flower once a bee has been near it, and reports it once', () => {
@@ -105,22 +107,6 @@ describe('discovery', () => {
     // Discovery fires once, not every frame it stays lit.
     field.step(1 / 60);
     expect(field.drainEvents().found.length).toBe(0);
-  });
-
-  it('reveals the field as the swarm flies, not just around the hive', () => {
-    const field = newDay(6);
-    const before = field.fog.exploredFraction();
-
-    // Put the whole swarm out in the far corner, as a drawn route would.
-    for (const bee of field.bees) {
-      bee.x = 1000;
-      bee.y = 200;
-      bee.state = 'outbound';
-    }
-    field.step(1 / 60);
-
-    expect(field.fog.exploredFraction()).toBeGreaterThan(before);
-    expect(field.fog.isDiscovered(1000, 200)).toBe(true);
   });
 
   it('never aims at a flower the player has not found', () => {
@@ -294,6 +280,9 @@ describe('distance pays', () => {
       const trials = 40;
       for (let t = 0; t < trials; t += 1) {
         const field = newDay(day);
+        // Measured across the blooms a day actually produces, not just the two
+        // it opens with — the board fills in over the day now.
+        for (let f = 0; f < 60 * 45; f += 1) field.step(1 / 60);
         if (
           field.patches.some(
             (p) => Math.hypot(p.x - field.hiveX, p.y - field.hiveY) < 420,
@@ -309,7 +298,7 @@ describe('distance pays', () => {
 
 describe('paths mature', () => {
   function workedRoute(deliveries: number): Route {
-    const route = new Route([0, 0, 400, 0], 12);
+    const route = new Route([0, 0, 400, 0]);
     for (let i = 0; i < deliveries; i += 1) route.reinforce();
     return route;
   }
@@ -320,17 +309,7 @@ describe('paths mature', () => {
     expect(workedRoute(500).strength).toBe(1);
   });
 
-  it('retreats more slowly the more it has been worked', () => {
-    const fresh = workedRoute(0);
-    const beaten = workedRoute(500);
-    expect(beaten.decaySpeed).toBeLessThan(fresh.decaySpeed);
-    expect(beaten.decaySpeed / fresh.decaySpeed).toBeCloseTo(
-      1 - TUNING.route.strengthDecayResist,
-      5,
-    );
-  });
-
-  it('carries bees faster and takes less of the wind', () => {
+  it('carries bees faster', () => {
     const beaten = workedRoute(500);
     expect(beaten.speedMultiplier).toBeCloseTo(1 + TUNING.route.strengthSpeedBonus, 5);
   });
@@ -342,7 +321,7 @@ describe('paths mature', () => {
     // full one. With a flat decay there would be no stable middle at all —
     // every route would peg at 1 or fall to 0.
     const settle = (deliveriesPerSecond: number): number => {
-      const route = new Route([0, 0, 400, 0], 12);
+      const route = new Route([0, 0, 400, 0]);
       const dt = 1 / 60;
       let owed = 0;
       for (let i = 0; i < 60 * 90; i += 1) {
@@ -373,14 +352,14 @@ describe('paths mature', () => {
   });
 
   it('keeps everything when extended and half when redrawn', () => {
-    // This is what finally gives the refresh gesture a price rather than just a
-    // shorter drag: extending is maintenance, starting over is construction.
+    // What makes extending worth finding: reaching a line on to a new bloom
+    // keeps the traffic it has earned; starting over is construction.
     const extended = workedRoute(500);
-    extended.extendWith([400, 0, 500, 0], 12);
+    extended.extendWith([400, 0, 500, 0]);
     expect(extended.strength).toBe(1);
 
     const redrawn = workedRoute(500);
-    redrawn.replaceWith([0, 0, 500, 0], 12);
+    redrawn.replaceWith([0, 0, 500, 0]);
     expect(redrawn.strength).toBeCloseTo(TUNING.route.strengthKeptOnRedraw, 5);
   });
 

@@ -1,10 +1,10 @@
 import { TUNING, UNCAPPED } from '../config/tuning.ts';
 
 export type UpgradeId =
-  'swarmSize' | 'beeSpeed' | 'routePersistence' | 'bloom' | 'honeyStore' | 'combWax';
+  'swarmSize' | 'beeSpeed' | 'routeSlots' | 'bloom' | 'honeyStore' | 'combWax';
 
 export const UPGRADE_ORDER: readonly UpgradeId[] = [
-  'routePersistence',
+  'routeSlots',
   'swarmSize',
   'beeSpeed',
   'bloom',
@@ -22,20 +22,21 @@ export interface UpgradeInfo {
 }
 
 /**
- * Route Persistence is listed first deliberately.
+ * More Lines is listed first deliberately.
  *
- * It is the only upgrade that buys relief from the core pressure rather than
- * more throughput, so it should be the one a new player reads first and the one
- * they most want. Everything else makes the swarm bigger or faster; this one
- * makes the game less demanding.
+ * It is the only upgrade that buys *reach* rather than throughput, and reach is
+ * the thing the board is always short of: blooms open faster than a fixed
+ * number of lines can hold. Every other upgrade makes the swarm bigger or
+ * faster; this one changes how much of the board you can be in at once, which
+ * is why buying one is the best moment in a run.
  */
 export const UPGRADES: Record<UpgradeId, UpgradeInfo> = {
-  routePersistence: {
-    id: 'routePersistence',
-    name: 'Beeswax Trails',
-    blurb: 'Routes last longer before they fade',
+  routeSlots: {
+    id: 'routeSlots',
+    name: 'More Lines',
+    blurb: 'Hold one more flower at once',
     format: (level) =>
-      `${(TUNING.route.holdSeconds + level * upgradeStep('routePersistence')).toFixed(0)}s`,
+      `${TUNING.route.maxCount + level * upgradeStep('routeSlots')} lines`,
   },
   swarmSize: {
     id: 'swarmSize',
@@ -86,7 +87,7 @@ export function emptyLevels(): UpgradeLevels {
   return {
     swarmSize: 0,
     beeSpeed: 0,
-    routePersistence: 0,
+    routeSlots: 0,
     bloom: 0,
     honeyStore: 0,
     combWax: 0,
@@ -125,7 +126,8 @@ export function isCapped(id: UpgradeId): boolean {
 export interface DerivedStats {
   beeCount: number;
   beeSpeed: number;
-  routeHoldSeconds: number;
+  /** How many lines may be open at once. */
+  routeSlots: number;
   patchCount: number;
   /** How much honey the hive holds before it spills. */
   honeyCap: number;
@@ -140,8 +142,7 @@ export function deriveStats(levels: UpgradeLevels): DerivedStats {
   return {
     beeCount: TUNING.bee.baseCount + levels.swarmSize * u.swarmSize.perLevel,
     beeSpeed: TUNING.bee.baseSpeed + levels.beeSpeed * u.beeSpeed.perLevel,
-    routeHoldSeconds:
-      TUNING.route.holdSeconds + levels.routePersistence * u.routePersistence.perLevel,
+    routeSlots: TUNING.route.maxCount + levels.routeSlots * u.routeSlots.perLevel,
     patchCount: TUNING.patch.baseCount + levels.bloom * u.bloom.perLevel,
     honeyCap: TUNING.honey.baseCap + levels.honeyStore * u.honeyStore.perLevel,
     // Offline earnings are money the swarm sold while you were away, and the
