@@ -137,6 +137,16 @@ export class GameScene extends BaseGameplayScene {
   // --- press-and-hold erase ---------------------------------------------
   private eraseCandidate: Route | null = null;
   private holdSeconds = 0;
+  /**
+   * Set when a hold has just erased a line, and cleared when the finger lifts.
+   *
+   * The erase clears `eraseCandidate` and `holdSeconds` the instant it fires,
+   * so by the time the pointer comes up there is nothing left to tell the tap
+   * handler what happened — and it would helpfully open the dial on top of the
+   * line the player had only just removed. This flag is the one piece of that
+   * gesture that has to outlive it.
+   */
+  private erasedThisGesture = false;
   private pressX = 0;
   private pressY = 0;
 
@@ -452,6 +462,7 @@ export class GameScene extends BaseGameplayScene {
       this.pressX = p.worldX;
       this.pressY = p.worldY;
       this.holdSeconds = 0;
+      this.erasedThisGesture = false;
 
       // A press that lands on an existing line *might* be an erase. It only
       // becomes one if the finger stays put; lifting turns it back into a tap.
@@ -471,13 +482,14 @@ export class GameScene extends BaseGameplayScene {
     this.input.on(Phaser.Input.Events.POINTER_UP, (p: Phaser.Input.Pointer) => {
       if (this.phase !== 'playing') return;
 
-      const wasErasing = this.eraseCandidate;
       this.eraseCandidate = null;
-      const held = this.holdSeconds;
       this.holdSeconds = 0;
 
-      // The hold already erased it; do not also fire the dial.
-      if (wasErasing && held >= ERASE_HOLD_SECONDS) return;
+      // The hold already erased a line; do not also open the dial on top of it.
+      if (this.erasedThisGesture) {
+        this.erasedThisGesture = false;
+        return;
+      }
 
       this.hasDrawnEver = true;
       const before = this.field.aim.mode;
@@ -493,6 +505,7 @@ export class GameScene extends BaseGameplayScene {
     this.input.on(Phaser.Input.Events.GAME_OUT, () => {
       this.eraseCandidate = null;
       this.holdSeconds = 0;
+      this.erasedThisGesture = false;
     });
   }
 
@@ -561,7 +574,8 @@ export class GameScene extends BaseGameplayScene {
       this.juice.scatter(route.tipX, route.tipY);
     }
 
-    // Consume the whole gesture so releasing does not also draw something.
+    // Consume the whole gesture so releasing does not also open the dial.
+    this.erasedThisGesture = true;
     this.eraseCandidate = null;
     this.holdSeconds = 0;
     this.previewGfx.clear();
@@ -1079,6 +1093,21 @@ export class GameScene extends BaseGameplayScene {
         angle: Number(this.field.aim.angle.toFixed(2)),
         spin: Number(this.field.aim.spinSpeed.toFixed(2)),
       }),
+      routeNear: (x: number, y: number) => !!this.field.routeNear(x, y),
+      hold: () => ({
+        candidate: !!this.eraseCandidate,
+        held: Number(this.holdSeconds.toFixed(2)),
+        phase: this.phase,
+      }),
+      screenOf: (x: number, y: number) => {
+        const cam = this.cameras.main;
+        const canvas = this.game.canvas.getBoundingClientRect();
+        const scale = canvas.width / this.scale.gameSize.width;
+        return {
+          x: canvas.left + (x - cam.scrollX) * scale,
+          y: canvas.top + (y - cam.scrollY) * scale,
+        };
+      },
       save: () => this.save,
       // Lands a raid on demand. The clock is deliberately random, so without
       // this a harness check of the raid would be a check of the dice.
