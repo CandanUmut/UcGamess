@@ -686,9 +686,6 @@ export class GameScene extends BaseGameplayScene {
     if (this.phase === 'playing') {
       this.hud.update(this.day, this.field.money, dayQuota(this.day), this.secondsLeft);
 
-      const wind = this.field.windVector;
-      this.hud.setWind(wind.x, wind.y, wind.strength);
-
       // A bee goes past now and then. Only while there is a swarm to hear —
       // a buzz over an empty board is a sound with nothing making it.
       if (this.field.time >= this.nextBuzzAt && this.field.bees.length > 0) {
@@ -1009,7 +1006,6 @@ export class GameScene extends BaseGameplayScene {
         this.field.fog.cells.fill(1);
         this.field.fog.dirty = true;
       },
-      wind: () => this.field.windVector,
       stats: () => this.field.getStats(),
       routes: () =>
         this.field.routes.map((r) => ({

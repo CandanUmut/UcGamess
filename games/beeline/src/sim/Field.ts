@@ -126,7 +126,6 @@ export interface FieldEvents {
 }
 
 const NO_FEATURES: DayFeatures = {
-  wind: false,
   raidSize: 0,
   wave: [],
   mazeOpenness: 1,
@@ -246,8 +245,6 @@ export class Field {
   private guardTimer = TUNING.wasp.guardInterval;
 
   private elapsed = 0;
-  private windAngle = Math.random() * Math.PI * 2;
-  private windStrength = 0;
   private patchPool = TUNING.patch.basePool;
   /** Current day, used to widen the field and size flower pools. */
   private day = 1;
@@ -363,14 +360,6 @@ export class Field {
         features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
       this.spawnPatch(kind);
     }
-
-    this.windStrength = features.wind
-      ? Math.min(
-          TUNING.wind.baseStrength +
-            (day - TUNING.wind.startDay) * TUNING.wind.strengthPerDay,
-          TUNING.wind.maxStrength,
-        )
-      : 0;
 
     this.fog.clear();
     // The hive lights its own neighbourhood, and Scout Bees light a great deal
@@ -1107,8 +1096,6 @@ export class Field {
     for (const patch of this.patches) patch.step(dt);
     for (const buyer of this.buyers) buyer.step(dt);
 
-    if (this.windStrength > 0) this.stepWind(dt);
-
     this.stepRaid(dt);
 
     for (const route of [...this.routes]) {
@@ -1520,62 +1507,6 @@ export class Field {
   }
 
   /**
-   * Bends stored route points sideways.
-   *
-   * The wind moves the *line the player drew*, not the bees. Pushing the bees
-   * off the line instead would desynchronise them from the visible route, and
-   * the player would have no way to see or counter what was happening. Bending
-   * the route keeps cause and effect on screen: your straight line becomes an
-   * arc, so it gets longer, so throughput drops.
-   */
-  private stepWind(dt: number): void {
-    this.windAngle += TUNING.wind.rotationSpeed * dt;
-    const nx = Math.cos(this.windAngle);
-    const ny = Math.sin(this.windAngle);
-    const basePush = this.windStrength * dt * this.modifiers.windResist;
-
-    for (const route of this.routes) {
-      // A road to a shop does not bend. The buyers are buildings that have
-      // been there all run and the road to one is a trade route, not a line
-      // scribbled across a meadow — and a sell line that wandered off its own
-      // depot would break the one part of the loop the player cannot improvise
-      // around, since there is nowhere else to sell.
-      if (route.targetBuyer) continue;
-
-      const poly = route.poly;
-      // A beaten track holds its shape. This is the counterplay the player
-      // asked for: wind is no longer something that simply happens to you, it
-      // is something a road you have invested in resists.
-      const push = basePush * route.windExposure;
-      for (let i = 1; i < poly.count; i += 1) {
-        // Points further from the hive bend more, so the route bows rather
-        // than sliding sideways as a rigid whole.
-        const influence = i / poly.count;
-        const x = poly.pts[i * 2] ?? 0;
-        const y = poly.pts[i * 2 + 1] ?? 0;
-        const toX = x + nx * push * influence;
-        const toY = y + ny * push * influence;
-
-        // **Hedges break the wind.** A point the gale would push through a wall
-        // simply does not move.
-        //
-        // This is the fix for the complaint that there was "no way to prevent"
-        // a route being blown into a wall. There was not: wind pushed a line
-        // into a hedge, the hedge shortened it, and nothing the player could do
-        // changed that. Now a corridor *shelters* the line inside it, so the
-        // maze is somewhere to take cover rather than only something to get
-        // around — and routing through the lee of a wall is a real read on a
-        // real board, which is exactly the kind of skill this was missing.
-        if (this.maze.segmentBlocked(x, y, toX, toY)) continue;
-
-        poly.pts[i * 2] = toX;
-        poly.pts[i * 2 + 1] = toY;
-      }
-      route.rebuildLengths();
-    }
-  }
-
-  /**
    * Cuts a route back to where it now meets a wall.
    *
    * Checked every step rather than only on commit, because the wind bows a
@@ -1607,14 +1538,6 @@ export class Field {
    */
   slidePath(coords: readonly number[]): WallSlide {
     return slideAlongWalls(coords, this.maze);
-  }
-
-  get windVector(): { x: number; y: number; strength: number } {
-    return {
-      x: Math.cos(this.windAngle),
-      y: Math.sin(this.windAngle),
-      strength: this.windStrength,
-    };
   }
 
   private assignBee(bee: Bee): void {

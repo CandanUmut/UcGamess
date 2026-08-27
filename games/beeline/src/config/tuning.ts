@@ -84,7 +84,7 @@ export interface RouteTuning {
    *
    * This is what makes a path mean something. A line the swarm has actually
    * worked becomes a beaten track: it retreats slower, it barely bends in the
-   * wind, and bees fly it faster. It is the only thing in the game the player
+   * and bees fly it faster. It is the only thing in the game the player
    * builds up rather than spends, and it is earned by use rather than bought.
    */
   strengthPerDelivery: number;
@@ -96,8 +96,6 @@ export interface RouteTuning {
   strengthDecayPerSecond: number;
   /** At full strength, retreat is slowed by this fraction. */
   strengthDecayResist: number;
-  /** At full strength, wind bends the route this much less. */
-  strengthWindResist: number;
   /** At full strength, bees fly this much faster along it. */
   strengthSpeedBonus: number;
   /**
@@ -179,14 +177,6 @@ export interface DayTuning {
   nightScreenMinSeconds: number;
   quotas: readonly number[];
   quotaGrowthAfterTable: number;
-}
-
-export interface WindTuning {
-  startDay: number;
-  baseStrength: number;
-  strengthPerDay: number;
-  maxStrength: number;
-  rotationSpeed: number;
 }
 
 /**
@@ -401,7 +391,6 @@ export interface Tuning {
   route: RouteTuning;
   patch: PatchTuning;
   day: DayTuning;
-  wind: WindTuning;
   wasp: WaspTuning;
   buyers: Record<'market' | 'apothecary', BuyerTuning>;
   honey: HoneyTuning;
@@ -523,7 +512,6 @@ export const TUNING: Tuning = {
     strengthPerDelivery: 0.0152,
     strengthDecayPerSecond: 0.1,
     strengthDecayResist: 0.75,
-    strengthWindResist: 0.85,
     strengthSpeedBonus: 0.35,
     strengthKeptOnRedraw: 0.5,
     holdSeconds: 12.0,
@@ -630,13 +618,6 @@ export const TUNING: Tuning = {
   // Shifted a day later than the original schedule to make room for brambles on
   // day 3. The rule the schedule exists to protect is one new element at a
   // time with a quiet day after it, not any particular day number.
-  wind: {
-    startDay: 5,
-    baseStrength: 9,
-    strengthPerDay: 1.6,
-    maxStrength: 34,
-    rotationSpeed: 0.12,
-  },
 
   /**
    * Wasps, and the raids they come in.

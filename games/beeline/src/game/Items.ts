@@ -40,7 +40,6 @@ export type ItemId =
   | 'stingers'
   | 'lookouts'
   | 'queensGift'
-  | 'windbreak'
   | 'royalJelly';
 
 export type Rarity = 'common' | 'rare' | 'epic';
@@ -81,8 +80,6 @@ export interface RunModifiers {
   honeyBonus: number;
   /** Fractional bonus on bee speed. */
   beeSpeedBonus: number;
-  /** Multiplier on how hard the wind bends a route. */
-  windResist: number;
 }
 
 export function noModifiers(): RunModifiers {
@@ -101,7 +98,6 @@ export function noModifiers(): RunModifiers {
     extraBees: 0,
     honeyBonus: 0,
     beeSpeedBonus: 0,
-    windResist: 1,
   };
 }
 
@@ -293,18 +289,6 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     relevant: () => true,
     apply: (m) => {
       m.extraBees += 5;
-    },
-  },
-  windbreak: {
-    id: 'windbreak',
-    glyph: 'wind',
-    iconTint: 0xa9d6e5,
-    name: 'Windbreak',
-    rarity: 'epic',
-    effect: 'routes resist wind',
-    relevant: (features) => features.wind,
-    apply: (m) => {
-      m.windResist *= 0.45;
     },
   },
   royalJelly: {

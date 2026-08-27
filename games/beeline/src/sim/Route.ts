@@ -144,11 +144,6 @@ export class Route {
     return 1 + this.strength * TUNING.route.strengthSpeedBonus;
   }
 
-  /** How much of the wind's sideways push this route actually takes. */
-  get windExposure(): number {
-    return 1 - this.strength * TUNING.route.strengthWindResist;
-  }
-
   /** Records a delivery made along this route. */
   reinforce(): void {
     this.strength = Math.min(1, this.strength + TUNING.route.strengthPerDelivery);

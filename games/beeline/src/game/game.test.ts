@@ -53,7 +53,6 @@ describe('escalation schedule', () => {
   it('introduces nothing on day one', () => {
     const features = featuresForDay(1);
     expect(features).toEqual({
-      wind: false,
       raidSize: 0,
       wave: [],
       mazeOpenness: 1,
@@ -74,7 +73,6 @@ describe('escalation schedule', () => {
       // maze tightening a little each day after that is intensity, not a new
       // thing to learn — the same reason a third flower has never counted.
       const additions =
-        (current.wind && !previous.wind ? 1 : 0) +
         // A *new kind* of wasp is a new thing to learn. A bigger wave of the
         // same kinds is intensity, exactly like the maze tightening — counting
         // it here would make every other day an "introduction" and the rule

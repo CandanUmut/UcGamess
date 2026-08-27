@@ -9,7 +9,7 @@ import { modifiersFor } from '../game/Items.ts';
 const DT = 1 / 60;
 
 /**
- * Day one: no maze, no wind, no raid clock.
+ * Day one: no maze, no raid clock.
  *
  * Everything below that tests the raid *mechanics* rather than the raid
  * *schedule* builds on this, and places its wasps by hand. Running them on a
@@ -202,52 +202,6 @@ describe('drawing a line at a wasp fights it', () => {
     wasp.hit(TUNING.wasp.kinds.raider.health);
     field.step(DT);
     expect(route!.targetWasp).toBeNull();
-  });
-});
-
-describe('the wind cannot blow a route through a wall', () => {
-  it('shelters a route lying inside a corridor', () => {
-    // The fix for "there is no way to prevent once it hits to the walls".
-    // There was not: wind pushed a line into a hedge, the hedge shortened it,
-    // and nothing the player did changed that. A hedge now *breaks* the wind
-    // instead, so the maze is cover as well as an obstacle.
-    const field = newDay(14);
-    const coords: number[] = [];
-    for (let d = 0; d <= 260; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(field.slidePath(coords).coords);
-    if (!route) return;
-
-    // Whatever the gale does over a full day, it may never end up with the
-    // road crossing a wall — that is the property, not any particular shape.
-    for (let t = 0; t < 60 * 45; t += 1) {
-      field.step(DT);
-      if (route.dead) break;
-      expect(
-        Number.isFinite(field.blockedDistance(route.poly, route.liveLength)) &&
-          field.blockedDistance(route.poly, route.liveLength) < route.liveLength,
-      ).toBe(false);
-    }
-  });
-
-  it('leaves a road to a shop completely alone', () => {
-    // A sell line that wandered off its own depot would break the one part of
-    // the loop a player cannot improvise around: there is nowhere else to sell.
-    const field = newDay(14);
-    const buyer = field.buyers[0]!;
-    const coords: number[] = [];
-    const n = 20;
-    for (let i = 0; i <= n; i += 1) {
-      coords.push(
-        field.hiveX + ((buyer.x - field.hiveX) * i) / n,
-        field.hiveY + ((buyer.y - field.hiveY) * i) / n,
-      );
-    }
-    const route = field.createRoute(field.slidePath(coords).coords);
-    field.aimRouteAt(route!, null, buyer);
-
-    const shape = [...route!.poly.pts];
-    advance(field, 20);
-    expect([...route!.poly.pts]).toEqual(shape);
   });
 });
 

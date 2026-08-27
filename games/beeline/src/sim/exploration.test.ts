@@ -333,7 +333,6 @@ describe('paths mature', () => {
   it('carries bees faster and takes less of the wind', () => {
     const beaten = workedRoute(500);
     expect(beaten.speedMultiplier).toBeCloseTo(1 + TUNING.route.strengthSpeedBonus, 5);
-    expect(beaten.windExposure).toBeCloseTo(1 - TUNING.route.strengthWindResist, 5);
   });
 
   it('settles at a level set by how much traffic it carries', () => {
