@@ -197,7 +197,7 @@ export function commitDrag(
       const before = route.poly.length;
       route.extendWith(coords);
       field.retarget(route);
-      field.aimRouteAt(route, assisted.wasp, assisted.buyer);
+      field.aimRouteAt(route, assisted.buyer);
       return {
         kind: 'extend',
         drawnLength,
@@ -221,7 +221,7 @@ export function commitDrag(
   if (existing) {
     existing.replaceWith(coords);
     field.retarget(existing);
-    field.aimRouteAt(existing, assisted.wasp, assisted.buyer);
+    field.aimRouteAt(existing, assisted.buyer);
     return {
       kind: 'fresh',
       drawnLength,
@@ -233,7 +233,7 @@ export function commitDrag(
   }
 
   const route = field.createRoute(coords);
-  if (route) field.aimRouteAt(route, assisted.wasp, assisted.buyer);
+  if (route) field.aimRouteAt(route, assisted.buyer);
   return {
     kind: route ? 'fresh' : 'rejected',
     drawnLength,

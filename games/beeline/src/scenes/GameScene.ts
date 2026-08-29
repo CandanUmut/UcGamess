@@ -497,8 +497,12 @@ export class GameScene extends BaseGameplayScene {
 
       // One sound per step of the ritual, each a little different, so the
       // three taps are audibly three different things.
-      if (before === 'idle') this.sfx.playVaried('draw', 0.2, 180);
-      else if (before === 'aiming') this.sfx.playVaried('draw', 0.3, 60);
+      // Three taps, three different sounds, so the ritual is audible as well
+      // as visible: a soft click to open, a firmer one to fire, a short thud
+      // to stop. On a phone this is most of what tells you the tap landed.
+      if (before === 'idle') this.sfx.playVaried('draw', 0.18, 420);
+      else if (before === 'aiming') this.sfx.playVaried('draw', 0.34, 90);
+      else this.sfx.playVaried('deposit', 0.2, 260);
     });
 
     // A pointer leaving the canvas mid-aim should not strand the dial.
@@ -760,8 +764,13 @@ export class GameScene extends BaseGameplayScene {
       );
     }
 
-    for (const hit of events.struck) this.juice.scatter(hit.x, hit.y);
-    if (events.struck.length > 0) this.sfx.playVaried('draw', 0.22, 400);
+    // A throw connecting is the most satisfying thing in the game, so it gets
+    // the biggest burst per event of anything here.
+    for (const hit of events.struck) {
+      for (let i = 0; i < 7; i += 1) this.juice.scatter(hit.x, hit.y);
+      this.showGain(hit.x, hit.y, 'hit!', '#ffd166');
+    }
+    if (events.struck.length > 0) this.sfx.playVaried('wasp', 0.3, 520);
 
     // Standing a guard line down is a success, not a loss, and the player has
     // to be told it happened or the line simply vanishes on them.
@@ -770,8 +779,10 @@ export class GameScene extends BaseGameplayScene {
     }
 
     for (const down of events.waspDown) {
-      for (let i = 0; i < 8; i += 1) this.juice.scatter(down.x, down.y);
-      this.sfx.play('upgrade', 0.3);
+      for (let i = 0; i < 14; i += 1) this.juice.scatter(down.x, down.y);
+      this.showGain(down.x, down.y, 'down!', '#9bd3a0');
+      this.sfx.play('upgrade', 0.36);
+      this.cameras.main.shake(120, 0.004);
     }
 
     // Honey draining out of the hive is the one loss the player must never
@@ -794,6 +805,12 @@ export class GameScene extends BaseGameplayScene {
       this.juice.scatter(gone.x, gone.y);
     }
     if (events.wilted.length > 0) this.sfx.playVaried('wasp', 0.16, 420);
+
+    // A shot coming to rest: a small thump where the road now ends, which is
+    // also where the next tap should go.
+    for (const spot of events.shotLanded) {
+      for (let i = 0; i < 5; i += 1) this.juice.collect(spot.x, spot.y, 2);
+    }
 
     // A new bloom, where the last one is not.
     for (const bloom of events.bloomed) {
@@ -1070,8 +1087,6 @@ export class GameScene extends BaseGameplayScene {
           strength: Number(r.strength.toFixed(2)),
           connected: r.reachesTarget(),
           buyer: r.targetBuyer ? r.targetBuyer.id : null,
-          guard: r.guard,
-          wasp: r.targetWasp ? 1 : 0,
         })),
       day: () => ({
         day: this.day,

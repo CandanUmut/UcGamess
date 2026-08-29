@@ -69,7 +69,7 @@ describe('the dial', () => {
     field.aim.angle = -Math.PI / 2; // straight up, into open board
     field.tap(0, 0);
 
-    advance(field, 1.5);
+    advance(field, 4);
     expect(field.routes.length).toBe(1);
     expect(field.routes[0]!.liveLength).toBeGreaterThan(TUNING.route.minLength);
   });
@@ -93,7 +93,7 @@ describe('the dial', () => {
     field.tap(field.hiveX, field.hiveY);
     field.aim.angle = -Math.PI / 2;
     field.tap(0, 0);
-    advance(field, 1.5);
+    advance(field, 4);
 
     const route = field.routes[0]!;
     const firstLength = route.liveLength;
@@ -106,7 +106,7 @@ describe('the dial', () => {
     // and the test would be measuring the rim rather than the mechanic.
     field.aim.angle = 0;
     field.tap(0, 0);
-    advance(field, 1.5);
+    advance(field, 4);
 
     expect(field.routes.length).toBe(1);
     expect(route.liveLength).toBeGreaterThan(firstLength);

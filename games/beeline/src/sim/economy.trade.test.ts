@@ -302,7 +302,7 @@ describe('selling', () => {
 
     const route = field.createRoute(lineTo(field, buyer.x, buyer.y));
     expect(route).not.toBeNull();
-    field.aimRouteAt(route!, null, buyer);
+    field.aimRouteAt(route!, buyer);
     expect(route!.targetBuyer).toBe(buyer);
 
     const honeyBefore = field.honey;
@@ -319,7 +319,7 @@ describe('selling', () => {
     const field = newDay();
     const buyer = field.buyers[0]!;
     const route = field.createRoute(lineTo(field, buyer.x, buyer.y));
-    field.aimRouteAt(route!, null, buyer);
+    field.aimRouteAt(route!, buyer);
 
     let biggestShare = 0;
     for (let i = 0; i < 60 * 40; i += 1) {
@@ -354,7 +354,7 @@ describe('selling', () => {
 
       const buyer = field.buyers[0]!;
       const route = field.createRoute(lineTo(field, buyer.x, buyer.y));
-      field.aimRouteAt(route!, null, buyer);
+      field.aimRouteAt(route!, buyer);
 
       let count = 0;
       for (let i = 0; i < 60 * 120 && field.honey > 0; i += 1) {
@@ -382,11 +382,11 @@ describe('selling', () => {
     expect(first && second).toBeTruthy();
 
     const a = field.createRoute(lineTo(field, first!.x, first!.y));
-    field.aimRouteAt(a!, null, first!);
+    field.aimRouteAt(a!, first!);
     expect(field.routes).toContain(a);
 
     const b = field.createRoute(lineTo(field, second!.x, second!.y));
-    field.aimRouteAt(b!, null, second!);
+    field.aimRouteAt(b!, second!);
 
     expect(field.routes).toContain(b);
     expect(field.routes).not.toContain(a);
@@ -400,9 +400,9 @@ describe('selling', () => {
     const buyer = field.buyers[0]!;
 
     const a = field.createRoute(lineTo(field, buyer.x, buyer.y));
-    field.aimRouteAt(a!, null, buyer);
+    field.aimRouteAt(a!, buyer);
     const b = field.createRoute(lineTo(field, buyer.x, buyer.y));
-    field.aimRouteAt(b!, null, buyer);
+    field.aimRouteAt(b!, buyer);
 
     expect(field.routes).toContain(a);
     expect(field.routes).toContain(b);
@@ -419,11 +419,11 @@ describe('selling', () => {
       field.honey = field.honeyCap;
 
       const a = field.createRoute(lineTo(field, first!.x, first!.y));
-      field.aimRouteAt(a!, null, first!);
+      field.aimRouteAt(a!, first!);
       advance(field, delay);
 
       const b = field.createRoute(lineTo(field, second!.x, second!.y));
-      field.aimRouteAt(b!, null, second!);
+      field.aimRouteAt(b!, second!);
       expect(field.routes).not.toContain(a);
 
       advance(field, 10);
@@ -460,7 +460,7 @@ describe('selling', () => {
     field.honey = 0;
 
     const route = field.createRoute(lineTo(field, buyer.x, buyer.y));
-    field.aimRouteAt(route!, null, buyer);
+    field.aimRouteAt(route!, buyer);
 
     advance(field, 10);
     expect(field.money).toBe(0);
@@ -473,7 +473,7 @@ describe('selling', () => {
     const field = newDay();
     const buyer = field.buyers[0]!;
     const route = field.createRoute(lineTo(field, buyer.x, buyer.y));
-    field.aimRouteAt(route!, null, buyer);
+    field.aimRouteAt(route!, buyer);
 
     advance(field, 5);
     expect(route!.dead || route!.targetBuyer === buyer).toBe(true);

@@ -251,10 +251,6 @@ export class Field {
   waspsDowned = 0;
   /** Honey lost over the brim today. The number that shames you into selling. */
   spilled = 0;
-  /** Counts down to the next bloom opening. */
-  private bloomTimer = 0;
-  /** How many blooms may be open at once today. */
-  private maxBlooms = 2;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
   /** Bees this wave has taken, against the budget below. */
@@ -373,18 +369,16 @@ export class Field {
     );
 
     // Today's clock, and how much board the player is being asked to hold.
-    this.maxBlooms = patchCount;
-    this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
 
-    // Two to open with, and the rest arrive across the day.
+    // The whole board opens at dawn.
     //
-    // Opening the whole board at dawn would make the day one puzzle solved
-    // once; blooms arriving one at a time means the board keeps changing under
-    // a fixed number of lines, which is the decision the game is now about.
-    const opening = Math.min(2, patchCount);
-    for (let i = 0; i < opening; i += 1) {
+    // Blooms used to arrive one at a time across the day, and it read as the
+    // game changing its mind: you planned around what was there, and then a
+    // flower appeared somewhere you had already decided not to go. A day is a
+    // board you are given, not a board that keeps being rewritten.
+    for (let i = 0; i < patchCount; i += 1) {
       const kind: PatchKind =
-        features.richPatches && i === opening - 1 ? 'rich' : 'normal';
+        features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
       this.spawnPatch(kind);
     }
 
@@ -940,20 +934,11 @@ export class Field {
    * squarely at one. Intent captured at the drag wins over geometry read after
    * it.
    */
-  aimRouteAt(route: Route, wasp: Wasp | null, buyer: Buyer | null = null): void {
-    if (buyer) {
-      route.targetBuyer = buyer;
-      route.targetWasp = null;
-      route.target = null;
-      route.guard = false;
-      this.tradeExclusively(buyer, route);
-      return;
-    }
-    if (!wasp || !wasp.alive) return;
-    route.targetBuyer = null;
-    route.targetWasp = wasp;
+  aimRouteAt(route: Route, buyer: Buyer | null = null): void {
+    if (!buyer) return;
+    route.targetBuyer = buyer;
     route.target = null;
-    route.guard = true;
+    this.tradeExclusively(buyer, route);
   }
 
   /**
@@ -1008,32 +993,11 @@ export class Field {
     const buyer = this.nearestBuyerTo(route.tipX, route.tipY, TUNING.honey.reachRadius);
     if (buyer) {
       route.targetBuyer = buyer;
-      route.targetWasp = null;
       route.target = null;
       return;
     }
 
-    const wasp = this.nearestWaspTo(route.tipX, route.tipY, TUNING.wasp.aimRadius);
-    if (wasp) {
-      route.targetWasp = wasp;
-      route.target = null;
-      route.guard = true;
-      return;
-    }
-
-    route.targetWasp = null;
-
-    // A guard line stays a guard line. Its wasp dies within seconds — that is
-    // the point of it — and quietly turning the line back into a supply route
-    // the moment it succeeded would undo the player's decision at exactly the
-    // moment it paid off, mid-wave, with more wasps still coming down the same
-    // corridor. Erasing it is a deliberate act.
-    if (route.guard) {
-      route.target = null;
-      return;
-    }
-
-    // A sell line likewise keeps its buyer, even though a buyer is a building
+    // A sell line keeps its buyer, even though a buyer is a building
     // and cannot die. Without this a sell route whose tip drifts near a flower
     // would quietly go back to foraging, which is the same betrayal.
     if (route.targetBuyer) {
@@ -1149,7 +1113,6 @@ export class Field {
     this.elapsed += dt;
 
     for (const patch of this.patches) patch.step(dt);
-    this.stepBlooms(dt);
     for (const buyer of this.buyers) buyer.step(dt);
 
     this.stepRaid(dt);
@@ -1169,24 +1132,7 @@ export class Field {
         continue;
       }
 
-      if (route.guard) {
-        this.standDownIfQuiet(route, dt);
-        if (route.dead) {
-          this.killRoute(route);
-          continue;
-        }
-      }
-
-      if (route.targetWasp) {
-        // A route pointed at a wasp follows it. The wasp is moving — usually
-        // straight at the hive — so a line that only knew where it *was* would
-        // be pointing at empty grass by the time the bees got there.
-        if (!route.targetWasp.alive || route.targetWasp.state === 'fleeing') {
-          this.retarget(route);
-        }
-      } else if (!route.guard && (!route.target || !route.target.alive)) {
-        this.retarget(route);
-      }
+      if (!route.target || !route.target.alive) this.retarget(route);
     }
 
     for (const bee of this.bees) this.stepBee(bee, dt);
@@ -1194,30 +1140,6 @@ export class Field {
     this.stepAim(dt);
     this.revealFromSwarm();
     this.updateDiscoveries();
-  }
-
-  /**
-   * Opens the next bloom when there is room for one.
-   *
-   * The board filling up *is* the pressure. Blooms arrive faster than a fixed
-   * number of lines can absorb, so falling behind is visible long before it is
-   * fatal and the player can see exactly which flower they are giving up.
-   */
-  private stepBlooms(dt: number): void {
-    const open = this.patches.filter((p) => p.alive).length;
-    if (open >= this.maxBlooms) {
-      this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
-      return;
-    }
-
-    this.bloomTimer -= dt;
-    if (this.bloomTimer > 0) return;
-    this.bloomTimer = TUNING.patch.bloomIntervalSeconds;
-
-    const kind: PatchKind =
-      this.features.richPatches && Math.random() < 0.25 ? 'rich' : 'normal';
-    const patch = this.spawnPatch(kind);
-    this.events.bloomed.push({ x: patch.x, y: patch.y });
   }
 
   // ---------------------------------------------------------------- the dial
@@ -1240,12 +1162,16 @@ export class Field {
       return;
     }
 
-    // Carrying on from the end of a line you already own beats starting a new
-    // one, because that is the more precise thing to want — a stray tap near
-    // the hive can always start a fresh line, but only a tap by the tip can
-    // mean "keep going from there".
+    // Whichever is nearer: the end of a line, or the hive.
+    //
+    // "A tip always wins" was tried and is wrong, because the tip-tap radius is
+    // deliberately generous on a phone — the first line's end sits well inside
+    // it while you are still standing at the hive, so tapping the hive quietly
+    // extended that line and a second line could never be started. Comparing
+    // the two distances is what the player means either way.
     const tip = this.routeToExtendAt(x, y, TUNING.aim.tipTapRadius);
-    if (tip) {
+    const toHive = Math.hypot(x - this.hiveX, y - this.hiveY);
+    if (tip && Math.hypot(x - tip.tipX, y - tip.tipY) < toHive) {
       this.aim.open(tip.tipX, tip.tipY, tip.id);
       return;
     }
@@ -1334,6 +1260,24 @@ export class Field {
     // flower would be two pieces of timing for one decision, and the second
     // one is not interesting. Landing on the target is the reward for aiming
     // well, so the game takes it for them.
+    // A shot that catches a wasp is a **throw**, not a road.
+    //
+    // Drawing a supply line at a raider never made sense — a line is
+    // infrastructure and a wasp is a moving target that will be gone in
+    // seconds. Same dial, same two taps, but the shot hits the wasp and
+    // vanishes: no line laid, no slot spent, and the swarm keeps working.
+    const struck = this.nearestWaspTo(x, y, TUNING.wasp.hitRadius);
+    if (struck && struck.state !== 'fleeing') {
+      const downed = struck.hit(TUNING.wasp.throwDamage);
+      this.events.struck.push({ x: struck.x, y: struck.y });
+      if (downed) {
+        this.events.waspDown.push({ x: struck.x, y: struck.y });
+        this.waspsDowned += 1;
+      }
+      this.aim.cancel();
+      return;
+    }
+
     // Not until the shot has actually gone somewhere, or a line that just
     // landed on a flower would stop dead the instant it set off again — the
     // head starts inside the reach of the very thing it arrived at.
@@ -1341,8 +1285,7 @@ export class Field {
 
     if (
       this.nearestPatchTo(x, y, TUNING.patch.reachRadius, true) ||
-      this.nearestBuyerTo(x, y, TUNING.honey.reachRadius) ||
-      this.nearestWaspTo(x, y, TUNING.wasp.reachRadius)
+      this.nearestBuyerTo(x, y, TUNING.honey.reachRadius)
     ) {
       this.landShot();
     }
@@ -1414,9 +1357,6 @@ export class Field {
     // on the same step another one arrives is not skipped by the loop.
     if (this.wasps.some((w) => !w.alive)) {
       this.wasps = this.wasps.filter((w) => w.alive);
-      for (const route of this.routes) {
-        if (route.targetWasp && !route.targetWasp.alive) route.targetWasp = null;
-      }
     }
   }
 
@@ -1648,44 +1588,6 @@ export class Field {
     this.beesLost += 1;
   }
 
-  /**
-   * Stands a guard line down once the fight is over.
-   *
-   * A guard line's bees carry nothing, so once the last wasp is off the board
-   * it is a slot and a share of the swarm doing no work at all. Leaving that
-   * for the player to notice and erase is the game handing them a chore for
-   * having defended successfully.
-   *
-   * It is given back rather than thrown away where possible: if the line
-   * happens to end at a flower it simply goes back to foraging, and only a line
-   * with nowhere useful to point is retired. Either way the bees return to the
-   * swarm and the slot comes free.
-   *
-   * The delay matters. A wave arrives in ones and twos and there are gaps
-   * between a wasp fleeing and the next one crossing into reach, so standing
-   * down on the first quiet frame would dissolve the line mid-fight.
-   */
-  private standDownIfQuiet(route: Route, dt: number): void {
-    const stillFighting = this.wasps.some((w) => w.alive && w.state !== 'fleeing');
-    if (stillFighting) {
-      route.guardIdleFor = 0;
-      return;
-    }
-
-    route.guardIdleFor += dt;
-    if (route.guardIdleFor < TUNING.wasp.standDownSeconds) return;
-
-    route.guard = false;
-    route.targetWasp = null;
-    route.guardIdleFor = 0;
-    this.retarget(route);
-
-    if (!route.target && !route.targetBuyer) {
-      route.dead = true;
-      this.events.stoodDown.push({ x: route.tipX, y: route.tipY });
-    }
-  }
-
   /** The nearest buyer to a point, for aim assist and targeting. */
   nearestBuyerTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Buyer | null {
     let best: Buyer | null = null;
@@ -1815,57 +1717,6 @@ export class Field {
       (route?.speedMultiplier ?? 1) *
       (1 + this.modifiers.beeSpeedBonus);
 
-    // A bee on a guard line strikes any wasp that comes within reach of it,
-    // anywhere along the line.
-    //
-    // Two deliberate choices, and both are where the skill lives. **Anywhere
-    // along the line**, because wasps move — a rule that only fired at the
-    // tip would work solely against a target that stood still, which a raider
-    // never is. **Any wasp, not only the one aimed at**, because a wave comes
-    // down the corridors the maze leaves open: a line laid across the corridor
-    // they must use is worth several laid on top of individual wasps, and
-    // reading the board for that corridor is a decision made under a clock.
-    if (
-      route?.guard &&
-      (bee.state === 'outbound' || bee.state === 'building' || bee.state === 'hunting')
-    ) {
-      const foe = this.nearestWaspTo(bee.x, bee.y, TUNING.wasp.reachRadius);
-      if (foe) {
-        const downed = foe.hit(TUNING.wasp.beeDamage + this.modifiers.beeDamageBonus);
-        this.events.struck.push({ x: foe.x, y: foe.y });
-        if (downed) {
-          this.events.waspDown.push({ x: foe.x, y: foe.y });
-          this.waspsDowned += 1;
-        }
-
-        // And the wasp hits back. This is the trade the whole system was
-        // missing: striking used to be free, so a defence was a button rather
-        // than a decision. A drone is nearly free to swat; a hornet takes more
-        // than half the bees that touch it, which is what makes "cover the
-        // door and let that one through" a real option.
-        if (
-          foe.strikesBack() &&
-          this.bees.length > MIN_SWARM &&
-          this.lostThisRaid < this.raidLossBudget
-        ) {
-          // Counted against the same budget as the theft at the door: a wave
-          // has one bill, and whether it is paid fighting or paid standing
-          // still is the player's choice rather than two separate taxes.
-          this.lostThisRaid += 1;
-          this.dropBee(bee);
-          this.events.beesLost.push({ x: bee.x, y: bee.y });
-          return;
-        }
-
-        // Survived it, and goes home rather than lingering. A swarm pinned in
-        // a brawl is a swarm the player can no longer redirect.
-        this.releaseBee(bee);
-        bee.carrying = 0;
-        bee.state = 'homing';
-        return;
-      }
-    }
-
     // Wasps only threaten bees that are actually out in the field.
     if (
       this.wasps.length > 0 &&
@@ -1875,13 +1726,6 @@ export class Field {
         bee.state === 'building')
     ) {
       for (const wasp of this.wasps) {
-        // A bee sent to fight *this* wasp is not scattered by it.
-        //
-        // Without the exemption the defence gesture cannot work at all: the
-        // scatter radius is smaller than the strike radius, so every attacker
-        // would be turned back a moment before it could land a hit, and the
-        // wasp would be untouchable by the one answer the game offers.
-        if (route?.targetWasp === wasp) continue;
         if (
           !wasp.threatens(
             bee.x,
@@ -1927,21 +1771,6 @@ export class Field {
             bee.state = 'outbound';
           }
         }
-        return;
-      }
-
-      case 'hunting': {
-        const quarry = route?.targetWasp;
-        bee.timer -= dt;
-        if (!quarry || !quarry.alive || bee.timer <= 0) {
-          // Gives up rather than chasing across the board. A bee that never
-          // came back would be a permanent loss for a mis-aimed drag, which is
-          // a far harsher tax than the trip this is meant to cost.
-          this.releaseBee(bee);
-          bee.state = 'homing';
-          return;
-        }
-        this.flyToward(bee, quarry.x, quarry.y, speed, dt);
         return;
       }
 
@@ -2023,13 +1852,6 @@ export class Field {
                 bee.payload = 'money';
               }
               bee.state = 'inbound';
-            } else if (route.targetWasp?.alive) {
-              // Leaves the road to run the wasp down. The route said where the
-              // fight was when it was drawn; by the time the bees get there the
-              // wasp has moved, and stopping at the tip would mean the defence
-              // only ever worked on a target that stood still.
-              bee.state = 'hunting';
-              bee.timer = TUNING.wasp.huntSeconds;
             } else if (route.reachesTarget()) {
               bee.state = 'collect';
               bee.timer = TUNING.bee.collectSeconds;

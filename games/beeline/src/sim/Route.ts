@@ -7,7 +7,6 @@ import {
   type SamplePoint,
 } from './polyline.ts';
 import type { Patch } from './Patch.ts';
-import type { Wasp } from './Wasp.ts';
 import type { Buyer } from './Buyer.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -42,38 +41,6 @@ export class Route {
   liveLength: number;
   /** The patch this route was aimed at, if any. */
   target: Patch | null = null;
-  /**
-   * The wasp this route was aimed at, if any.
-   *
-   * A route has one job or the other, never both: bees flying it either bring
-   * nectar home or go and fight. That exclusivity *is* the cost of defending —
-   * every line you point at a wasp is a line that stopped earning.
-   */
-  targetWasp: Wasp | null = null;
-  /**
-   * Whether this line is a guard line: its bees fight instead of foraging.
-   *
-   * Set when a drag lands on a wasp and never cleared while the route lives,
-   * which is the whole point. The wasp it was aimed at will be dead or gone in
-   * seconds, but the *line* stays where the player put it, and every wasp that
-   * passes within reach of a bee on it gets hit.
-   *
-   * That is where the skill went. A wave crosses the maze through corridors,
-   * so a line laid across the corridor they must use is worth several lines
-   * laid on top of individual wasps — and reading the board for that corridor
-   * is a real decision made under a real clock.
-   */
-  guard = false;
-  /**
-   * How long this guard line has had nothing to fight.
-   *
-   * A guard line that has done its job is dead weight: its bees carry no
-   * pollen, and it holds one of the five slots. The playtest was blunt about
-   * it — "those wasps are gone but I have to delete the red line because those
-   * bees cannot carry polens". Making the player tidy up after a fight they
-   * just won is the game asking for chores.
-   */
-  guardIdleFor = 0;
   /**
    * The buyer this line sells to, if it is a sell line.
    *
