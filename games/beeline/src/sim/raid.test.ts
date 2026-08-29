@@ -170,41 +170,6 @@ describe('wasps cross the maze and rob the hive', () => {
   });
 });
 
-describe('drawing a line at a wasp fights it', () => {
-  it('brings one down, and the route stops earning while it does', () => {
-    const field = openBoard();
-    const wasp = new Wasp(field.hiveX + 300, field.hiveY);
-    field.wasps.push(wasp);
-
-    const coords: number[] = [];
-    for (let d = 0; d <= 300; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(coords);
-    expect(route).not.toBeNull();
-    // Aimed at the wasp, not at a flower that happens to be behind it.
-    expect(route!.targetWasp).toBe(wasp);
-    expect(route!.target).toBeNull();
-
-    advance(field, 25);
-    expect(wasp.health).toBe(0);
-    expect(field.wasps).not.toContain(wasp);
-  });
-
-  it('drops the wasp target once it is gone, so the line goes back to work', () => {
-    const field = openBoard();
-    const wasp = new Wasp(field.hiveX + 260, field.hiveY);
-    field.wasps.push(wasp);
-
-    const coords: number[] = [];
-    for (let d = 0; d <= 260; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(coords);
-    expect(route!.targetWasp).toBe(wasp);
-
-    wasp.hit(TUNING.wasp.kinds.raider.health);
-    field.step(DT);
-    expect(route!.targetWasp).toBeNull();
-  });
-});
-
 describe('hive defences fight without the player', () => {
   it('brings a raider down on their own, given enough guards', () => {
     // The one answer to a raid that does not cost a drag. Everything else in
@@ -266,54 +231,54 @@ describe('hive defences fight without the player', () => {
   });
 });
 
-describe('a guard line stands itself down', () => {
-  it('goes back to work once the last wasp is gone', () => {
-    // "Those wasps are gone but I have to delete the red line because those
-    // bees cannot carry polens." Making the player tidy up after a fight they
-    // won is the game handing them a chore for succeeding.
+describe('throwing at a wasp', () => {
+  it('hits it, hurts it, and lays no line', () => {
+    // Drawing a supply line at a raider never made sense: a line is
+    // infrastructure and a wasp will be gone in seconds. Same dial, same two
+    // taps, but the shot hits and vanishes — no road, no slot spent.
     const field = openBoard();
-    const wasp = new Wasp(field.hiveX + 300, field.hiveY);
+    const wasp = new Wasp(field.hiveX + 240, field.hiveY);
     field.wasps.push(wasp);
+    const health = wasp.health;
 
-    const coords: number[] = [];
-    for (let d = 0; d <= 300; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(coords);
-    expect(route!.guard).toBe(true);
+    field.tap(field.hiveX, field.hiveY);
+    field.aim.angle = 0;
+    field.tap(0, 0);
+    advance(field, 4);
 
-    // Still guarding while anything is on the board, however long it takes.
-    // Moved out of the line's reach first, so this measures the stand-down
-    // rule rather than how fast the line kills what it was drawn at.
-    wasp.x = field.hiveX;
-    wasp.y = field.hiveY - 340;
-    advance(field, TUNING.wasp.standDownSeconds + 1);
-    expect(route!.guard).toBe(true);
-
-    field.wasps = [];
-    advance(field, TUNING.wasp.standDownSeconds + 0.5);
-
-    // Either it found something to forage or it retired — never left standing
-    // there costing a slot and a share of the swarm for nothing.
-    expect(route!.dead || route!.guard === false).toBe(true);
-    expect(route!.guard).toBe(false);
+    expect(wasp.health).toBeLessThan(health);
+    expect(field.routes.length).toBe(0);
+    expect(field.aim.mode).toBe('idle');
   });
 
-  it('holds through the gaps inside a wave', () => {
-    // Wasps arrive in ones and twos. Standing down on the first quiet frame
-    // would dissolve the line in the middle of the fight it was drawn for.
+  it('brings one down in a handful of throws', () => {
+    // Every throw is a deliberate aimed act, so a wasp that took seven of them
+    // would be a chore rather than a fight.
     const field = openBoard();
-    const first = new Wasp(field.hiveX + 300, field.hiveY);
-    field.wasps.push(first);
+    const wasp = new Wasp(field.hiveX + 240, field.hiveY);
+    field.wasps.push(wasp);
 
-    const coords: number[] = [];
-    for (let d = 0; d <= 300; d += 20) coords.push(field.hiveX + d, field.hiveY);
-    const route = field.createRoute(coords);
-    expect(route!.guard).toBe(true);
+    for (let i = 0; i < 6 && wasp.alive && wasp.state !== 'fleeing'; i += 1) {
+      field.tap(field.hiveX, field.hiveY);
+      // Re-aimed each time: the wasp is crossing the board, so a throw at
+      // where it *was* is exactly the miss a player would make.
+      field.aim.angle = Math.atan2(wasp.y - field.hiveY, wasp.x - field.hiveX);
+      field.tap(0, 0);
+      advance(field, 4);
+    }
+    expect(wasp.health).toBe(0);
+  });
 
-    field.wasps = [];
-    advance(field, TUNING.wasp.standDownSeconds * 0.5);
-    field.wasps.push(new Wasp(field.hiveX + 320, field.hiveY));
-    advance(field, TUNING.wasp.standDownSeconds * 0.9);
+  it('still lays a line when the shot lands on a flower instead', () => {
+    const field = openBoard();
+    const patch = field.patches.find((p) => p.alive && p.discovered);
+    if (!patch) return;
 
-    expect(route!.guard).toBe(true);
+    field.tap(field.hiveX, field.hiveY);
+    field.aim.angle = Math.atan2(patch.y - field.hiveY, patch.x - field.hiveX);
+    field.tap(0, 0);
+    advance(field, 6);
+
+    expect(field.routes.length).toBe(1);
   });
 });

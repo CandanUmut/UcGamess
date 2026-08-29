@@ -218,6 +218,8 @@ export class FieldRenderer {
   /** One per wasp, reused. There are never more than a couple. */
   private wasps: Phaser.GameObjects.Image[] = [];
   private buyerLabels: Phaser.GameObjects.Text[] = [];
+  /** Eased pollen fractions, per patch, so the ring falls smoothly. */
+  private readonly pollenShown = new Map<number, number>();
   /** One per buyer. A null entry is a shop whose art never arrived. */
   private shops: Array<Phaser.GameObjects.Image | null> = [];
   /** The price tags' boards and posts, redrawn per frame. */
@@ -338,7 +340,7 @@ export class FieldRenderer {
       if (!patch.discovered) continue;
       this.drawPatch(g, patch, field.time);
     }
-    this.drawFlowers(field);
+    this.drawFlowers(field, field.time);
     this.drawLabels(field);
     this.drawWalls(field);
 
@@ -580,6 +582,40 @@ export class FieldRenderer {
       g.strokeCircle(patch.x, patch.y, radius * 1.35);
     }
 
+    if (patch.alive) {
+      // How much pollen is left, as a draining ring.
+      //
+      // The number over a flower said 186 and meant nothing without knowing
+      // what it started at. A ring you can watch empty answers the only
+      // question the player actually asks — "is this one nearly done, should I
+      // be moving?" — from across the board, without reading anything.
+      //
+      // Eased toward the true value rather than set, so a swarm draining a
+      // flower shows as a smooth fall instead of a stutter, and the last of it
+      // visibly drains away.
+      const shown = this.pollenShown.get(patch.id) ?? patch.fullness;
+      const eased = shown + (patch.fullness - shown) * 0.12;
+      this.pollenShown.set(patch.id, eased);
+
+      const ringRadius = radius * 1.5;
+      const low = eased < 0.25;
+      const ringTint = low ? 0xff9a5c : tint;
+
+      g.lineStyle(5, 0x3c3524, 0.18);
+      g.strokeCircle(patch.x, patch.y, ringRadius);
+      g.lineStyle(5, ringTint, low ? 0.7 + 0.3 * Math.sin(time * 7) : 0.85);
+      g.beginPath();
+      g.arc(
+        patch.x,
+        patch.y,
+        ringRadius,
+        -Math.PI / 2,
+        -Math.PI / 2 + Math.PI * 2 * Math.max(0, eased),
+        false,
+      );
+      g.strokePath();
+    }
+
     if (patch.kind === 'night' && patch.alive) {
       // A closing arc: the window is the whole point of a night bloom, so it
       // gets the only countdown in the game.
@@ -649,7 +685,7 @@ export class FieldRenderer {
    * hidden, because the player needs to see that the flower they routed to is
    * the one that is finished.
    */
-  private drawFlowers(field: Field): void {
+  private drawFlowers(field: Field, time: number): void {
     while (this.flowers.length < field.patches.length) {
       const flower = this.scene.add
         .image(0, 0, FLOWER_TEX[0] ?? TEX.glow)
@@ -676,11 +712,21 @@ export class FieldRenderer {
       const radius = 26 * patch.bloomT * (0.85 + 0.2 * patch.yieldPerTrip);
       const head = radius * (0.55 + 0.45 * patch.fullness);
 
+      // A slow sway on two sines of different periods, so no two flowers are
+      // ever in step and the meadow never looks like a grid of stamps. Tiny
+      // amounts: this is a breeze, not a wobble, and a flower that moved far
+      // would be a flower the player could miss when they aimed at it.
+      const t = time + patch.id * 1.7;
+      const swayX = Math.sin(t * 1.15) * 2.4;
+      const swayY = Math.sin(t * 0.83 + 1.1) * 1.6;
+      const breathe = 1 + Math.sin(t * 1.45) * 0.035;
+
       flower.setVisible(true);
-      flower.setPosition(patch.x, patch.y);
+      flower.setPosition(patch.x + swayX, patch.y + swayY);
+      flower.setRotation(Math.sin(t * 0.7) * 0.07);
       // The art is 96px square with a little margin, so a flower of `head`
       // radius wants a touch more than 2*head of sprite.
-      flower.setDisplaySize(head * 2.4, head * 2.4);
+      flower.setDisplaySize(head * 2.4 * breathe, head * 2.4 * breathe);
       flower.setAlpha(patch.alive ? 1 : 0.4);
       flower.setTint(patch.alive ? 0xffffff : COLORS.patchDry);
     }

@@ -234,6 +234,10 @@ export interface WaspTuning {
   beeDamage: number;
   /** How close a bee has to be to strike, and a route's tip to be a guard. */
   reachRadius: number;
+  /** How near a thrown shot has to pass to hit a wasp. Generous on purpose. */
+  hitRadius: number;
+  /** Damage one thrown shot does. */
+  throwDamage: number;
   /** How close a wasp must get to the hive to start robbing it. */
   arriveRadius: number;
   /** Seconds between blows from one Guard Bee. */
@@ -542,7 +546,11 @@ export const TUNING: Tuning = {
     refreshSnapRadius: 160,
     pointSpacing: 12,
     // The board is twice as deep now the hive sits in a corner.
-    maxLength: 1400,
+    // Long. The cap used to bite in ordinary play — a line simply stopped
+    // accepting shots with no explanation, which reads as the game breaking.
+    // Five slots are the budget that matters; a line's length should be
+    // limited by the board, not by a number nobody can see.
+    maxLength: 3200,
   },
 
   patch: {
@@ -681,7 +689,7 @@ export const TUNING: Tuning = {
       /** The staple. Middling everything; the wave is mostly these. */
       raider: {
         speed: 95,
-        health: 3,
+        health: 2,
         stealShare: 0.05,
         beeLossInterval: 5.5,
         retaliation: 0.12,
@@ -699,7 +707,7 @@ export const TUNING: Tuning = {
        */
       drone: {
         speed: 165,
-        health: 2,
+        health: 1,
         stealShare: 0.02,
         beeLossInterval: 3.0,
         retaliation: 0.06,
@@ -717,7 +725,7 @@ export const TUNING: Tuning = {
        */
       hornet: {
         speed: 68,
-        health: 7,
+        health: 4,
         stealShare: 0.1,
         beeLossInterval: 7.0,
         retaliation: 0.28,
@@ -733,6 +741,11 @@ export const TUNING: Tuning = {
     beeDamage: 1,
     /** How close a bee has to be to strike, and a route's tip to be a guard. */
     reachRadius: 74,
+    // Wide, because the target moves and the dial is already the hard part.
+    // Asking for pixel accuracy *and* timing would be two skills for one tap,
+    // and a wasp crosses a good part of the board while the arrow comes round.
+    hitRadius: 80,
+    throwDamage: 1,
     /** How close a wasp must get to the hive to start robbing it. */
     arriveRadius: 70,
     // Two guards bring a raider down in about a second and a half, so a
@@ -1056,20 +1069,34 @@ export const TUNING: Tuning = {
    * button into a skill — leave the dial open and the arrow runs away from you.
    */
   aim: {
-    spinBase: 1.7,
+    spinBase: 1.25,
     // A little faster every day, so a run that lasts is visibly harder to aim
     // rather than merely more expensive.
-    spinPerDay: 0.14,
+    spinPerDay: 0.1,
     // The half of "gitgide hızlanmalı" that lives inside a single shot:
     // hesitate for three seconds and the arrow is spinning half again as fast.
-    spinAccel: 0.85,
-    maxSpin: 7,
-    launchSpeed: 640,
+    spinAccel: 0.5,
+    maxSpin: 4.2,
+    // Slow enough to stop.
+    //
+    // At 640 a shot crossed a third of the board in seven tenths of a second,
+    // which is faster than a person can decide to tap — so "tap to stop it"
+    // was a promise the game could not keep and every shot ran its full
+    // length. A quarter of that speed makes the stop a real control, and it is
+    // what turns the whole mechanic from a slot machine into aiming.
+    launchSpeed: 210,
     // About a third of the board per shot, so crossing it is three or four
     // well-aimed shots and a corner is something you go round deliberately.
-    maxFlightLength: 460,
+    // Half the board. Measured: at 520 a throw fired from the hive could not
+    // reach a wasp that had just crossed the rim, so the answer to a raid was
+    // "wait until it is nearly on top of you" — which is not an answer, it is
+    // a countdown. The player can stop a shot at any point, so a longer flight
+    // costs them nothing they did not choose.
+    maxFlightLength: 700,
     dialRadius: 58,
-    tipTapRadius: 150,
+    // Generous, because this is a phone game and the tip of a line is the most
+    // important thing on the board to be able to hit.
+    tipTapRadius: 190,
   },
 
   /**
