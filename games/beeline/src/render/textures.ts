@@ -37,6 +37,7 @@ export const TEX = {
   swatBurst: 'swat-burst',
   flowerGolden: 'flower-golden',
   honeyDrop: 'honey-drop',
+  medal: 'medal',
   waspFlap: 'wasp-flap',
 } as const;
 
@@ -62,6 +63,7 @@ export const TEX_FILES: ReadonlyArray<readonly [key: string, path: string]> = [
   [TEX.glint, 'particles/glint.png'],
   [TEX.flowerGolden, 'sprites/flower-golden.png'],
   [TEX.honeyDrop, 'sprites/honey-drop.png'],
+  [TEX.medal, 'sprites/medal.png'],
   ...FLOWER_TEX.map((key) => [key, `sprites/${key}.png`] as const),
 ];
 

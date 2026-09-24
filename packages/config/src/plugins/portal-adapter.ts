@@ -3,7 +3,7 @@ import type { Plugin } from 'vite';
 /** Module every game reaches the portal through. Swapped at build time. */
 const ACTIVE_ADAPTER_SUFFIX = 'portal/src/active-adapter.ts';
 
-export type PortalTarget = 'local' | 'crazygames' | 'poki' | 'gamedistribution';
+export type PortalTarget = 'local' | 'crazygames' | 'poki' | 'gamedistribution' | 'web';
 
 /**
  * Replaces `@ucgames/portal`'s active-adapter module with the variant for the

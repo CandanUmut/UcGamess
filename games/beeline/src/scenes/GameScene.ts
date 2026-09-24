@@ -40,6 +40,21 @@ import { modifiersFor, rollOffer } from '../game/Items.ts';
 import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
+import type { LevelDoneData } from './LevelDoneScene.ts';
+import type { PauseData } from './PauseScene.ts';
+import {
+  LEVELS_PER_WORLD,
+  levelById,
+  levelFeatures,
+  levelModifiers,
+  levelStarsFor,
+  levelSunsetBonus,
+  withSeed,
+  type LevelDef,
+} from '../game/Levels.ts';
+
+/** What the Game scene was started to play. */
+export type GameStart = { mode: 'endless' } | { mode: 'level'; level: number };
 
 /**
  * Fog sits above the terrain and the routes but below the swarm and the juice.
@@ -116,6 +131,10 @@ export class GameScene extends BaseGameplayScene {
   private sfx!: Sfx;
 
   private save!: BeelineSave;
+  /** Endless run, or one campaign level. Set by `init` from the start data. */
+  private start: GameStart = { mode: 'endless' };
+  /** The campaign level being played, or null in the endless run. */
+  private level: LevelDef | null = null;
   private day = 1;
   private secondsLeft = 0;
   private daySeconds = 0;
@@ -152,6 +171,18 @@ export class GameScene extends BaseGameplayScene {
 
   constructor() {
     super({ key: 'Game' });
+  }
+
+  init(data: Partial<GameStart> | undefined): void {
+    if (
+      data?.mode === 'level' &&
+      typeof (data as { level?: unknown }).level === 'number'
+    ) {
+      this.start = { mode: 'level', level: (data as { level: number }).level };
+    } else {
+      this.start = { mode: 'endless' };
+    }
+    this.phase = 'loading';
   }
 
   preload(): void {
@@ -216,10 +247,26 @@ export class GameScene extends BaseGameplayScene {
 
     this.fieldRenderer.setViewRect(viewRect(this));
     this.hud.layout(this.safeArea);
+    this.hud.onPause = () => this.openPause();
+    this.input.keyboard?.on('keydown-P', () => this.openPause());
+    // Losing focus pauses with the card up, so a player who clicked outside
+    // the portal frame comes back to "Paused", not to a day half gone.
+    this.game.events.on(Phaser.Core.Events.BLUR, this.openPause, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
+      this.game.events.off(Phaser.Core.Events.BLUR, this.openPause, this),
+    );
+    // A star earned mid-level is the best moment in it: a chime that climbs
+    // with each one, and a flash of gold.
+    this.hud.onStar = (star) => {
+      this.sfx.play('sparkle', 0.4, (star - 1) * 300);
+      this.cameras.main.flash(160, 255, 220, 120);
+    };
     this.bindInput();
 
-    // The harness handle reads live simulation state. Removed before submission.
-    (window as unknown as Record<string, unknown>).__beeline = this.debugHandle();
+    // The harness handle reads live simulation state. Dev and `local` builds only.
+    if (__UCGAMES_DEV__ || __UCGAMES_PORTAL__ === 'local') {
+      (window as unknown as Record<string, unknown>).__beeline = this.debugHandle();
+    }
 
     void this.bootstrap();
   }
@@ -242,6 +289,15 @@ export class GameScene extends BaseGameplayScene {
     this.save = coerceSave(this.context.save.get<unknown>(SAVE_KEY, null));
     this.day = this.save.day;
 
+    if (this.start.mode === 'level') {
+      this.level = levelById(this.start.level) ?? levelById(1) ?? null;
+      // The tutorial belongs to the very first level of a fresh save.
+      this.tutorial = new Tutorial(!this.save.tutorialDone && this.level?.id === 1);
+      this.beginDay();
+      return;
+    }
+    this.level = null;
+
     // Only ever on a genuinely fresh save. Being taught twice is worse than not
     // being taught at all.
     this.tutorial = new Tutorial(!this.save.tutorialDone && this.save.day === 1);
@@ -263,6 +319,10 @@ export class GameScene extends BaseGameplayScene {
   // ------------------------------------------------------------------ day
 
   private beginDay(): void {
+    if (this.level) {
+      this.beginLevel(this.level);
+      return;
+    }
     this.phase = 'playing';
     this.day = this.save.day;
     this.scheduleBuzz();
@@ -285,14 +345,8 @@ export class GameScene extends BaseGameplayScene {
 
     this.hud.resetDay();
     this.hud.setVisible(true);
-    this.hud.update(
-      this.day,
-      0,
-      dayQuota(this.day),
-      this.secondsLeft,
-      this.daySeconds,
-      0,
-    );
+    this.hud.setPauseVisible(true);
+    this.refreshHud(0);
 
     const intro = dayIntroduction(this.day);
     this.hud.showBanner(intro ?? `Day ${this.day} — goal ${dayQuota(this.day)}`);
@@ -305,6 +359,213 @@ export class GameScene extends BaseGameplayScene {
   }
 
   /**
+   * Sets up one campaign level: its own seeded board, hive and clock.
+   *
+   * The board is built under a fixed seed so a level is the same meadow every
+   * time — something to learn and replay for the third star. The simulation
+   * itself runs on the ordinary random source afterwards, so golden blooms
+   * and wasps still keep a player honest.
+   */
+  private beginLevel(level: LevelDef): void {
+    this.phase = 'playing';
+    this.day = level.difficulty;
+    this.scheduleBuzz();
+
+    const modifiers = levelModifiers(level);
+    this.field.setStats(deriveStats(modifiers));
+    withSeed(level.seed, () =>
+      this.field.beginDay(
+        level.difficulty,
+        levelFeatures(level),
+        level.flowers,
+        1,
+        modifiers,
+      ),
+    );
+
+    this.daySeconds = level.seconds;
+    this.secondsLeft = this.daySeconds;
+    this.beeRenderer.resize(this.field.bees.length);
+    this.cancelDrag();
+
+    this.hud.resetDay();
+    this.hud.setVisible(true);
+    this.hud.setPauseVisible(true);
+    this.refreshHud(0);
+    this.hud.showBanner(level.intro ?? level.name);
+
+    this.sfx.startHum();
+    this.sfx.startMusic();
+    if (!this.externallyPaused) this.startGameplay();
+  }
+
+  /** Honey for one, two and three stars on whatever is being played. */
+  private get targets(): readonly [number, number, number] {
+    if (this.level) return this.level.stars;
+    const quota = dayQuota(this.day);
+    return [
+      quota,
+      Math.round(quota * TUNING.score.twoStars),
+      Math.round(quota * TUNING.score.threeStars),
+    ];
+  }
+
+  /** The sunset bonus the daylight left would pay right now. */
+  private get bonusNow(): number {
+    return this.level
+      ? levelSunsetBonus(this.level, this.secondsLeft)
+      : sunsetBonus(this.day, this.secondsLeft);
+  }
+
+  private refreshHud(deltaSeconds: number): void {
+    const label = this.level
+      ? `${this.level.world + 1}-${((this.level.id - 1) % LEVELS_PER_WORLD) + 1}  ${this.level.name}`
+      : `Day ${this.day}`;
+    this.hud.update(
+      label,
+      this.field.honey,
+      this.targets,
+      this.secondsLeft,
+      this.daySeconds,
+      deltaSeconds,
+      {
+        tier: this.field.comboTier,
+        progress: this.field.comboProgress,
+        slipping: this.field.comboSlipping,
+      },
+    );
+  }
+
+  /**
+   * A campaign level is over. Stars are kept at their best, the honey at its
+   * best, and the result goes to the level card.
+   */
+  private endLevel(level: LevelDef, cleared: boolean): void {
+    this.phase = 'ended';
+    this.cancelDrag();
+    this.stopGameplay();
+    this.sfx.play('dayEnd', 0.45);
+
+    const bonus = cleared ? levelSunsetBonus(level, this.secondsLeft) : 0;
+    const honey = Math.floor(this.field.honey) + bonus;
+    const stars = levelStarsFor(level, honey);
+    const index = level.id - 1;
+    const prevStars = this.save.levelStars[index] ?? 0;
+    const prevBest = this.save.levelBest[index] ?? 0;
+
+    while (this.save.levelStars.length <= index) this.save.levelStars.push(0);
+    while (this.save.levelBest.length <= index) this.save.levelBest.push(0);
+    this.save.levelStars[index] = Math.max(prevStars, stars);
+    this.save.levelBest[index] = Math.max(prevBest, honey);
+
+    // A world is complete the first time all ten of its levels are passed.
+    const first = level.world * LEVELS_PER_WORLD;
+    const worldDone = Array.from(
+      { length: LEVELS_PER_WORLD },
+      (_, i) => (this.save.levelStars[first + i] ?? 0) >= 1,
+    ).every(Boolean);
+    const celebrateWorld = worldDone && !this.save.worldsCelebrated.includes(level.world);
+    if (celebrateWorld) this.save.worldsCelebrated.push(level.world);
+
+    if (this.tutorial.finished || stars > 0) this.save.tutorialDone = true;
+    // The portal's own celebration cue, for a star gained or a world finished —
+    // not for every pass, or it stops meaning anything.
+    if (stars > prevStars || celebrateWorld) this.context.portal.happyTime();
+    this.tutorial.dismiss();
+    this.tutorialText.setText('');
+    this.persist();
+    this.hud.setVisible(false);
+
+    const data: LevelDoneData = {
+      level,
+      honey,
+      bonus,
+      stars,
+      prevStars,
+      prevBest,
+      bestCombo: this.field.bestCombo,
+      worldComplete: celebrateWorld ? level.world : null,
+      sfx: this.sfx,
+      onRetry: () => this.replayLevel(level.id),
+      onNext: () => this.replayLevel(level.id + 1),
+      onMap: () => this.toMap(),
+    };
+    this.scene.launch('LevelDone', data);
+    this.scene.pause();
+  }
+
+  private replayLevel(id: number): void {
+    this.scene.stop('LevelDone');
+    this.scene.stop('Pause');
+    this.tutorialText.setVisible(true);
+    this.scene.resume();
+    const next = levelById(id);
+    if (!next) {
+      this.toMap();
+      return;
+    }
+    this.level = next;
+    this.beginDay();
+  }
+
+  /**
+   * The pause card. Only mid-day: between days there is nothing running to
+   * pause, and the result screens have their own way out.
+   */
+  private openPause(): void {
+    if (this.phase !== 'playing' || this.externallyPaused) return;
+    if (!this.scene.isActive() || this.scene.isActive('Pause')) return;
+    this.cancelDrag();
+    this.sfx.stopHumOnly();
+    this.tutorialText.setVisible(false);
+    const level = this.level;
+    const data: PauseData = {
+      title: level
+        ? `${level.world + 1}-${((level.id - 1) % LEVELS_PER_WORLD) + 1}  ${level.name}`
+        : `Day ${this.day}`,
+      quitLabel: level ? 'Map' : 'Menu',
+      onResume: () => this.closePause(),
+      onQuit: () => {
+        this.scene.stop('Pause');
+        this.scene.resume();
+        this.goHome();
+      },
+      ...(level ? { onRetry: () => this.replayLevel(level.id) } : {}),
+    };
+    this.scene.launch('Pause', data);
+    this.scene.pause();
+  }
+
+  private closePause(): void {
+    this.tutorialText.setVisible(true);
+    this.scene.stop('Pause');
+    this.scene.resume();
+    this.sfx.startHum();
+    this.startGameplay();
+  }
+
+  /** Leaves the board: the map in the campaign, the menu otherwise. */
+  private goHome(): void {
+    if (this.phase === 'loading') return;
+    if (this.level) {
+      this.toMap();
+      return;
+    }
+    this.scene.stop('Night');
+    this.sfx.stopHumOnly();
+    this.stopGameplay();
+    this.scene.start('Menu');
+  }
+
+  /** Back to the honeycomb. Anything unfinished on this board is dropped. */
+  private toMap(): void {
+    this.scene.stop('LevelDone');
+    this.sfx.stopHumOnly();
+    this.stopGameplay();
+    this.scene.start('Map', { world: this.level?.world ?? 0 });
+  }
+
+  /**
    * The day is over: by dusk, or by clearing the meadow.
    *
    * Clearing early pays the sunset bonus for the daylight left, which is what
@@ -312,6 +573,10 @@ export class GameScene extends BaseGameplayScene {
    */
   private endDay(cleared: boolean): void {
     if (this.phase === 'ended') return;
+    if (this.level) {
+      this.endLevel(this.level, cleared);
+      return;
+    }
     this.phase = 'ended';
     this.cancelDrag();
 
@@ -322,6 +587,10 @@ export class GameScene extends BaseGameplayScene {
     const result = evaluateDay(this.day, Math.floor(this.field.honey) + bonus, bonus);
 
     this.save.runScore += result.score;
+    // Surviving further than ever before is endless mode's celebration.
+    if (result.outcome === 'met' && this.day > this.save.bestRunDay && this.day > 1) {
+      this.context.portal.happyTime();
+    }
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     if (this.tutorial.finished) this.save.tutorialDone = true;
     this.tutorial.dismiss();
@@ -585,14 +854,7 @@ export class GameScene extends BaseGameplayScene {
     this.consumeEvents();
 
     if (this.phase === 'playing' || this.phase === 'clearing') {
-      this.hud.update(
-        this.day,
-        this.field.honey,
-        dayQuota(this.day),
-        this.secondsLeft,
-        this.daySeconds,
-        seconds,
-      );
+      this.refreshHud(seconds);
 
       if (this.field.time >= this.nextBuzzAt && this.field.bees.length > 0) {
         this.scheduleBuzz();
@@ -744,14 +1006,19 @@ export class GameScene extends BaseGameplayScene {
       this.floatText(gone.x, gone.y - 40, 'closed', '#ff8a70', 18);
     }
 
+    if (events.comboUp > 0) {
+      this.hud.comboPop(events.comboUp);
+      this.sfx.play('upgrade', 0.3 + events.comboUp * 0.04, (events.comboUp - 2) * 200);
+    }
+    if (events.comboDown > 0) {
+      this.sfx.playVaried('deposit', 0.3, 80);
+    }
+
     if (events.cleared && this.phase === 'playing') {
       this.phase = 'clearing';
       this.clearTimer = CLEAR_PAUSE;
       this.cancelDrag();
-      this.hud.showBanner(
-        `Meadow cleared! +${sunsetBonus(this.day, this.secondsLeft)} sunset bonus`,
-        '#ffe38a',
-      );
+      this.hud.showBanner(`Meadow cleared! +${this.bonusNow} sunset bonus`, '#ffe38a');
       this.sfx.play('fanfare', 0.55);
       this.cameras.main.flash(260, 255, 230, 150);
     }
@@ -995,7 +1262,7 @@ export class GameScene extends BaseGameplayScene {
     g.strokeCircle(fx, fy, pressed ? 17 : 20);
   }
 
-  /** Exposed for the automated harness. Removed before submission. */
+  /** Exposed for the automated harness, in dev and `local` builds only. */
   debugHandle(): Record<string, unknown> {
     return {
       hive: { x: this.field.hiveX, y: this.field.hiveY },

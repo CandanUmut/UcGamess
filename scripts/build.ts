@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const GAMES_DIR = join(REPO_ROOT, 'games');
 
-const PORTALS = ['local', 'crazygames', 'poki', 'gamedistribution'] as const;
+const PORTALS = ['local', 'crazygames', 'poki', 'gamedistribution', 'web'] as const;
 
 /**
  * Builds games for a given portal.

@@ -174,4 +174,5 @@ pnpm test                         # unit tests
 pnpm test:e2e                     # browser smoke tests
 pnpm verify                       # everything CI runs
 pnpm create-game <slug>           # scaffold a new game
+node scripts/package.ts -g <slug> # build + zip for CrazyGames and web (docs/publishing.md)
 ```

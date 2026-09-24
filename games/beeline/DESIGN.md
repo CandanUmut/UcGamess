@@ -6,8 +6,8 @@
 **One sentence:** You drag beelines from your hive to flowers, and every bee
 that comes home is honey on the scoreboard.
 
-> **§33 is the current shape of the game** and supersedes everything it
-> contradicts: the dial, the shops and prices, the coin economy and the ten
+> **§33 and §34 are the current shape of the game** and supersede everything
+> they contradict: the dial, the shops and prices, the coin economy and the ten
 > button night screen are gone. The earlier sections are kept as the record of
 > how the game got here.
 
@@ -2205,6 +2205,103 @@ cleared meadow.
 - The golden bloom's position can land far into a maze on later days, where
   its seven seconds are not enough to route to it. That may be fine (it is a
   bonus), or it may want to prefer reachable cells.
+
+## 34. Something to finish, and a reason to play well
+
+Playtest after §33: "more fun, yes, but really easy — not much challenge — and
+there is no satisfaction, no completion feeling." Both were structural:
+
+- **Easy** because nothing in a day paid for playing _well_. The only decision
+  was which flower next, the answer was usually obvious, and the bees did the
+  rest; a sloppy day and a sharp day both cleared the quota.
+- **No completion** because nothing could be finished. A run only ever ended in
+  failure, stars did not open or change anything, and a "best day" is a
+  number, not a thing you did.
+
+### The Busy Hive multiplier (`TUNING.combo`)
+
+Honey is paid at x1-x5. The multiplier climbs while every bee that could be
+flying is flying (about 8s a tier), and slips — after a 1.2s grace — while
+three or more bees wait at the hive _and_ a line is free for them. Bees idle
+because every line is full are not the player's fault and cost nothing.
+
+That makes the game's actual skill — noticing a dry flower and putting its
+crew back to work at once — the thing that scores. A tier-up is announced in
+the middle of the screen with a rising note; a slip turns the badge's ring red.
+Measured, it roughly triples a competent player's honey and widens the gap
+between players, which is where the challenge comes from: one star is a pass,
+three stars needs the multiplier held high.
+
+### Adventure: 30 meadows to fill (`game/Levels.ts`)
+
+Three worlds of ten fixed, seeded levels — **Spring Meadow** (the verb, crews,
+the multiplier, mist), **Bramble Maze** (routing in legs), **Wasp Summer**
+(raids at full strength) — each one board with an end and one to three stars.
+The map is a honeycomb: each level a hex cell that fills with honey by thirds
+as its stars are earned, so progress is a picture of a comb going gold. Worlds
+open at 15 and 36 stars. Finishing a world for the first time gets its own
+card with a medal.
+
+The level card is sequenced rather than shown: stars slam in one at a time with
+rising notes, honey tallies up, NEW BEST / NEW STAR is stamped on, petals fall.
+A miss shows the score, what the next star needs, and Retry in the biggest
+button.
+
+Endless stays, as the high-score chase, with quotas refitted for the
+multiplier. The menu offers Adventure first.
+
+### Fitted, not guessed
+
+`src/playtest/fit-levels.ts` plays every level with the three simulated players
+and places the stars: one star at the lower quartile of a first-timer in world
+one and of a regular after it; two at a regular's typical score; three at what
+a practised player gets. The current table gives, per attempt:
+
+|                               | world 1 | worlds 2-3                                   |
+| ----------------------------- | ------- | -------------------------------------------- |
+| first-timer passes            | ~90%    | rarely (the bot does not route round hedges) |
+| regular passes                | ~100%   | ~90%                                         |
+| regular gets 3 stars          | ~20%    | ~15%                                         |
+| practised player gets 3 stars | ~40%    | ~60%                                         |
+
+The harness also found that its "expert" routed worse than the novice on some
+mazes — it always steered by corridors, even when a straight drag would slide
+through. Real players read the preview; the bots now do too (drag straight,
+steer for the corner only when the preview will not connect).
+
+A campaign gate in `engagement.test.ts` holds the shape in CI.
+
+## 35. Shipping it
+
+What changed to make the game submittable, rather than playable:
+
+- **In gameplay within one click.** A brand-new save skips the menu and opens
+  level 1-1, whose tutorial is the onboarding. A returning player's menu leads
+  with one button: e.g. _Play 1-4 Far Petals_, the next unstarred level.
+- **Pause.** The HUD's top-right button, or `P`, opens a card with Resume,
+  Retry (campaign), Map/Menu and Sound on/off. `Esc` is left alone:
+  CrazyGames reserves it for leaving fullscreen. Losing window focus opens the
+  same card, so a player who clicked outside the portal frame comes back to
+  "Paused" rather than to a day that ran on without them.
+- **A core bug found on the way.** `BaseGameplayScene` stopped gameplay on
+  window blur and never restarted it on focus — the board froze until the next
+  day began. Focus now restarts play that blur stopped, unless the game paused
+  the scene itself in between.
+- **Mute persists** (`audio.muted`, restored at boot). There was no way to mute
+  at all before.
+- **`happyTime()`** — CrazyGames' celebration cue, a no-op elsewhere — fires on
+  a new star, a finished world, and an endless run that beats its best day.
+  Not on every pass: a cue that fires constantly means nothing.
+- **Debug handles** (`window.__game`, `window.__beeline`) exist only in dev and
+  `local` builds; portal builds carry neither.
+- **A `web` adapter** (packages/portal) for itch.io and plain hosting: no SDK,
+  no ads, rewarded offers hidden.
+- **Store assets are generated, not drawn**: `tools/store.mjs` plays a level in
+  headless Chromium and captures covers, screenshots and 18 s silent previews.
+  They are honest but plain; hand-made key art would outperform them. The title
+  on all of them comes from `src/config/title.ts`.
+
+Release mechanics are in `docs/publishing.md`.
 
 ## 25. Success criteria
 

@@ -244,4 +244,89 @@ await render('honey-drop.png', () => {
   return c;
 });
 
+// --- the world medal --------------------------------------------------------
+
+await render('medal.png', () => {
+  const W = 160;
+  const H = 200;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+  const cx = W / 2;
+  // Ribbon tails, behind the disc.
+  for (const [dx, colour] of [
+    [-1, '#e2669a'],
+    [1, '#4f9ede'],
+  ]) {
+    const tail = (p) => {
+      p.beginPath();
+      p.moveTo(cx + dx * 14, 96);
+      p.lineTo(cx + dx * 46, 188);
+      p.lineTo(cx + dx * 30, 176);
+      p.lineTo(cx + dx * 18, 194);
+      p.lineTo(cx - dx * 6, 104);
+      p.closePath();
+    };
+    tail(g);
+    g.fillStyle = colour;
+    g.fill();
+    window.sketch(g, tail, 3);
+  }
+  // The disc.
+  const disc = (p) => {
+    p.beginPath();
+    p.arc(cx, 74, 62, 0, Math.PI * 2);
+  };
+  disc(g);
+  const grad = g.createRadialGradient(cx - 18, 54, 6, cx, 74, 64);
+  grad.addColorStop(0, '#fff2a8');
+  grad.addColorStop(0.55, '#ffc93c');
+  grad.addColorStop(1, '#d88a0a');
+  g.fillStyle = grad;
+  g.fill();
+  window.sketch(g, disc, 4);
+  const rim = (p) => {
+    p.beginPath();
+    p.arc(cx, 74, 50, 0, Math.PI * 2);
+  };
+  window.sketch(g, rim, 2, '#9a5c00');
+  // A honeycomb of seven cells, the middle one full.
+  const hex = (hx, hy, r) => (p) => {
+    p.beginPath();
+    for (let i = 0; i < 6; i += 1) {
+      const a = Math.PI / 6 + (i * Math.PI) / 3;
+      const x = hx + Math.cos(a) * r;
+      const y = hy + Math.sin(a) * r;
+      if (i === 0) p.moveTo(x, y);
+      else p.lineTo(x, y);
+    }
+    p.closePath();
+  };
+  const r = 13;
+  const w = Math.sqrt(3) * r;
+  const cells = [
+    [0, 0],
+    [w, 0],
+    [-w, 0],
+    [w / 2, -1.5 * r],
+    [-w / 2, -1.5 * r],
+    [w / 2, 1.5 * r],
+    [-w / 2, 1.5 * r],
+  ];
+  cells.forEach(([dx, dy], i) => {
+    const shape = hex(cx + dx, 74 + dy, r - 1.5);
+    shape(g);
+    g.fillStyle = i === 0 ? '#e8740c' : '#ffe07a';
+    g.fill();
+    window.sketch(g, shape, 2, '#8a5400');
+  });
+  // Shine.
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  g.beginPath();
+  g.ellipse(cx - 30, 44, 14, 7, -0.7, 0, Math.PI * 2);
+  g.fill();
+  return c;
+});
+
 await browser.close();

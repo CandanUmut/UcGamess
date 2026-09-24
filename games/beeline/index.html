@@ -31,9 +31,17 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: #101018;
+        /* The meadow's own olive, so the frame before the canvas paints is not a
+           flash of a different colour. */
+        background: #6f7f4c;
         /* Kills the grey tap-highlight flash on mobile Safari and Chrome. */
         -webkit-tap-highlight-color: transparent;
+        /* No text selection, magnifier or long-press menu on a touch drag.
+           Required by CrazyGames for mobile, and right everywhere: every
+           gesture in this game is a long press or a drag. */
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
         /* Stops pull-to-refresh and rubber-banding from fighting the game. */
         overscroll-behavior: none;
         touch-action: none;
@@ -65,10 +73,12 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        color: #8a8aa0;
-        font-size: 16px;
+        color: #ffe38a;
+        font-size: 18px;
+        font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
+        text-shadow: 0 2px 0 #2a1d08;
       }
 
       /*

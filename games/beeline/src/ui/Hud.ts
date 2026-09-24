@@ -1,5 +1,4 @@
 import type Phaser from 'phaser';
-import { TUNING } from '../config/tuning.ts';
 import { DESIGN_WIDTH } from '@ucgames/core';
 
 const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -49,6 +48,15 @@ export class Hud {
   private idleBees = 0;
   private alertPhase = 0;
   private starsLit = 0;
+  private targets: readonly [number, number, number] = [1, 2, 3];
+  private combo: ComboView = { tier: 1, progress: 0, slipping: false };
+  private comboPulse = 0;
+  private readonly comboText: Phaser.GameObjects.Text;
+  private readonly pauseButton: Phaser.GameObjects.Text;
+  /** Called with the star number (1-3) the moment it is earned. */
+  onStar: ((star: number) => void) | null = null;
+  /** Called when the pause button is tapped. */
+  onPause: (() => void) | null = null;
   private starPops: number[] = [0, 0, 0];
 
   constructor(scene: Phaser.Scene, depth: number) {
@@ -67,7 +75,17 @@ export class Hud {
         strokeThickness: bold ? 5 : 3,
       });
 
-    this.dayText = text(24, '#fff4d6', true).setOrigin(0, 0.5);
+    this.dayText = text(22, '#fff4d6', true).setOrigin(0, 0.5);
+    this.comboText = text(24, '#ffe38a', true).setOrigin(0.5, 0.5);
+    // Pause (and from there Retry, Map, Sound). A zone-less text with its own
+    // hit area, so it does not fight the board's own pointer handling for the
+    // rest of the screen; padded out to a thumb-sized target.
+    this.pauseButton = text(30, '#fff4d6', true)
+      .setText('II')
+      .setOrigin(0.5)
+      .setPadding(26, 10, 26, 10)
+      .setInteractive({ useHandCursor: true });
+    this.pauseButton.on('pointerup', () => this.onPause?.());
     this.timerText = text(22, '#fff4d6', true).setOrigin(0.5, 0.5);
     this.honeyText = text(34, '#ffd466', true).setOrigin(0.5, 0.5);
     this.quotaText = text(16, '#e9dcc0').setOrigin(0.5, 0.5);
@@ -86,6 +104,8 @@ export class Hud {
 
     this.root.add([
       this.gfx,
+      this.comboText,
+      this.pauseButton,
       ...(this.dropIcon ? [this.dropIcon] : []),
       this.dayText,
       this.timerText,
@@ -111,6 +131,7 @@ export class Hud {
 
     this.dayText.setPosition(safe.x + 30, top);
     this.timerText.setPosition(safe.right - 52, top + 2);
+    this.pauseButton.setPosition(safe.right - 52, top + 62);
     this.honeyText.setPosition(safe.centerX, top - 4);
     this.quotaText.setPosition(safe.centerX, top + 44);
     this.linesText.setPosition(safe.x + 30, top + 50);
@@ -121,17 +142,20 @@ export class Hud {
 
   /** Called every frame with the day's numbers. */
   update(
-    day: number,
+    label: string,
     honey: number,
-    quota: number,
+    targets: readonly [number, number, number],
     secondsLeft: number,
     daySeconds: number,
     deltaSeconds: number,
+    combo: ComboView = { tier: 1, progress: 0, slipping: false },
   ): void {
-    this.dayText.setText(`Day ${day}`);
-    this.quota = Math.max(1, quota);
+    this.dayText.setText(label);
+    this.targets = targets;
+    this.quota = Math.max(1, targets[0]);
     this.secondsLeft = secondsLeft;
     this.dayFraction = daySeconds > 0 ? Math.max(0, secondsLeft / daySeconds) : 0;
+    this.combo = combo;
 
     if (honey > this.target + 0.5) this.punch(this.honeyText, 1.12);
     this.target = honey;
@@ -145,29 +169,38 @@ export class Hud {
       this.honeyText.x - this.honeyText.displayWidth / 2 - 22,
       this.honeyText.y,
     );
+    this.comboText
+      .setText(`x${combo.tier}`)
+      .setPosition(
+        this.honeyText.x + this.honeyText.displayWidth / 2 + 44,
+        this.honeyText.y,
+      )
+      .setColor(combo.slipping ? '#ff9b80' : combo.tier > 1 ? '#ffe38a' : '#c9b98f');
 
-    const met = honey >= quota;
-    this.quotaText.setText(met ? 'quota met — keep going for stars' : `goal ${quota}`);
-    this.quotaText.setColor(met ? '#a8f0b4' : '#e9dcc0');
+    const [one, two, three] = targets;
+    const stars = honey >= three ? 3 : honey >= two ? 2 : honey >= one ? 1 : 0;
+    const next = stars === 0 ? one : stars === 1 ? two : stars === 2 ? three : 0;
+    this.quotaText.setText(
+      next > 0
+        ? `${stars === 0 ? 'goal' : 'next star'} ${next.toLocaleString('en-US')}`
+        : 'three stars!',
+    );
+    this.quotaText.setColor(stars > 0 ? '#a8f0b4' : '#e9dcc0');
 
     const seconds = Math.max(0, Math.ceil(secondsLeft));
     this.timerText.setText(String(seconds));
     this.timerText.setColor(seconds <= 10 ? '#ff8a70' : '#fff4d6');
 
-    // Stars light as the thresholds are crossed, each with a pop.
-    const stars =
-      honey >= quota * TUNING.score.threeStars
-        ? 3
-        : honey >= quota * TUNING.score.twoStars
-          ? 2
-          : met
-            ? 1
-            : 0;
-    for (let i = this.starsLit; i < stars; i += 1) this.starPops[i] = 1;
+    // Stars light as the thresholds are crossed, each with a pop and a chime.
+    for (let i = this.starsLit; i < stars; i += 1) {
+      this.starPops[i] = 1;
+      this.onStar?.(i + 1);
+    }
     this.starsLit = Math.max(this.starsLit, stars);
     for (let i = 0; i < 3; i += 1) {
       this.starPops[i] = Math.max(0, (this.starPops[i] ?? 0) - deltaSeconds * 2.5);
     }
+    this.comboPulse = Math.max(0, this.comboPulse - deltaSeconds * 2);
 
     this.draw();
   }
@@ -191,8 +224,8 @@ export class Hud {
     const { x, y, right, centerX } = this.safe;
     const top = y + 34;
 
-    // Day plate.
-    plate(g, x + 14, top - 24, 150, 48);
+    // Day (or level) plate, sized to what it says.
+    plate(g, x + 14, top - 24, Math.max(150, this.dayText.displayWidth + 34), 48);
     // Lines plate: one pip per line owned, filled for each in use.
     plate(g, x + 14, top + 30, 96 + this.lines.owned * 24, 40);
     for (let i = 0; i < this.lines.owned; i += 1) {
@@ -212,15 +245,14 @@ export class Hud {
     g.fillStyle(0x000000, 0.4);
     g.fillRoundedRect(barX, barY - 7, this.barWidth, 14, 7);
     // The bar spans to three stars' worth, so there is always somewhere to go.
-    const span = this.quota * TUNING.score.threeStars;
+    const span = Math.max(1, this.targets[2]);
     const fill = Math.min(1, this.shown / span);
     if (fill > 0) {
       g.fillStyle(this.shown >= this.quota ? GOOD : HONEY, 1);
       g.fillRoundedRect(barX, barY - 7, Math.max(14, this.barWidth * fill), 14, 7);
     }
-    const marks = [1, TUNING.score.twoStars, TUNING.score.threeStars];
-    marks.forEach((m, i) => {
-      const mx = barX + (this.barWidth * m) / TUNING.score.threeStars;
+    this.targets.forEach((m, i) => {
+      const mx = barX + (this.barWidth * m) / span;
       const lit = i < this.starsLit;
       const pop = 1 + (this.starPops[i] ?? 0) * 0.8;
       star(
@@ -231,6 +263,27 @@ export class Hud {
         lit ? STAR_ON : STAR_OFF,
       );
     });
+
+    // The Busy Hive multiplier: a ring round its badge that fills toward the
+    // next tier, red and shrinking while bees wait.
+    const cx = this.comboText.x;
+    const cy = this.comboText.y;
+    const r = 24 + this.comboPulse * 10;
+    g.fillStyle(0x000000, 0.35);
+    g.fillCircle(cx, cy, r);
+    g.lineStyle(5, 0x000000, 0.35);
+    g.strokeCircle(cx, cy, r);
+    g.lineStyle(5, this.combo.slipping ? 0xff7043 : 0xffd23f, 1);
+    g.beginPath();
+    g.arc(
+      cx,
+      cy,
+      r,
+      -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * this.combo.progress,
+      false,
+    );
+    g.strokePath();
 
     // Daylight: a sun dial that empties.
     const sx = right - 52;
@@ -250,6 +303,42 @@ export class Hud {
   get honeyAnchor(): { x: number; y: number } {
     const target = this.dropIcon ?? this.honeyText;
     return { x: target.x, y: target.y };
+  }
+
+  /** The multiplier reached a new tier: say it big, in the middle. */
+  comboPop(tier: number): void {
+    this.comboPulse = 1;
+    const label = this.scene.add
+      .text(this.safe.centerX, this.safe.y + 150, `BUSY HIVE  x${tier}!`, {
+        fontFamily: FONT,
+        fontSize: '40px',
+        fontStyle: 'bold',
+        color: '#ffe38a',
+        stroke: '#2a1d08',
+        strokeThickness: 8,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(this.root.depth + 2)
+      .setScale(0.4);
+    this.scene.tweens.add({
+      targets: label,
+      scale: 1,
+      duration: 220,
+      ease: 'Back.easeOut',
+    });
+    this.scene.tweens.add({
+      targets: label,
+      alpha: 0,
+      y: label.y - 30,
+      delay: 700,
+      duration: 400,
+      onComplete: () => label.destroy(),
+    });
+  }
+
+  setPauseVisible(visible: boolean): void {
+    this.pauseButton.setVisible(visible);
   }
 
   /** A drop just landed in the counter. */
@@ -311,6 +400,7 @@ export class Hud {
   }
 
   resetDay(): void {
+    this.comboPulse = 0;
     this.shown = 0;
     this.target = 0;
     this.starsLit = 0;
@@ -329,6 +419,13 @@ export class Hud {
   destroy(): void {
     this.root.destroy(true);
   }
+}
+
+export interface ComboView {
+  tier: number;
+  /** 0..1 toward the next tier. */
+  progress: number;
+  slipping: boolean;
 }
 
 function plate(

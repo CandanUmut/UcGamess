@@ -79,6 +79,10 @@ export class LocalAdapter implements PortalAdapter {
     this.log('gameplayStop()');
   }
 
+  happyTime(): void {
+    this.log('happyTime()');
+  }
+
   async commercialBreak(): Promise<void> {
     this.log(`commercialBreak() — simulating ${this.commercialBreakMs}ms`);
     await withDuckedAudio(() => delay(this.commercialBreakMs));

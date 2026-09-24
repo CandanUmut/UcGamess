@@ -6,7 +6,13 @@ import { compression, type CompressedAsset } from './plugins/compression.ts';
 import { portalAdapter } from './plugins/portal-adapter.ts';
 
 /** Portals we can build for. Selected at build time, never at runtime. */
-export const PORTALS = ['local', 'crazygames', 'poki', 'gamedistribution'] as const;
+export const PORTALS = [
+  'local',
+  'crazygames',
+  'poki',
+  'gamedistribution',
+  'web',
+] as const;
 export type PortalName = (typeof PORTALS)[number];
 
 export interface GameConfigOptions {

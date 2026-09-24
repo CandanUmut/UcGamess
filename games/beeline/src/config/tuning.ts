@@ -349,6 +349,28 @@ export interface ScoreTuning {
   threeStars: number;
 }
 
+/**
+ * The Busy Hive multiplier.
+ *
+ * The skill the game is about — noticing a dry flower and putting its bees
+ * back to work — used to earn nothing a sloppy player did not also earn,
+ * because the swarm was always going to get there eventually. The multiplier
+ * pays for doing it *now*: it climbs while every bee that could be flying is
+ * flying, and slips when bees wait at the hive with a line free for them.
+ */
+export interface ComboTuning {
+  /** Highest multiplier. */
+  max: number;
+  /** Multiplier gained per second of a fully busy hive. */
+  risePerSecond: number;
+  /** Multiplier lost per second once the grace below has run out. */
+  fallPerSecond: number;
+  /** Seconds bees may wait before the multiplier starts to slip. */
+  graceSeconds: number;
+  /** Fewer idle bees than this never counts as waiting. */
+  idleTolerance: number;
+}
+
 export interface MazeTuning {
   /** Grid the board is carved into. Cells are the corridors. */
   cols: number;
@@ -411,6 +433,7 @@ export interface Tuning {
   swat: SwatTuning;
   golden: GoldenTuning;
   score: ScoreTuning;
+  combo: ComboTuning;
   raid: RaidTuning;
   fog: {
     cellSize: number;
@@ -607,8 +630,8 @@ export const TUNING: Tuning = {
     // somebody. Re-run `pnpm --filter @ucgames/game-beeline playtest` after
     // changing anything that moves honey, and refit here if the per-day table
     // drifts.
-    quotas: [80, 170, 260, 340, 430, 530, 630, 750, 870, 1000, 1140, 1290],
-    quotaGrowthAfterTable: 1.11,
+    quotas: [150, 340, 520, 700, 980, 1200, 1420, 1700, 1950, 2150, 2350, 2600],
+    quotaGrowthAfterTable: 1.1,
   },
 
   // Shifted a day later than the original schedule to make room for brambles on
@@ -893,6 +916,19 @@ export const TUNING: Tuning = {
     sunsetBonusPerSecond: 0.02,
     twoStars: 1.4,
     threeStars: 1.9,
+  },
+
+  combo: {
+    max: 5,
+    // About eight seconds a tier: x5 is twenty-five seconds of never letting a
+    // bee wait, which is most of a day and exactly what an expert does.
+    risePerSecond: 0.125,
+    // Slower down than up, and only after a grace: re-laying a line takes a
+    // second, and a multiplier that dropped the instant a flower ran dry would
+    // punish the very move it is there to reward.
+    fallPerSecond: 0.6,
+    graceSeconds: 1.2,
+    idleTolerance: 3,
   },
 
   ads: {

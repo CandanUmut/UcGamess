@@ -1,0 +1,142 @@
+name: Release
+
+# Packages one game for release and publishes it wherever that can be automated.
+#
+#   git tag beeline-v1.0.0 && git push origin beeline-v1.0.0
+#   (or: Actions → Release → Run workflow, with a game and a version)
+#
+# Every run:
+#   - builds the CrazyGames and plain-web zips (size budget enforced),
+#   - renders the store covers, screenshots and preview videos,
+#   - creates a GitHub Release carrying all of it.
+# And, once the itch.io secret and variable exist (docs/publishing.md):
+#   - pushes the web build to itch.io with butler.
+#
+# CrazyGames has no upload API: its zip is downloaded from the release and
+# uploaded through the developer portal by hand. See docs/publishing.md.
+
+on:
+  push:
+    tags: ['*-v*']
+  workflow_dispatch:
+    inputs:
+      game:
+        description: Game slug (a directory under games/)
+        required: true
+        default: beeline
+      version:
+        description: Version, e.g. 1.0.0
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Work out game and version
+        id: meta
+        env:
+          INPUT_GAME: ${{ inputs.game }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            tag="$GITHUB_REF_NAME"
+            game="${tag%-v*}"
+            version="${tag##*-v}"
+          else
+            game="$INPUT_GAME"
+            version="$INPUT_VERSION"
+            tag="$game-v$version"
+          fi
+          if ! printf '%s' "$game" | grep -Eq '^[a-z0-9-]+$' || [ ! -d "games/$game" ]; then
+            echo "::error::No game directory games/$game"; exit 1
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9A-Za-z.+-]+$'; then
+            echo "::error::Bad version '$version'"; exit 1
+          fi
+          {
+            echo "game=$game"
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck, lint and test
+        run: pnpm typecheck && pnpm lint && pnpm test
+
+      - name: Build and zip (CrazyGames, web)
+        run: node scripts/package.ts --game "${{ steps.meta.outputs.game }}" --portal crazygames,web --out release
+
+      - name: Install Chromium for the store capture
+        if: hashFiles(format('games/{0}/tools/store.mjs', steps.meta.outputs.game)) != ''
+        run: pnpm exec playwright install --with-deps chromium
+
+      # ffmpeg ships on GitHub's Ubuntu runners; the tool falls back to .webm
+      # without it.
+      - name: Render store covers, screenshots and preview videos
+        if: hashFiles(format('games/{0}/tools/store.mjs', steps.meta.outputs.game)) != ''
+        run: |
+          node "games/${{ steps.meta.outputs.game }}/tools/store.mjs"
+          cp "games/${{ steps.meta.outputs.game }}"/store/out/* release/
+          cp "games/${{ steps.meta.outputs.game }}/store/listing.md" release/listing.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          GAME: ${{ steps.meta.outputs.game }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          cat > release-notes.md <<EOF
+          $GAME $VERSION
+
+          - \`$GAME-crazygames.zip\` — upload in the CrazyGames developer portal.
+          - \`$GAME-web.zip\` — no ads, no SDK: itch.io or any static host.
+          - Covers, screenshots, preview videos and \`listing.md\` for the store pages.
+          EOF
+          gh release create "$TAG" release/* \
+            --title "$GAME $VERSION" \
+            --notes-file release-notes.md \
+            --target "$GITHUB_SHA"
+
+      - name: Check for itch.io credentials
+        id: itch
+        env:
+          ITCH_PROJECT: ${{ vars.ITCH_PROJECT }}
+        run: |
+          if [ "${{ secrets.BUTLER_API_KEY != '' }}" = "true" ] && [ -n "$ITCH_PROJECT" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::itch.io push skipped: set the BUTLER_API_KEY secret and ITCH_PROJECT variable (docs/publishing.md)."
+          fi
+
+      - name: Push to itch.io
+        if: steps.itch.outputs.enabled == 'true'
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+          ITCH_PROJECT: ${{ vars.ITCH_PROJECT }}
+          GAME: ${{ steps.meta.outputs.game }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          curl -fsSL -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip -q butler.zip -d butler && chmod +x butler/butler
+          ./butler/butler -V
+          mkdir -p itch && unzip -q "release/$GAME-web.zip" -d itch
+          ./butler/butler push itch "$ITCH_PROJECT:html5" --userversion "$VERSION"

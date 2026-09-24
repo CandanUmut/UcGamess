@@ -121,6 +121,10 @@ export class CrazyGamesAdapter implements PortalAdapter {
     this.sdk?.game.gameplayStop();
   }
 
+  happyTime(): void {
+    this.sdk?.game.happytime();
+  }
+
   commercialBreak(): Promise<void> {
     if (!this.sdk) return Promise.resolve();
     return withDuckedAudio(async () => {

@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
 import {
+  AudioManager,
   BaseScene,
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
@@ -7,7 +8,9 @@ import {
   viewRect,
 } from '@ucgames/core';
 import { COLORS } from '../config/tuning.ts';
+import { GAME_TITLE } from '../config/title.ts';
 import { Button } from '../ui/Button.ts';
+import { LEVELS, isUnlocked, totalStars } from '../game/Levels.ts';
 import {
   coerceSave,
   newSave,
@@ -143,16 +146,50 @@ export class MenuScene extends BaseScene {
     } catch (error) {
       console.warn('[beeline] Could not read save; starting fresh.', error);
     }
+    // No preload scene, so the player's mute choice is restored here.
+    this.context.audio.hydrate(this.context.save.get(AudioManager.saveKey, false));
     this.save = coerceSave(this.context.save.get<unknown>(SAVE_KEY, null));
+
+    // A brand-new player lands straight in the first level. CrazyGames asks
+    // for new users to be in gameplay immediately (one click at most), and
+    // the first level *is* the tutorial — the menu can wait until they have
+    // something to come back to.
+    if (this.isFirstVisit()) {
+      this.scene.start('Game', { mode: 'level', level: 1 });
+      return;
+    }
+
     this.layoutMenu();
     this.ready = true;
+  }
+
+  private isFirstVisit(): boolean {
+    const s = this.save;
+    return (
+      !s.tutorialDone &&
+      totalStars(s.levelStars) === 0 &&
+      s.day === 1 &&
+      s.bestScore === 0 &&
+      s.bestRunDay === 0
+    );
+  }
+
+  /** The level a returning player most likely wants: the next one without a star. */
+  private nextLevel(): (typeof LEVELS)[number] | null {
+    return (
+      LEVELS.find(
+        (l) =>
+          isUnlocked(l, this.save.levelStars) &&
+          (this.save.levelStars[l.id - 1] ?? 0) === 0,
+      ) ?? null
+    );
   }
 
   private layoutMenu(): void {
     const cx = DESIGN_WIDTH / 2;
 
     const title = this.add
-      .text(cx, 128, 'Beeline', {
+      .text(cx, 128, GAME_TITLE, {
         fontFamily: FONT,
         fontSize: '104px',
         fontStyle: 'bold',
@@ -185,44 +222,60 @@ export class MenuScene extends BaseScene {
       .setOrigin(0.5);
 
     const resuming = this.save.day > 1;
+    const stars = totalStars(this.save.levelStars);
+    const next = this.nextLevel();
 
+    // Two ways to play, and the campaign is the one the screen is about: it is
+    // the one with an end, and the one a first-timer should meet first.
     new Button(this, {
       x: cx,
-      y: 318,
-      width: 380,
-      label: resuming ? `▶  Continue — day ${this.save.day}` : '▶  Play',
+      y: 300,
+      width: 500,
+      label: next
+        ? `▶  Play ${next.world + 1}-${((next.id - 1) % 10) + 1}  ${next.name}`
+        : '▶  Adventure',
+      sublabel: `★ ${stars} / ${LEVELS.length * 3}   ·   Adventure`,
       tint: 0x3aa860,
       big: true,
-      onClick: () => this.start(),
+      // One click from the menu into gameplay: straight to the next level.
+      onClick: () =>
+        next
+          ? this.scene.start('Game', { mode: 'level', level: next.id })
+          : this.scene.start('Map'),
     }).pulse();
+
+    new Button(this, {
+      x: cx + 345,
+      y: 300,
+      width: 140,
+      label: 'Map',
+      tint: 0x8a6a3a,
+      onClick: () => this.scene.start('Map'),
+    });
+
+    const best =
+      this.save.bestScore > 0
+        ? `best ${Math.floor(this.save.bestScore).toLocaleString('en-US')} honey · day ${Math.max(1, this.save.bestRunDay)}`
+        : 'how far can the hive go?';
+    new Button(this, {
+      x: cx,
+      y: 410,
+      width: 400,
+      label: resuming ? `Endless — day ${this.save.day}` : 'Endless',
+      sublabel: best,
+      tint: 0x2f8fb8,
+      onClick: () => this.start(),
+    });
 
     if (resuming) {
       new Button(this, {
         x: cx,
-        y: 406,
-        width: 260,
-        label: 'New run',
+        y: 500,
+        width: 240,
+        label: 'New endless run',
         tint: 0xb8742a,
         onClick: () => this.confirmReset(),
       });
-    }
-
-    if (this.save.bestScore > 0 || this.save.bestRunDay > 0) {
-      this.add
-        .text(
-          cx,
-          resuming ? 468 : 400,
-          `Best run: ${Math.floor(this.save.bestScore).toLocaleString('en-US')} honey · day ${Math.max(1, this.save.bestRunDay)}`,
-          {
-            fontFamily: FONT,
-            fontSize: '20px',
-            fontStyle: 'bold',
-            color: '#ffe38a',
-            stroke: '#2a1d08',
-            strokeThickness: 5,
-          },
-        )
-        .setOrigin(0.5);
     }
   }
 
@@ -281,7 +334,7 @@ export class MenuScene extends BaseScene {
       )
       .setInteractive();
     const warning = this.add
-      .text(cx, 300, 'Start a new run?\nThis run will be lost.', {
+      .text(cx, 300, 'Start a new endless run?\nThe current one will be lost.', {
         fontFamily: FONT,
         fontSize: '30px',
         fontStyle: 'bold',
@@ -297,13 +350,19 @@ export class MenuScene extends BaseScene {
       label: 'New run',
       tint: 0xc0472c,
       onClick: () => {
-        const fresh = newSave();
-        fresh.bestScore = this.save.bestScore;
-        fresh.bestRunDay = this.save.bestRunDay;
-        fresh.tutorialDone = this.save.tutorialDone;
+        // Only the endless run starts over. Records and the campaign stay.
+        const fresh = {
+          ...newSave(),
+          bestScore: this.save.bestScore,
+          bestRunDay: this.save.bestRunDay,
+          tutorialDone: this.save.tutorialDone,
+          levelStars: this.save.levelStars,
+          levelBest: this.save.levelBest,
+          worldsCelebrated: this.save.worldsCelebrated,
+        };
         writeSave(this.context.save, fresh);
         void this.context.save.flush();
-        this.scene.start('Game');
+        this.scene.start('Game', { mode: 'endless' });
       },
     });
     const no = new Button(this, {
@@ -323,6 +382,6 @@ export class MenuScene extends BaseScene {
 
   private start(): void {
     if (!this.ready) return;
-    this.scene.start('Game');
+    this.scene.start('Game', { mode: 'endless' });
   }
 }

@@ -1,7 +1,11 @@
-import { createGame } from '@ucgames/core';
+import { AudioManager, createGame } from '@ucgames/core';
 import { MenuScene } from './scenes/MenuScene.ts';
 import { GameScene } from './scenes/GameScene.ts';
 import { NightScene } from './scenes/NightScene.ts';
+import { MapScene } from './scenes/MapScene.ts';
+import { LevelDoneScene } from './scenes/LevelDoneScene.ts';
+import { PauseScene } from './scenes/PauseScene.ts';
+import { GAME_TITLE } from './config/title.ts';
 import { COLORS } from './config/tuning.ts';
 import { SAVE_KEYS } from './game/SaveState.ts';
 import { installRotateGate } from './ui/rotateGate.ts';
@@ -26,6 +30,16 @@ import { installRotateGate } from './ui/rotateGate.ts';
  * Past this, the system stack takes over and the game boots on time.
  */
 const FONT_TIMEOUT_MS = 1200;
+
+/**
+ * Whether the automated harness's window hooks are installed.
+ *
+ * The browser checks run against `local` builds, so the hooks have to survive
+ * a production build of that — but no portal or public build carries them.
+ * `__UCGAMES_PORTAL__` is a build-time literal, so this folds to a constant
+ * and the handle code is dropped from the bundle when it is false.
+ */
+const DEBUG_HOOKS = __UCGAMES_DEV__ || __UCGAMES_PORTAL__ === 'local';
 
 /**
  * Loads the UI face before Phaser measures any text with it.
@@ -63,13 +77,14 @@ async function loadUiFont(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
+  document.title = GAME_TITLE;
   await loadUiFont();
 
   const { game, context } = await createGame({
     parent: 'game',
     backgroundColor: COLORS.background,
-    saveKeys: SAVE_KEYS,
-    scenes: [MenuScene, GameScene, NightScene],
+    saveKeys: [...SAVE_KEYS, AudioManager.saveKey],
+    scenes: [MenuScene, MapScene, GameScene, NightScene, LevelDoneScene, PauseScene],
   });
 
   // Nothing was preloaded, but the portal still has to be told the game is
@@ -80,9 +95,11 @@ async function boot(): Promise<void> {
 
   // Harness hook for the automated functional and performance checks. It runs
   // against a production build, so this cannot be behind __UCGAMES_DEV__.
-  // Removed before submission.
+  // Dev and `local` builds only (see DEBUG_HOOKS).
   game.events.once('ready', () => {
-    (window as unknown as Record<string, unknown>).__game = game;
+    // Harness hooks exist only in dev and `local` builds — never in a build
+    // that goes to a portal or a public page.
+    if (DEBUG_HOOKS) (window as unknown as Record<string, unknown>).__game = game;
 
     // The Game scene installs its own `__beeline` handle when it builds. It is
     // not running yet — the title screen is — and reaching into it here would
