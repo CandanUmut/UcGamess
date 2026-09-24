@@ -17,6 +17,8 @@
  * message that is supposed to be helpful.
  */
 
+import { GAME_TITLE } from '../config/title.ts';
+
 export interface RotateGate {
   /** True while the prompt is covering the screen. */
   isBlocking(): boolean;
@@ -59,7 +61,7 @@ export function installRotateGate(options: RotateGateOptions): RotateGate {
               stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <p class="rotate-title">Turn your phone sideways</p>
-      <p class="rotate-sub">Beeline needs a wide screen</p>
+      <p class="rotate-sub">${GAME_TITLE} needs a wide screen</p>
     </div>`;
   document.body.appendChild(overlay);
 

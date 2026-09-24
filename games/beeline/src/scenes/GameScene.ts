@@ -41,6 +41,7 @@ import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
 import type { LevelDoneData } from './LevelDoneScene.ts';
+import type { PauseData } from './PauseScene.ts';
 import {
   LEVELS_PER_WORLD,
   levelById,
@@ -246,7 +247,14 @@ export class GameScene extends BaseGameplayScene {
 
     this.fieldRenderer.setViewRect(viewRect(this));
     this.hud.layout(this.safeArea);
-    this.hud.onHome = () => this.goHome();
+    this.hud.onPause = () => this.openPause();
+    this.input.keyboard?.on('keydown-P', () => this.openPause());
+    // Losing focus pauses with the card up, so a player who clicked outside
+    // the portal frame comes back to "Paused", not to a day half gone.
+    this.game.events.on(Phaser.Core.Events.BLUR, this.openPause, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
+      this.game.events.off(Phaser.Core.Events.BLUR, this.openPause, this),
+    );
     // A star earned mid-level is the best moment in it: a chime that climbs
     // with each one, and a flash of gold.
     this.hud.onStar = (star) => {
@@ -255,8 +263,10 @@ export class GameScene extends BaseGameplayScene {
     };
     this.bindInput();
 
-    // The harness handle reads live simulation state. Removed before submission.
-    (window as unknown as Record<string, unknown>).__beeline = this.debugHandle();
+    // The harness handle reads live simulation state. Dev and `local` builds only.
+    if (__UCGAMES_DEV__ || __UCGAMES_PORTAL__ === 'local') {
+      (window as unknown as Record<string, unknown>).__beeline = this.debugHandle();
+    }
 
     void this.bootstrap();
   }
@@ -335,7 +345,7 @@ export class GameScene extends BaseGameplayScene {
 
     this.hud.resetDay();
     this.hud.setVisible(true);
-    this.hud.setHomeVisible(true);
+    this.hud.setPauseVisible(true);
     this.refreshHud(0);
 
     const intro = dayIntroduction(this.day);
@@ -380,7 +390,7 @@ export class GameScene extends BaseGameplayScene {
 
     this.hud.resetDay();
     this.hud.setVisible(true);
-    this.hud.setHomeVisible(true);
+    this.hud.setPauseVisible(true);
     this.refreshHud(0);
     this.hud.showBanner(level.intro ?? level.name);
 
@@ -458,6 +468,9 @@ export class GameScene extends BaseGameplayScene {
     if (celebrateWorld) this.save.worldsCelebrated.push(level.world);
 
     if (this.tutorial.finished || stars > 0) this.save.tutorialDone = true;
+    // The portal's own celebration cue, for a star gained or a world finished —
+    // not for every pass, or it stops meaning anything.
+    if (stars > prevStars || celebrateWorld) this.context.portal.happyTime();
     this.tutorial.dismiss();
     this.tutorialText.setText('');
     this.persist();
@@ -483,6 +496,8 @@ export class GameScene extends BaseGameplayScene {
 
   private replayLevel(id: number): void {
     this.scene.stop('LevelDone');
+    this.scene.stop('Pause');
+    this.tutorialText.setVisible(true);
     this.scene.resume();
     const next = levelById(id);
     if (!next) {
@@ -493,7 +508,43 @@ export class GameScene extends BaseGameplayScene {
     this.beginDay();
   }
 
-  /** The HUD's home button: the map in the campaign, the menu otherwise. */
+  /**
+   * The pause card. Only mid-day: between days there is nothing running to
+   * pause, and the result screens have their own way out.
+   */
+  private openPause(): void {
+    if (this.phase !== 'playing' || this.externallyPaused) return;
+    if (!this.scene.isActive() || this.scene.isActive('Pause')) return;
+    this.cancelDrag();
+    this.sfx.stopHumOnly();
+    this.tutorialText.setVisible(false);
+    const level = this.level;
+    const data: PauseData = {
+      title: level
+        ? `${level.world + 1}-${((level.id - 1) % LEVELS_PER_WORLD) + 1}  ${level.name}`
+        : `Day ${this.day}`,
+      quitLabel: level ? 'Map' : 'Menu',
+      onResume: () => this.closePause(),
+      onQuit: () => {
+        this.scene.stop('Pause');
+        this.scene.resume();
+        this.goHome();
+      },
+      ...(level ? { onRetry: () => this.replayLevel(level.id) } : {}),
+    };
+    this.scene.launch('Pause', data);
+    this.scene.pause();
+  }
+
+  private closePause(): void {
+    this.tutorialText.setVisible(true);
+    this.scene.stop('Pause');
+    this.scene.resume();
+    this.sfx.startHum();
+    this.startGameplay();
+  }
+
+  /** Leaves the board: the map in the campaign, the menu otherwise. */
   private goHome(): void {
     if (this.phase === 'loading') return;
     if (this.level) {
@@ -536,6 +587,10 @@ export class GameScene extends BaseGameplayScene {
     const result = evaluateDay(this.day, Math.floor(this.field.honey) + bonus, bonus);
 
     this.save.runScore += result.score;
+    // Surviving further than ever before is endless mode's celebration.
+    if (result.outcome === 'met' && this.day > this.save.bestRunDay && this.day > 1) {
+      this.context.portal.happyTime();
+    }
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     if (this.tutorial.finished) this.save.tutorialDone = true;
     this.tutorial.dismiss();
@@ -1207,7 +1262,7 @@ export class GameScene extends BaseGameplayScene {
     g.strokeCircle(fx, fy, pressed ? 17 : 20);
   }
 
-  /** Exposed for the automated harness. Removed before submission. */
+  /** Exposed for the automated harness, in dev and `local` builds only. */
   debugHandle(): Record<string, unknown> {
     return {
       hive: { x: this.field.hiveX, y: this.field.hiveY },

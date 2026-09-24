@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
 import {
+  AudioManager,
   BaseScene,
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
@@ -7,8 +8,9 @@ import {
   viewRect,
 } from '@ucgames/core';
 import { COLORS } from '../config/tuning.ts';
+import { GAME_TITLE } from '../config/title.ts';
 import { Button } from '../ui/Button.ts';
-import { LEVELS, totalStars } from '../game/Levels.ts';
+import { LEVELS, isUnlocked, totalStars } from '../game/Levels.ts';
 import {
   coerceSave,
   newSave,
@@ -144,16 +146,50 @@ export class MenuScene extends BaseScene {
     } catch (error) {
       console.warn('[beeline] Could not read save; starting fresh.', error);
     }
+    // No preload scene, so the player's mute choice is restored here.
+    this.context.audio.hydrate(this.context.save.get(AudioManager.saveKey, false));
     this.save = coerceSave(this.context.save.get<unknown>(SAVE_KEY, null));
+
+    // A brand-new player lands straight in the first level. CrazyGames asks
+    // for new users to be in gameplay immediately (one click at most), and
+    // the first level *is* the tutorial — the menu can wait until they have
+    // something to come back to.
+    if (this.isFirstVisit()) {
+      this.scene.start('Game', { mode: 'level', level: 1 });
+      return;
+    }
+
     this.layoutMenu();
     this.ready = true;
+  }
+
+  private isFirstVisit(): boolean {
+    const s = this.save;
+    return (
+      !s.tutorialDone &&
+      totalStars(s.levelStars) === 0 &&
+      s.day === 1 &&
+      s.bestScore === 0 &&
+      s.bestRunDay === 0
+    );
+  }
+
+  /** The level a returning player most likely wants: the next one without a star. */
+  private nextLevel(): (typeof LEVELS)[number] | null {
+    return (
+      LEVELS.find(
+        (l) =>
+          isUnlocked(l, this.save.levelStars) &&
+          (this.save.levelStars[l.id - 1] ?? 0) === 0,
+      ) ?? null
+    );
   }
 
   private layoutMenu(): void {
     const cx = DESIGN_WIDTH / 2;
 
     const title = this.add
-      .text(cx, 128, 'Beeline', {
+      .text(cx, 128, GAME_TITLE, {
         fontFamily: FONT,
         fontSize: '104px',
         fontStyle: 'bold',
@@ -187,19 +223,35 @@ export class MenuScene extends BaseScene {
 
     const resuming = this.save.day > 1;
     const stars = totalStars(this.save.levelStars);
+    const next = this.nextLevel();
 
     // Two ways to play, and the campaign is the one the screen is about: it is
     // the one with an end, and the one a first-timer should meet first.
     new Button(this, {
       x: cx,
       y: 300,
-      width: 400,
-      label: '▶  Adventure',
-      sublabel: stars > 0 ? `★ ${stars} / ${LEVELS.length * 3}` : '30 meadows to fill',
+      width: 500,
+      label: next
+        ? `▶  Play ${next.world + 1}-${((next.id - 1) % 10) + 1}  ${next.name}`
+        : '▶  Adventure',
+      sublabel: `★ ${stars} / ${LEVELS.length * 3}   ·   Adventure`,
       tint: 0x3aa860,
       big: true,
-      onClick: () => this.scene.start('Map'),
+      // One click from the menu into gameplay: straight to the next level.
+      onClick: () =>
+        next
+          ? this.scene.start('Game', { mode: 'level', level: next.id })
+          : this.scene.start('Map'),
     }).pulse();
+
+    new Button(this, {
+      x: cx + 345,
+      y: 300,
+      width: 140,
+      label: 'Map',
+      tint: 0x8a6a3a,
+      onClick: () => this.scene.start('Map'),
+    });
 
     const best =
       this.save.bestScore > 0

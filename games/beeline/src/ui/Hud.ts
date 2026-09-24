@@ -52,11 +52,11 @@ export class Hud {
   private combo: ComboView = { tier: 1, progress: 0, slipping: false };
   private comboPulse = 0;
   private readonly comboText: Phaser.GameObjects.Text;
-  private readonly homeButton: Phaser.GameObjects.Text;
+  private readonly pauseButton: Phaser.GameObjects.Text;
   /** Called with the star number (1-3) the moment it is earned. */
   onStar: ((star: number) => void) | null = null;
-  /** Called when the home button is tapped. */
-  onHome: (() => void) | null = null;
+  /** Called when the pause button is tapped. */
+  onPause: (() => void) | null = null;
   private starPops: number[] = [0, 0, 0];
 
   constructor(scene: Phaser.Scene, depth: number) {
@@ -77,15 +77,15 @@ export class Hud {
 
     this.dayText = text(22, '#fff4d6', true).setOrigin(0, 0.5);
     this.comboText = text(24, '#ffe38a', true).setOrigin(0.5, 0.5);
-    // Back to the map (or the menu). A zone-less text with its own hit area,
-    // so it does not fight the board's own pointer handling for the rest of
-    // the screen.
-    this.homeButton = text(26, '#fff4d6', true)
-      .setText('⌂')
+    // Pause (and from there Retry, Map, Sound). A zone-less text with its own
+    // hit area, so it does not fight the board's own pointer handling for the
+    // rest of the screen; padded out to a thumb-sized target.
+    this.pauseButton = text(30, '#fff4d6', true)
+      .setText('II')
       .setOrigin(0.5)
-      .setPadding(10, 4, 10, 4)
+      .setPadding(26, 10, 26, 10)
       .setInteractive({ useHandCursor: true });
-    this.homeButton.on('pointerup', () => this.onHome?.());
+    this.pauseButton.on('pointerup', () => this.onPause?.());
     this.timerText = text(22, '#fff4d6', true).setOrigin(0.5, 0.5);
     this.honeyText = text(34, '#ffd466', true).setOrigin(0.5, 0.5);
     this.quotaText = text(16, '#e9dcc0').setOrigin(0.5, 0.5);
@@ -105,7 +105,7 @@ export class Hud {
     this.root.add([
       this.gfx,
       this.comboText,
-      this.homeButton,
+      this.pauseButton,
       ...(this.dropIcon ? [this.dropIcon] : []),
       this.dayText,
       this.timerText,
@@ -131,7 +131,7 @@ export class Hud {
 
     this.dayText.setPosition(safe.x + 30, top);
     this.timerText.setPosition(safe.right - 52, top + 2);
-    this.homeButton.setPosition(safe.right - 52, top + 62);
+    this.pauseButton.setPosition(safe.right - 52, top + 62);
     this.honeyText.setPosition(safe.centerX, top - 4);
     this.quotaText.setPosition(safe.centerX, top + 44);
     this.linesText.setPosition(safe.x + 30, top + 50);
@@ -337,8 +337,8 @@ export class Hud {
     });
   }
 
-  setHomeVisible(visible: boolean): void {
-    this.homeButton.setVisible(visible);
+  setPauseVisible(visible: boolean): void {
+    this.pauseButton.setVisible(visible);
   }
 
   /** A drop just landed in the counter. */
