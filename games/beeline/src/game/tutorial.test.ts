@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Tutorial } from './Tutorial.ts';
 
-const nothing = { routesDrawn: 0, honey: 0, money: 0 };
+const nothing = { routesDrawn: 0, honey: 0, lines: 0 };
 
 describe('tutorial', () => {
   it('does not exist for a returning player', () => {
@@ -13,7 +13,7 @@ describe('tutorial', () => {
 
   it('opens by asking for the one thing the game is about', () => {
     const tutorial = new Tutorial(true);
-    expect(tutorial.current?.id).toBe('aim');
+    expect(tutorial.current?.id).toBe('drag');
     expect(tutorial.wantsHintLine).toBe(true);
   });
 
@@ -22,27 +22,27 @@ describe('tutorial', () => {
     // the hesitant one.
     const tutorial = new Tutorial(true);
     for (let i = 0; i < 1000; i += 1) tutorial.update(nothing);
-    expect(tutorial.current?.id).toBe('aim');
+    expect(tutorial.current?.id).toBe('drag');
 
     tutorial.update({ ...nothing, routesDrawn: 1 });
     expect(tutorial.current?.id).toBe('watch');
   });
 
-  it('walks the whole loop — aim, gather, sell — then gets out of the way', () => {
+  it('walks the whole loop — drag, gather, more lines — then gets out of the way', () => {
     const tutorial = new Tutorial(true);
 
-    tutorial.update({ ...nothing, routesDrawn: 1 });
+    tutorial.update({ ...nothing, routesDrawn: 1, lines: 1 });
     expect(tutorial.current?.id).toBe('watch');
 
-    tutorial.update({ ...nothing, routesDrawn: 1, honey: 12 });
-    expect(tutorial.current?.id).toBe('sell');
+    tutorial.update({ ...nothing, routesDrawn: 1, lines: 1, honey: 12 });
+    expect(tutorial.current?.id).toBe('more');
 
-    // Honey in the combs is not the lesson: money is. The step waits for a
-    // sale, because a player who never sells never sees the loop close.
-    tutorial.update({ ...nothing, routesDrawn: 2, honey: 40 });
-    expect(tutorial.current?.id).toBe('sell');
+    // One line is not the lesson: the crew cap is. The step waits for a second
+    // line standing at once.
+    tutorial.update({ ...nothing, routesDrawn: 3, lines: 1, honey: 40 });
+    expect(tutorial.current?.id).toBe('more');
 
-    tutorial.update({ ...nothing, routesDrawn: 2, honey: 20, money: 18 });
+    tutorial.update({ ...nothing, routesDrawn: 3, lines: 2, honey: 50 });
     expect(tutorial.current).toBeNull();
     expect(tutorial.finished).toBe(true);
   });

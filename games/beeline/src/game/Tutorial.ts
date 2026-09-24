@@ -15,45 +15,43 @@
  *  - **Each step waits for evidence**, not for a timer. Advancing on a timer
  *    teaches the confident player nothing and abandons the hesitant one.
  */
-export type TutorialStepId = 'aim' | 'watch' | 'sell' | 'done';
+export type TutorialStepId = 'drag' | 'watch' | 'more' | 'done';
 
 export interface TutorialStep {
   id: TutorialStepId;
   /** One line, in the player's terms. Shown near the top of the field. */
   text: string;
-  /** Whether the hint line to the nearest flower should pulse. */
+  /** Whether the hint hand from the hive to the nearest flower should play. */
   showHintLine: boolean;
 }
 
 const STEPS: readonly TutorialStep[] = [
   {
-    id: 'aim',
-    text: 'Tap the hive to open the dial, tap again to fire the path',
+    id: 'drag',
+    text: 'Drag from the hive to a flower',
     showHintLine: true,
   },
   {
     id: 'watch',
-    text: 'Your bees follow the line you drew',
+    text: 'Your bees fly the line and bring honey home',
     showHintLine: false,
   },
   {
-    // The step the whole economy hangs on, and the one a new player will not
-    // guess: honey in the combs is stock, not score, and it only becomes money
-    // when a line carries it to somebody who wants it. Taught immediately after
-    // the first honey arrives, while the connection is obvious.
-    id: 'sell',
-    text: 'Honey is not money yet — drag a line to a buyer to sell it',
-    showHintLine: false,
+    // The rule that makes lines matter: one line carries a crew, not the
+    // whole swarm. Taught the moment it bites — bees idling at the hive.
+    id: 'more',
+    text: 'One line carries 8 bees — lay more lines!',
+    showHintLine: true,
   },
 ];
 
 export interface TutorialProgress {
-  /** Routes the player has committed. */
+  /** Lines the player has laid. */
   routesDrawn: number;
   /** Honey banked so far this day. */
   honey: number;
-  /** Money earned so far this day. */
-  money: number;
+  /** Lines standing right now. */
+  lines: number;
 }
 
 /**
@@ -90,13 +88,11 @@ export class Tutorial {
     if (!step) return;
 
     const satisfied =
-      step.id === 'aim'
+      step.id === 'drag'
         ? progress.routesDrawn >= 1
         : step.id === 'watch'
           ? progress.honey > 0
-          : // Honey in the combs is not the lesson: money is. A player who
-            // never sells never sees the loop close.
-            progress.money > 0;
+          : progress.lines >= 2;
 
     if (satisfied) this.index += 1;
   }

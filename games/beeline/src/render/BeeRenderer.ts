@@ -1,6 +1,6 @@
 import type Phaser from 'phaser';
 import type { Bee } from '../sim/Bee.ts';
-import { TEX } from './textures.ts';
+import { FLAP_FRAMES, TEX } from './textures.ts';
 
 export type RendererMode = 'blitter' | 'sprite';
 
@@ -69,6 +69,7 @@ const BUILDER_TINT = 0xb9dcf5;
  * Phaser draws for a missing texture.
  */
 function beeTextureKey(scene: Phaser.Scene): string {
+  if (scene.textures.exists(TEX.beeFlap)) return TEX.beeFlap;
   return scene.textures.exists(TEX.bee) ? TEX.bee : TEX.beeDrawn;
 }
 
@@ -128,11 +129,13 @@ class SpriteBeeRenderer implements BeeRenderer {
   private readonly depth: number;
   private readonly texture: string;
   private sprites: Phaser.GameObjects.Image[] = [];
+  private readonly flaps: boolean;
 
   constructor(scene: Phaser.Scene, depth: number) {
     this.scene = scene;
     this.depth = depth;
     this.texture = beeTextureKey(scene);
+    this.flaps = this.texture === TEX.beeFlap;
   }
 
   resize(count: number): void {
@@ -158,6 +161,14 @@ class SpriteBeeRenderer implements BeeRenderer {
       const x = bee.prevX + (bee.x - bee.prevX) * alpha;
       const y = bee.prevY + (bee.y - bee.prevY) * alpha;
       sprite.setPosition(x, y);
+
+      // The wing beat, off the scene clock with a per-bee phase so the swarm
+      // never flaps in unison. Plain frame picks rather than Phaser animations:
+      // a few hundred animation components is real overhead for four frames.
+      if (this.flaps) {
+        const beat = Math.floor(this.scene.time.now / 38 + i * 1.7) % FLAP_FRAMES;
+        sprite.setFrame(beat);
+      }
 
       const laden = bee.carrying > 0;
       sprite.setTint(tintFor(bee.state, bee.carrying));

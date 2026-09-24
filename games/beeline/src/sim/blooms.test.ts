@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { TUNING } from '../config/tuning.ts';
 import { Field } from './Field.ts';
 import { featuresForDay, patchesForDay } from '../game/DayCycle.ts';
-import { deriveStats, emptyLevels } from '../game/Upgrades.ts';
+import { deriveStats } from '../game/Upgrades.ts';
+import { modifiersFor } from '../game/Items.ts';
 
 function newDay(day = 1): Field {
   const field = new Field();
@@ -24,11 +25,11 @@ function lineTo(field: Field, x: number, y: number): number[] {
 }
 
 describe('lines are the budget', () => {
-  it('starts with only a few, and the upgrade is what buys more', () => {
-    const base = deriveStats(emptyLevels());
+  it('starts with only a few, and the More Lines pick is what buys more', () => {
+    const base = deriveStats();
     expect(base.routeSlots).toBe(TUNING.route.maxCount);
 
-    const withOne = deriveStats({ ...emptyLevels(), routeSlots: 1 });
+    const withOne = deriveStats(modifiersFor(['moreLines']));
     expect(withOne.routeSlots).toBe(base.routeSlots + 1);
   });
 

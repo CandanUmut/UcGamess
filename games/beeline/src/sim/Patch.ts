@@ -56,8 +56,7 @@ export class Patch {
     this.pool = pool;
     this.maxPool = pool;
     this.kind = kind;
-    this.windowTotal =
-      kind === 'night' ? TUNING.patch.nightBloomWindowSeconds : Number.POSITIVE_INFINITY;
+    this.windowTotal = kind === 'night' ? TUNING.golden.window : Number.POSITIVE_INFINITY;
     this.windowRemaining = this.windowTotal;
   }
 

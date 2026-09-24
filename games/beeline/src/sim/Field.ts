@@ -3,19 +3,12 @@ import { Bee } from './Bee.ts';
 import { Patch, type PatchKind } from './Patch.ts';
 import { Route } from './Route.ts';
 import { Wasp, type WaspKind } from './Wasp.ts';
-import { Buyer, type BuyerId } from './Buyer.ts';
-import { Aimer } from './Aimer.ts';
 import { RaidClock } from './Raid.ts';
 import { Maze } from './Maze.ts';
 import { slideAlongWalls, type WallSlide } from './deflect.ts';
 import { Fog } from './Fog.ts';
-import {
-  coordsLength,
-  truncateCoords,
-  type Polyline,
-  type SamplePoint,
-} from './polyline.ts';
-import { deriveStats, emptyLevels, type DerivedStats } from '../game/Upgrades.ts';
+import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
+import { deriveStats, type DerivedStats } from '../game/Upgrades.ts';
 import { dayQuota, type DayFeatures } from '../game/DayCycle.ts';
 import { noModifiers, type RunModifiers } from '../game/Items.ts';
 
@@ -90,48 +83,84 @@ export interface FieldStats {
 export interface FieldEvents {
   /** Positions where nectar was picked up this step. */
   collected: Array<{ x: number; y: number; amount: number }>;
-  /** How much honey was deposited at the hive this step. */
+  /** Honey banked at the hive this step. The score, arriving. */
   deposited: number;
   /** Positions where bees were scattered by a wasp. */
   scattered: Array<{ x: number; y: number }>;
-  /** Workers committed to a newly drawn route this step. */
-  dispatched: number;
-  /** Where a route was severed by thorns, so the cut is visible and audible. */
+  /** Where a new line was pressed into a wall and turned along it. */
   deflected: Array<{ x: number; y: number }>;
   /** Flowers found this step. Discovery is the reward for exploring. */
   found: Array<{ x: number; y: number; honey: number }>;
   /** A raid was announced this step, at the edge it will come from. */
   raidWarning: { x: number; y: number; size: number } | null;
-  /** Bees landed a hit on a wasp here. */
+  /** A tap landed on a wasp here. */
   struck: Array<{ x: number; y: number }>;
-  /** A wasp was beaten off here. */
-  waspDown: Array<{ x: number; y: number }>;
+  /** A wasp was beaten off here, and paid this bounty. */
+  waspDown: Array<{ x: number; y: number; bounty: number }>;
   /** Honey taken by raiders this step. */
   stolen: number;
   /** Wasps that arrived on the board this step. */
   raidLanded: number;
-  /** A shot came to rest here. */
-  shotLanded: Array<{ x: number; y: number }>;
-  /** Guard lines retired because the fight was over. */
-  stoodDown: Array<{ x: number; y: number }>;
+  /** A line was laid, ending here. */
+  lineLaid: Array<{ x: number; y: number; connected: boolean }>;
   /** A line was dropped to make room for a new one. */
   replaced: Array<{ x: number; y: number }>;
-  /** Blooms nobody reached in time. The thing a day is lost to. */
+  /** A flower worked dry: its line retires and the slot comes free. */
+  drained: Array<{ x: number; y: number }>;
+  /** A line that reached nothing gave up and retired. */
+  fizzled: Array<{ x: number; y: number }>;
+  /** Golden blooms that closed before anyone reached them. */
   wilted: Array<{ x: number; y: number; honey: number }>;
-  /** Blooms that opened this step. */
+  /** Golden blooms that opened this step. */
   bloomed: Array<{ x: number; y: number }>;
-  /** Honey lost over the brim this step. */
-  spilled: number;
-  /** Sales completed this step, for the coin burst and the sound. */
-  sold: Array<{ x: number; y: number; honey: number; money: number; buyer: BuyerId }>;
-  /** Money actually banked at the hive this step. */
-  banked: number;
   /** Bees driven out of the swarm for the day. */
   beesLost: Array<{ x: number; y: number }>;
-  /** Nectar shaken loose where the wind crushed a route into a wall. */
-  pollenLost: Array<{ x: number; y: number }>;
-  /** A depot the swarm stopped trading with, because the other one was chosen. */
-  droppedBuyer: { x: number; y: number; name: string } | null;
+  /** Every ordinary flower on the board is dry. The day can end early. */
+  cleared: boolean;
+}
+
+function emptyEvents(): FieldEvents {
+  return {
+    collected: [],
+    deposited: 0,
+    scattered: [],
+    deflected: [],
+    found: [],
+    raidWarning: null,
+    struck: [],
+    waspDown: [],
+    stolen: 0,
+    raidLanded: 0,
+    lineLaid: [],
+    replaced: [],
+    drained: [],
+    fizzled: [],
+    wilted: [],
+    bloomed: [],
+    beesLost: [],
+    cleared: false,
+  };
+}
+
+/** Where a line would start, if the press at a point began one. */
+export interface LineStart {
+  x: number;
+  y: number;
+  /** The line being carried on, or null for a fresh one from the hive. */
+  route: Route | null;
+}
+
+/** A line as it would be laid, for the preview and for committing. */
+export interface LinePlan {
+  start: LineStart;
+  /** The path, after aim assist and sliding along walls. */
+  coords: number[];
+  /** The flower it ends on, if it ends on one. */
+  target: Patch | null;
+  /** Where it first ran into a wall, if it did. */
+  contact: { x: number; y: number } | null;
+  /** Long enough to be worth laying. */
+  valid: boolean;
 }
 
 const NO_FEATURES: DayFeatures = {
@@ -181,25 +210,17 @@ export class Field {
   /** What the player has seen of the board today. */
   readonly fog = new Fog(WORLD_WIDTH, WORLD_HEIGHT);
 
-  /** Honey sitting in the hive, waiting to be sold. Capped — see `honeyCap`. */
-  honey = 0;
-  /** Money banked today. The thing a day is now judged on. */
-  money = 0;
   /**
-   * The two buyers, fixed on the far side of the board.
+   * Honey banked today. The score, and the thing a day is judged on.
    *
-   * Built once and re-seeded each dawn rather than rebuilt, so a buyer's
-   * identity — where it is, what it pays on average — is something a player
-   * learns across a whole run.
+   * Honey used to be stock that had to be carried to a shop and sold before it
+   * counted, which put two trips and a price chart between the player's action
+   * and its reward. Measured, the first point of score landed 15-25 seconds
+   * into day one. Now a bee landing at the hive *is* the reward.
    */
-  readonly buyers: Buyer[] = [
-    new Buyer('market', TUNING.buyers.market.x, TUNING.buyers.market.y),
-    new Buyer('apothecary', TUNING.buyers.apothecary.x, TUNING.buyers.apothecary.y),
-  ];
-  /** Debug affordance: freeze route decay to feel the contrast. */
-  decayEnabled = true;
+  honey = 0;
 
-  stats: DerivedStats = deriveStats(emptyLevels());
+  stats: DerivedStats = deriveStats();
   features: DayFeatures = NO_FEATURES;
   /** What the run's items change about today. Neutral on a run with none. */
   modifiers: RunModifiers = noModifiers();
@@ -207,33 +228,20 @@ export class Field {
   /** Multiplier on effective swarm size, for the rewarded swarm boost. */
   swarmBoost = 1;
 
-  events: FieldEvents = {
-    collected: [],
-    deposited: 0,
-    scattered: [],
-    dispatched: 0,
-    deflected: [],
-    found: [],
-    raidWarning: null,
-    struck: [],
-    waspDown: [],
-    stolen: 0,
-    raidLanded: 0,
-    shotLanded: [],
-    stoodDown: [],
-    replaced: [],
-    wilted: [],
-    bloomed: [],
-    spilled: 0,
-    sold: [],
-    banked: 0,
-    beesLost: [],
-    pollenLost: [],
-    droppedBuyer: null,
-  };
+  events: FieldEvents = emptyEvents();
 
-  /** The dial. One tap opens it, one fires, one stops. See sim/Aimer.ts. */
-  readonly aim = new Aimer();
+  /**
+   * Seconds since each line last had a job, by route id.
+   *
+   * A line whose flower has run dry, or that never reached one, is retired
+   * after a short grace so its slot comes back without the player having to
+   * find it and erase it. Erasing by hand was the one chore left in the loop.
+   */
+  private readonly jobless = new Map<number, number>();
+  /** Field time the next golden bloom opens. */
+  private nextGoldenAt = Number.POSITIVE_INFINITY;
+  /** Set once the cleared event has fired today, so it fires once. */
+  private clearedAnnounced = false;
 
   /** Decides when the next raid lands. See sim/Raid.ts. */
   readonly raid = new RaidClock();
@@ -249,8 +257,6 @@ export class Field {
   beesLost = 0;
   /** Wasps brought down today, for the HUD and the end-of-day report. */
   waspsDowned = 0;
-  /** Honey lost over the brim today. The number that shames you into selling. */
-  spilled = 0;
   /** Where the next raid will come in, so the warning can point at it. */
   private raidEntry: { x: number; y: number } | null = null;
   /** Bees this wave has taken, against the budget below. */
@@ -271,29 +277,6 @@ export class Field {
 
   get time(): number {
     return this.elapsed;
-  }
-
-  /**
-   * How much honey the hive can hold.
-   *
-   * Small on purpose, and now actually enforced. A hive that could hold a whole
-   * day's gathering would let a player forage all morning and sell once at
-   * dusk, which is two chores rather than a loop. At this size the hive fills
-   * in well under a minute of good foraging, so the question "sell now, or hold
-   * for a better price" is live almost continuously.
-   */
-  get honeyCap(): number {
-    return this.stats.honeyCap;
-  }
-
-  /** 0..1, for the gauge. */
-  get honeyFullness(): number {
-    return this.honeyCap > 0 ? Math.min(1, this.honey / this.honeyCap) : 0;
-  }
-
-  /** True once the hive is brimming and deliveries are being lost. */
-  get isSpilling(): boolean {
-    return this.honey >= this.honeyCap - 1e-6;
   }
 
   // ---------------------------------------------------------------- setup
@@ -333,10 +316,11 @@ export class Field {
     this.modifiers = modifiers;
     this.swarmBoost = boost;
     this.honey = 0;
-    this.money = 0;
-    this.spilled = 0;
-    for (const buyer of this.buyers) buyer.beginDay();
     this.elapsed = 0;
+    this.jobless.clear();
+    this.clearedAnnounced = false;
+    this.nextGoldenAt =
+      day >= TUNING.golden.startDay ? TUNING.golden.firstAt : Number.POSITIVE_INFINITY;
     this.day = day;
 
     this.clearRoutes();
@@ -346,7 +330,6 @@ export class Field {
     this.waspsDowned = 0;
     this.raidEntry = null;
     this.raid.begin(features.raidSize, modifiers.extraWarningSeconds);
-    this.aim.beginDay(day);
 
     this.patchPool = Math.round(
       (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
@@ -358,8 +341,8 @@ export class Field {
     // placed relative to flowers that already existed.
     this.maze.generate(Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus));
     // The hive's front yard, flattened after generation so the spanning tree
-    // has already made every cell reachable and this can only add routes. The
-    // shops stand here; see `TUNING.maze.yard`.
+    // has already made every cell reachable and this can only add routes. See
+    // `TUNING.maze.yard`.
     const yard = TUNING.maze.yard;
     this.maze.clearRegion(yard.col0, yard.row0, yard.col1, yard.row1);
 
@@ -387,13 +370,6 @@ export class Field {
     // more. Day one's flowers spawn inside the hive's light, so the first
     // thirty seconds are exactly what they were before fog existed.
     this.fog.reveal(this.hiveX, this.hiveY, TUNING.hive.sightRadius);
-    // The buyers are landmarks, not discoveries. A player who cannot see where
-    // to sell cannot play the loop at all, so their ground is lit at dawn and
-    // stays lit — the dark is there to hide what is *worth finding*, and a
-    // building that has been there the whole run is not that.
-    for (const buyer of this.buyers) {
-      this.fog.reveal(buyer.x, buyer.y, TUNING.honey.revealRadius);
-    }
     if (modifiers.scoutRadius > 0) {
       this.fog.reveal(this.hiveX, this.hiveY, modifiers.scoutRadius);
     }
@@ -521,26 +497,6 @@ export class Field {
       block(taken, maze.colAt(patch.x), maze.rowAt(patch.y), 1);
     }
 
-    // The ring around each shop, held to a harder rule than the flower rings
-    // above: it gets its own last-resort tier rather than sharing `taken`.
-    //
-    // A flower's reach ring overlapping a shop's makes it genuinely ambiguous
-    // which one a drag was aimed at, and the aim assist has to pick one. The
-    // flower rule is allowed to give way under pressure — landing next to
-    // another flower is untidy and costs nothing — while landing next to a shop
-    // costs the player the sell line they meant to draw.
-    //
-    // Ringing the *shops* rather than the whole yard, which is what this
-    // started as. The yard is three cells and its ring is fifteen, most of them
-    // the near cells day one has to put its flowers in; excluding all of them
-    // left the opening board with nowhere lit to spawn. The yard cells
-    // themselves are excluded outright below, which is the part that actually
-    // keeps the road clear.
-    const nearShop = new Set<number>();
-    for (const buyer of this.buyers) {
-      block(nearShop, maze.colAt(buyer.x), maze.rowAt(buyer.y), 1);
-    }
-    const yard = TUNING.maze.yard;
     // Only the hive's own cell, not its neighbours. Day one's flowers are
     // deliberately one corridor out so they sit inside the hive's light, and
     // blocking the ring around the hive would push them straight back out of
@@ -562,8 +518,6 @@ export class Field {
     const inBand: number[] = [];
     const spaced: number[] = [];
     const anywhere: number[] = [];
-    /** Last resort: beside a shop, but on the board and not on anything. */
-    const crowded: number[] = [];
 
     for (let index = 0; index < this.cellSteps.length; index += 1) {
       const steps = this.cellSteps[index] ?? -1;
@@ -571,16 +525,15 @@ export class Field {
 
       const col = index % maze.cols;
       const row = Math.floor(index / maze.cols);
-      // Never, at any fallback tier: a flower sharing a cell with the hive, or
-      // standing anywhere in the yard, is either unaimable or in the way of the
-      // one journey that has to stay quick. `anywhere` exists to stop a day
-      // being short of a flower, not to put one somewhere it cannot be used.
+      // Never, at any fallback tier: a flower sharing a cell with the hive is
+      // unaimable, and one on top of another flower is unreadable. `anywhere`
+      // exists to stop a day being short of a flower, not to put one somewhere
+      // it cannot be used.
       const onTop =
         this.patches.some(
           (p) => p.alive && maze.colAt(p.x) === col && maze.rowAt(p.y) === row,
         ) ||
-        (col === hiveCol && row === hiveRow) ||
-        (col >= yard.col0 && col <= yard.col1 && row >= yard.row0 && row <= yard.row1);
+        (col === hiveCol && row === hiveRow);
       if (onTop) continue;
 
       // On the teaching days every flower must start lit, or the hint line has
@@ -601,11 +554,6 @@ export class Field {
         }
       }
 
-      if (nearShop.has(index)) {
-        crowded.push(index);
-        continue;
-      }
-
       anywhere.push(index);
       if (taken.has(index)) continue;
       spaced.push(index);
@@ -614,14 +562,7 @@ export class Field {
       inBand.push(index);
     }
 
-    const pool =
-      inBand.length > 0
-        ? inBand
-        : spaced.length > 0
-          ? spaced
-          : anywhere.length > 0
-            ? anywhere
-            : crowded;
+    const pool = inBand.length > 0 ? inBand : spaced.length > 0 ? spaced : anywhere;
     if (pool.length === 0) return { x: this.hiveX, y: this.hiveY };
 
     const index = pool[Math.floor(Math.random() * pool.length)] ?? 0;
@@ -669,7 +610,10 @@ export class Field {
     // line to point at — the whole onboarding budget spent on nothing. A wide
     // band on day one put them out past it, which a test caught.
     const spread = Math.min(4, Math.max(1, this.day - 1));
-    return { min: 1, max: outward + spread };
+    // Never all in the hive's lap. A board where every flower is one corridor
+    // out uses a third of the screen and leaves the rest as empty mist; from
+    // day two the nearest flowers are two corridors out.
+    return { min: this.day >= 2 ? 2 : 1, max: outward + spread + 1 };
   }
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
@@ -916,173 +860,28 @@ export class Field {
   }
 
   /**
-   * Decides what a route is currently for, from where its tip is.
+   * Decides what a route is for, from where its tip is.
    *
-   * A wasp wins over a flower, and not only because it is usually closer: the
-   * player who drags a line onto a raider has said something unambiguous, and
-   * a route that quietly reverted to nectar-gathering because a flower happened
-   * to sit behind the wasp would be the game ignoring them at the exact moment
-   * they were reacting to it.
+   * Only a flower the tip is actually standing on — seen or not, which is how
+   * a line pushed into the mist pays off. There used to be a fallback to the
+   * nearest known flower *anywhere*, and it made every line that missed look
+   * busy: the bees flew to the end, found nothing, milled about and came home,
+   * and the player could not tell a working line from a dead one. A line with
+   * no flower under its tip now says so by retiring itself.
    */
-  /**
-   * Points a route at the wasp the player's drag actually landed on.
-   *
-   * Called with what aim assist decided, which is the only reading of intent
-   * taken while the gesture was still happening. `retarget` re-derives a target
-   * from where the tip *is*, and a wasp covers most of a corridor in the time a
-   * slow drag takes — so on its own it loses the gesture that was aimed
-   * squarely at one. Intent captured at the drag wins over geometry read after
-   * it.
-   */
-  aimRouteAt(route: Route, buyer: Buyer | null = null): void {
-    if (!buyer) return;
-    route.targetBuyer = buyer;
-    route.target = null;
-    this.tradeExclusively(buyer, route);
-  }
-
-  /**
-   * The swarm trades with one buyer at a time.
-   *
-   * Pointing a line at a depot drops every line still pointing at the other
-   * one. Two reasons, and the second is the one that matters.
-   *
-   * The small one: it was busywork. Switching buyers meant drawing the new line
-   * and then hunting down the old one to erase it by hand, every single time,
-   * for a decision the player had already plainly made.
-   *
-   * The real one: **an unattended sell line quietly undoes the choice.** The
-   * whole point of two buyers is picking a moment — this price, now, over that
-   * one. A line left standing at the old depot goes on selling into it at
-   * whatever the price happens to be, so the honey the player meant to hold for
-   * a peak leaks away at a trough while they are looking somewhere else. The
-   * result is that neither line is a decision and the market reads as noise.
-   *
-   * Lines to the *same* depot are untouched: several roads into one buyer is a
-   * legitimate way to move a full hive quickly, and it is still one choice.
-   *
-   * Bees on a dropped line come home rather than vanishing, so a switch never
-   * costs the honey already in the air — see `killRoute`.
-   */
-  private tradeExclusively(chosen: Buyer, except: Route): void {
-    let dropped: Buyer | null = null;
-
-    for (const route of [...this.routes]) {
-      if (route === except || route.dead) continue;
-      const other = route.targetBuyer;
-      if (!other || other === chosen) continue;
-      dropped = other;
-      this.killRoute(route);
-    }
-
-    if (dropped) {
-      this.events.droppedBuyer = {
-        x: dropped.x,
-        y: dropped.y,
-        name: dropped.tuning.name,
-      };
-    }
-  }
-
   retarget(route: Route): void {
-    // Targeted on the assist radius, not the strike radius. Striking is a
-    // question of where a bee is; targeting is a question of what the player
-    // meant, and a wasp that moved 80px during the drag is still plainly what
-    // they were pointing at. Matching the two radii made the gesture fail
-    // silently whenever the raider was quick, which is every raider.
-    const buyer = this.nearestBuyerTo(route.tipX, route.tipY, TUNING.honey.reachRadius);
-    if (buyer) {
-      route.targetBuyer = buyer;
-      route.target = null;
-      return;
-    }
-
-    // A sell line keeps its buyer, even though a buyer is a building
-    // and cannot die. Without this a sell route whose tip drifts near a flower
-    // would quietly go back to foraging, which is the same betrayal.
-    if (route.targetBuyer) {
-      route.target = null;
-      return;
-    }
-
-    // Two ways a route may end up pointed at a flower, and only two.
-    //
-    // A flower the player has **found** — anywhere on the board. And a flower
-    // the tip is genuinely standing on, seen or not, which is the case the fog
-    // exists to pay off: you drew a line into the dark, it landed on something,
-    // and the bees you sent find it.
-    //
-    // What is excluded is the one in between, and it was quietly undoing the
-    // whole mechanic. When a route's flower ran dry the retarget picked the
-    // nearest flower *anywhere*, unseen ones included; the bees flew to it,
-    // lit it, and the game announced a discovery the player had not gone
-    // looking for. A dead flower became a free map of the next one.
-    const underTip = this.nearestPatchTo(
-      route.tipX,
-      route.tipY,
-      TUNING.patch.reachRadius,
-    );
-    route.target =
-      underTip ?? this.nearestPatchTo(route.tipX, route.tipY, Infinity, true);
+    route.target = this.nearestPatchTo(route.tipX, route.tipY, TUNING.patch.reachRadius);
+    if (route.target) route.hadTarget = true;
   }
 
   /**
-   * Commits workers to open a freshly drawn stretch of route.
+   * Bees that fly a new line's first trip.
    *
-   * This is the price of drawing. `drawnLength` is what the player's gesture
-   * actually covered — the piece that was missing, not the whole route — so
-   * refreshing a stub costs a handful of bees and redrawing from the hive costs
-   * a crowd. The cost is paid in throughput: a worker flies the line once and
-   * comes back empty, so for a few seconds the swarm carries less.
-   *
-   * Never refuses. If the swarm is already stretched, fewer workers go and the
-   * route simply opens with less fanfare — a drag that silently does nothing is
-   * the worst thing a touchscreen game can do.
+   * Kept as the harness's hook into the swarm, but no longer a price: the line
+   * slots are the budget now, and charging a trip of workers on top of that put
+   * a second, invisible delay between laying a line and seeing it pay. Idle
+   * bees pick the line up on their own on the next step.
    */
-  dispatchBuilders(route: Route, drawnLength: number): number {
-    const wanted = Math.ceil(drawnLength * TUNING.bee.workersPerPixel);
-    const ceiling = Math.floor(this.bees.length * TUNING.bee.maxWorkerFraction);
-    const budget = Math.max(0, Math.min(wanted, ceiling));
-    if (budget === 0) return 0;
-
-    let sent = 0;
-
-    /**
-     * Only bees that are at the hive or already heading back to it can be
-     * conscripted. Never one that is outbound or on a flower.
-     *
-     * Taking an in-flight forager was measured as a disaster: with a redraw
-     * every couple of seconds, bees 90% of the way to a flower were repeatedly
-     * reset to the start of the line and nobody ever arrived. Honey flatlined
-     * and day one — which must be unmissable — failed.
-     *
-     * The rule also gives the cost a nice shape on its own: drawing while the
-     * swarm is out in the field is cheap, and drawing just as a wave lands
-     * costs the most. It is never destructive, only an opportunity cost.
-     */
-    const conscriptable = (bee: Bee): boolean => {
-      if (bee.state === 'idle' || bee.state === 'queued') return true;
-      return bee.state === 'inbound' && bee.carrying === 0;
-    };
-
-    for (const bee of this.bees) {
-      if (sent >= budget) break;
-      if (!conscriptable(bee)) continue;
-
-      this.releaseBee(bee);
-      route.beeCount += 1;
-      bee.routeId = route.id;
-      bee.s = 0;
-      bee.carrying = 0;
-      bee.state = 'building';
-      sent += 1;
-    }
-
-    this.events.dispatched += sent;
-    return sent;
-  }
-
-  /** Bees currently opening a route rather than carrying nectar. */
   countBuilders(): number {
     let building = 0;
     for (const bee of this.bees) if (bee.state === 'building') building += 1;
@@ -1093,6 +892,7 @@ export class Field {
     route.dead = true;
     const index = this.routes.indexOf(route);
     if (index >= 0) this.routes.splice(index, 1);
+    this.jobless.delete(route.id);
 
     for (const bee of this.bees) {
       if (bee.routeId === route.id) {
@@ -1112,214 +912,272 @@ export class Field {
   step(dt: number): void {
     this.elapsed += dt;
 
-    for (const patch of this.patches) patch.step(dt);
-    for (const buyer of this.buyers) buyer.step(dt);
+    for (const patch of this.patches) {
+      const wasAlive = patch.alive;
+      patch.step(dt);
+      // A golden bloom whose clock ran out before anyone reached it.
+      if (wasAlive && !patch.alive && patch.kind === 'night') {
+        this.events.wilted.push({ x: patch.x, y: patch.y, honey: patch.honeyLeft });
+      }
+    }
 
     this.stepRaid(dt);
+    this.stepGolden();
 
     for (const route of [...this.routes]) {
-      if (this.decayEnabled) route.step(dt);
-      else route.updateTip();
-
+      route.step(dt);
       if (route.dead) {
         this.killRoute(route);
         continue;
       }
-
-      this.deflectRouteAtWalls(route);
-      if (route.dead) {
-        this.killRoute(route);
-        continue;
-      }
-
-      if (!route.target || !route.target.alive) this.retarget(route);
+      if (route.target && !route.target.alive) route.target = null;
+      if (!route.target) this.retarget(route);
+      this.retireIfJobless(route, dt);
     }
 
     for (const bee of this.bees) this.stepBee(bee, dt);
 
-    this.stepAim(dt);
     this.revealFromSwarm();
     this.updateDiscoveries();
+    this.revealLastFlowers();
+
+    if (!this.clearedAnnounced && this.cleared) {
+      this.clearedAnnounced = true;
+      this.events.cleared = true;
+    }
   }
 
-  // ---------------------------------------------------------------- the dial
+  /**
+   * Retires a line that has nothing left to do.
+   *
+   * Two cases. Its flower ran dry — the ordinary end of a line's life, and
+   * the moment the slot should come back. Or it never reached a flower at all
+   * and the bees have had time to fly it and light what is out there, which
+   * is how a line pushed into the mist scouts rather than sits there.
+   *
+   * A line whose tip is being carried on — the player is building a longer
+   * route leg by leg — gets a longer grace, since the next leg is usually a
+   * second away.
+   */
+  private retireIfJobless(route: Route, dt: number): void {
+    if (route.target) {
+      this.jobless.delete(route.id);
+      return;
+    }
+
+    const idle = (this.jobless.get(route.id) ?? 0) + dt;
+    this.jobless.set(route.id, idle);
+
+    const hadFlower = route.hadTarget;
+    const grace = hadFlower
+      ? TUNING.line.retireSeconds
+      : Math.max(4, route.liveLength / (this.stats.beeSpeed * 0.8));
+    if (idle < grace) return;
+
+    if (hadFlower) this.events.drained.push({ x: route.tipX, y: route.tipY });
+    else this.events.fizzled.push({ x: route.tipX, y: route.tipY });
+    this.killRoute(route);
+  }
 
   /**
-   * One tap does whatever the moment calls for.
+   * True once every ordinary flower on the board has been worked dry.
    *
-   * Deliberately a single verb. The old input had a drag, a hold and a
-   * tip-grab, all overlapping, and the player had to know which one they were
-   * performing. Here every tap is the next step of the same little ritual:
-   * open, fire, stop.
+   * Golden blooms are left out: they are a bonus that comes and goes, and a
+   * day that could not end until the next one had opened and closed would be
+   * a day spent waiting.
    */
-  tap(x: number, y: number): void {
-    if (this.aim.mode === 'aiming') {
-      this.aim.launch();
-      return;
-    }
-    if (this.aim.mode === 'flying') {
-      this.landShot();
-      return;
-    }
+  get cleared(): boolean {
+    return (
+      this.patches.length > 0 && this.patches.every((p) => p.kind === 'night' || !p.alive)
+    );
+  }
 
-    // Whichever is nearer: the end of a line, or the hive.
-    //
-    // "A tip always wins" was tried and is wrong, because the tip-tap radius is
-    // deliberately generous on a phone — the first line's end sits well inside
-    // it while you are still standing at the hive, so tapping the hive quietly
-    // extended that line and a second line could never be started. Comparing
-    // the two distances is what the player means either way.
-    const tip = this.routeToExtendAt(x, y, TUNING.aim.tipTapRadius);
+  /**
+   * Lights the last flowers once there is nothing known left to work.
+   *
+   * The mist is there to make the *order* a decision — what to scout, what to
+   * take first — not to hide the last flower of the day until the clock runs
+   * out. Once every flower the player has found is dry, the swarm smells the
+   * rest.
+   */
+  private revealLastFlowers(): void {
+    const known = this.patches.some((p) => p.alive && p.discovered && p.kind !== 'night');
+    if (known) return;
+    for (const patch of this.patches) {
+      if (!patch.alive || patch.discovered) continue;
+      this.fog.reveal(patch.x, patch.y, TUNING.bee.sightRadius * 1.2);
+      patch.discovered = true;
+      this.events.found.push({
+        x: patch.x,
+        y: patch.y,
+        honey: Math.round(patch.honeyLeft),
+      });
+    }
+  }
+
+  /** Opens a golden bloom when its time comes. */
+  private stepGolden(): void {
+    if (this.elapsed < this.nextGoldenAt) return;
+    const { minGap, maxGap, poolShare } = TUNING.golden;
+    this.nextGoldenAt = this.elapsed + minGap + Math.random() * (maxGap - minGap);
+
+    // One at a time. Two countdowns on the board at once is a panic, not an
+    // opportunity.
+    if (this.patches.some((p) => p.kind === 'night' && p.alive)) return;
+
+    const pool = this.patchPool;
+    this.patchPool = Math.max(4, Math.round(pool * poolShare));
+    const patch = this.spawnPatch('night');
+    this.patchPool = pool;
+
+    // Always seen: a bonus the player cannot see is not a bonus.
+    patch.discovered = true;
+    this.fog.reveal(patch.x, patch.y, TUNING.bee.sightRadius);
+    this.events.bloomed.push({ x: patch.x, y: patch.y });
+  }
+
+  // ---------------------------------------------------------------- lines
+
+  /**
+   * Where a line pressed at (x, y) would start from, or null for nowhere.
+   *
+   * The hive, or the end of a line the player already owns — whichever the
+   * press is nearer. A line's end wins only inside its own grab radius, so a
+   * press on the hive with a short line's end nearby still starts a new line.
+   */
+  lineStartAt(x: number, y: number): LineStart | null {
     const toHive = Math.hypot(x - this.hiveX, y - this.hiveY);
-    if (tip && Math.hypot(x - tip.tipX, y - tip.tipY) < toHive) {
-      this.aim.open(tip.tipX, tip.tipY, tip.id);
-      return;
-    }
-
-    // Anything else opens at the hive. A tap that does nothing is the worst
-    // possible answer on a touchscreen, and starting a line is never wrong.
-    this.aim.open(this.hiveX, this.hiveY, 0);
-  }
-
-  /** Puts the dial away without firing. */
-  cancelAim(): void {
-    this.aim.cancel();
-  }
-
-  private stepAim(dt: number): void {
-    if (this.aim.mode === 'aiming') {
-      this.aim.spin(dt);
-      return;
-    }
-    if (this.aim.mode !== 'flying') return;
-
-    const next = this.aim.nextStep(dt);
-
-    // Out of flight, or off the board: the shot lands here.
-    if (
-      next.distance <= 0 ||
-      next.x < 6 ||
-      next.y < 6 ||
-      next.x > WORLD_WIDTH - 6 ||
-      next.y > WORLD_HEIGHT - 6
-    ) {
-      this.landShot();
-      return;
-    }
-
-    // A hedge turns a shot rather than stopping it.
-    //
-    // Stopping dead was measured to make the whole economy unreachable: a shot
-    // travels in a straight line and a maze does not, so on any dense day a
-    // line fired at a shop grazed the first hedge, stopped, and the day earned
-    // nothing at all. Sliding is the rule drawn paths have always used — take
-    // the part of the step the wall permits and drop the part it does not — so
-    // a shot down a corridor follows the corridor.
-    //
-    // A shot pressed into a corner takes neither axis, and *that* is where it
-    // lands. The wall still ends the shot; it just has to be a wall the shot
-    // cannot go along rather than one it merely touched.
-    let { x, y } = next;
-    if (this.maze.segmentBlocked(this.aim.headX, this.aim.headY, x, y)) {
-      const dx = x - this.aim.headX;
-      const dy = y - this.aim.headY;
-      const freeX =
-        dx !== 0 &&
-        !this.maze.segmentBlocked(
-          this.aim.headX,
-          this.aim.headY,
-          this.aim.headX + dx,
-          this.aim.headY,
-        );
-      const freeY =
-        dy !== 0 &&
-        !this.maze.segmentBlocked(
-          this.aim.headX,
-          this.aim.headY,
-          this.aim.headX,
-          this.aim.headY + dy,
-        );
-
-      if (freeX) {
-        x = this.aim.headX + dx;
-        y = this.aim.headY;
-      } else if (freeY) {
-        x = this.aim.headX;
-        y = this.aim.headY + dy;
-      } else {
-        this.landShot();
-        return;
+    let best: Route | null = null;
+    let bestDist = TUNING.line.tipGrabRadius;
+    for (const route of this.routes) {
+      if (route.dead) continue;
+      const dist = Math.hypot(route.tipX - x, route.tipY - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = route;
       }
     }
-
-    this.aim.advanceTo(x, y, next.distance);
-
-    // Arriving at something worth arriving at stops the shot on its own.
-    //
-    // Asking the player to also tap at the exact instant the path crosses a
-    // flower would be two pieces of timing for one decision, and the second
-    // one is not interesting. Landing on the target is the reward for aiming
-    // well, so the game takes it for them.
-    // A shot that catches a wasp is a **throw**, not a road.
-    //
-    // Drawing a supply line at a raider never made sense — a line is
-    // infrastructure and a wasp is a moving target that will be gone in
-    // seconds. Same dial, same two taps, but the shot hits the wasp and
-    // vanishes: no line laid, no slot spent, and the swarm keeps working.
-    const struck = this.nearestWaspTo(x, y, TUNING.wasp.hitRadius);
-    if (struck && struck.state !== 'fleeing') {
-      const downed = struck.hit(TUNING.wasp.throwDamage);
-      this.events.struck.push({ x: struck.x, y: struck.y });
-      if (downed) {
-        this.events.waspDown.push({ x: struck.x, y: struck.y });
-        this.waspsDowned += 1;
-      }
-      this.aim.cancel();
-      return;
-    }
-
-    // Not until the shot has actually gone somewhere, or a line that just
-    // landed on a flower would stop dead the instant it set off again — the
-    // head starts inside the reach of the very thing it arrived at.
-    if (this.aim.flownLength < TUNING.route.minLength) return;
-
-    if (
-      this.nearestPatchTo(x, y, TUNING.patch.reachRadius, true) ||
-      this.nearestBuyerTo(x, y, TUNING.honey.reachRadius)
-    ) {
-      this.landShot();
-    }
+    if (best && bestDist < toHive) return { x: best.tipX, y: best.tipY, route: best };
+    if (toHive <= TUNING.line.startRadius)
+      return { x: this.hiveX, y: this.hiveY, route: null };
+    return null;
   }
 
   /**
-   * Turns the shot in flight into road.
+   * The line a drag from `start` to (toX, toY) would lay.
    *
-   * A shot that never got going is simply forgotten — firing into a wall from
-   * point blank should cost the player the shot, not one of their lines.
+   * Straight — a beeline — clamped to the longest leg, snapped onto a found
+   * flower the finger is near, and slid along any hedge it presses into. The
+   * preview draws exactly this, so what the player sees while dragging is
+   * what they get when they let go.
    */
-  private landShot(): void {
-    const coords = this.aim.coords;
-    const routeId = this.aim.routeId;
-    this.aim.cancel();
+  planLine(start: LineStart, toX: number, toY: number): LinePlan {
+    let endX = toX;
+    let endY = toY;
+    const dx = endX - start.x;
+    const dy = endY - start.y;
+    const len = Math.hypot(dx, dy);
+    const max = TUNING.line.maxLegLength;
+    if (len > max) {
+      endX = start.x + (dx / len) * max;
+      endY = start.y + (dy / len) * max;
+    }
+    endX = clamp(endX, 6, WORLD_WIDTH - 6);
+    endY = clamp(endY, 6, WORLD_HEIGHT - 6);
 
-    if (coordsLength(coords) < TUNING.route.minLength) return;
-
-    const slid = this.slidePath(coords);
-    if (coordsLength(slid.coords) < TUNING.route.minLength) return;
-
-    const existing = routeId !== 0 ? this.routeById(routeId) : undefined;
-    if (existing && !existing.dead) {
-      existing.extendWith(slid.coords);
-      this.retarget(existing);
-      this.events.shotLanded.push({ x: existing.tipX, y: existing.tipY });
-      return;
+    // Aim assist: a release near a found flower means that flower.
+    const near = this.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
+    if (near) {
+      endX = near.x;
+      endY = near.y;
     }
 
-    const route = this.createRoute(slid.coords);
-    if (route) {
-      this.dispatchBuilders(route, coordsLength(slid.coords));
-      this.events.shotLanded.push({ x: route.tipX, y: route.tipY });
+    const raw = straight(start.x, start.y, endX, endY);
+    const slid = this.slidePath(raw);
+    const coords = slid.coords;
+    const tipX = coords[coords.length - 2] ?? start.x;
+    const tipY = coords[coords.length - 1] ?? start.y;
+    const target = this.nearestPatchTo(tipX, tipY, TUNING.patch.reachRadius, true);
+
+    return {
+      start,
+      coords,
+      target,
+      contact: slid.contact,
+      valid: coordsLength(coords) >= TUNING.route.minLength,
+    };
+  }
+
+  /** Lays a planned line. Returns the route it created or carried on. */
+  commitLine(plan: LinePlan): Route | null {
+    if (!plan.valid) return null;
+    if (plan.contact) this.events.deflected.push(plan.contact);
+
+    const tipX = plan.coords[plan.coords.length - 2] ?? plan.start.x;
+    const tipY = plan.coords[plan.coords.length - 1] ?? plan.start.y;
+
+    const carried = plan.start.route;
+    if (carried && !carried.dead) {
+      carried.extendWith(plan.coords);
+      this.retarget(carried);
+      this.jobless.delete(carried.id);
+      this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!carried.target });
+      return carried;
     }
+
+    // A second line to a flower that already has one replaces it rather than
+    // spending a slot on a duplicate.
+    if (plan.target) {
+      const existing = this.routeTargeting(plan.target);
+      if (existing) this.killRoute(existing);
+    }
+
+    const route = this.createRoute(plan.coords);
+    if (!route) return null;
+    this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!route.target });
+    return route;
+  }
+
+  /**
+   * A tap on a found flower: a beeline to it from the hive.
+   *
+   * The shortcut for the obvious case, and the thing a first-time player will
+   * try before they discover dragging. A flower behind a hedge still needs a
+   * dragged route round it — the straight line slides and stops short, which
+   * is the maze teaching itself.
+   */
+  tapFlower(x: number, y: number): Route | null {
+    const patch = this.nearestPatchTo(x, y, TUNING.line.tapFlowerRadius, true);
+    if (!patch) return null;
+    const plan = this.planLine(
+      { x: this.hiveX, y: this.hiveY, route: null },
+      patch.x,
+      patch.y,
+    );
+    return this.commitLine(plan);
+  }
+
+  /**
+   * A tap on a wasp. Returns true if it landed.
+   *
+   * Direct and instant, because a wasp is the one thing on the board that
+   * wants a reaction rather than a plan. The throw it replaces went through the
+   * dial and a shot in flight, and by the time it arrived the wasp was usually
+   * somewhere else.
+   */
+  swatAt(x: number, y: number): boolean {
+    const wasp = this.nearestWaspTo(x, y, TUNING.swat.radius);
+    if (!wasp) return false;
+    const downed = wasp.hit(1 + this.modifiers.beeDamageBonus);
+    this.events.struck.push({ x: wasp.x, y: wasp.y });
+    if (downed) {
+      const bounty = Math.round(dayQuota(this.day) * TUNING.swat.bountyShare);
+      this.honey += bounty;
+      this.events.deposited += bounty;
+      this.events.waspDown.push({ x: wasp.x, y: wasp.y, bounty });
+      this.waspsDowned += 1;
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------- raids
@@ -1386,7 +1244,9 @@ export class Field {
       const downed = target.hit(1);
       this.events.struck.push({ x: target.x, y: target.y });
       if (downed) {
-        this.events.waspDown.push({ x: target.x, y: target.y });
+        // Guards earn no bounty: the bounty is for the player's own swat.
+        this.events.waspDown.push({ x: target.x, y: target.y, bounty: 0 });
+        this.waspsDowned += 1;
         break;
       }
     }
@@ -1588,20 +1448,6 @@ export class Field {
     this.beesLost += 1;
   }
 
-  /** The nearest buyer to a point, for aim assist and targeting. */
-  nearestBuyerTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Buyer | null {
-    let best: Buyer | null = null;
-    let bestDist = limit;
-    for (const buyer of this.buyers) {
-      const dist = Math.hypot(buyer.x - x, buyer.y - y);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = buyer;
-      }
-    }
-    return best;
-  }
-
   /** The nearest wasp worth pointing a route at. */
   nearestWaspTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Wasp | null {
     let best: Wasp | null = null;
@@ -1634,29 +1480,6 @@ export class Field {
   }
 
   /**
-   * Cuts a route back to where it now meets a wall.
-   *
-   * Checked every step rather than only on commit, because the wind bows a
-   * drawn line sideways over time — a route threaded neatly down a corridor at
-   * dawn can be pressed into the hedge beside it by mid-afternoon. That
-   * interaction was free: wind and the maze were built for their own reasons
-   * and produce it between them, and it is the best pressure in the game
-   * because it makes a route something you maintain rather than something you
-   * place.
-   */
-  private deflectRouteAtWalls(route: Route): void {
-    const hit = this.blockedDistance(route.poly, route.liveLength);
-    if (!Number.isFinite(hit) || hit >= route.liveLength) return;
-
-    const live = truncateCoords(route.poly, route.liveLength);
-    const slid = slideAlongWalls(live, this.maze);
-    if (!slid.contact) return;
-
-    this.events.deflected.push(slid.contact);
-    route.deflectTo(slid.coords);
-  }
-
-  /**
    * Slides a path the player just drew clear of the walls it pressed into.
    *
    * Shared with the commit path so a freshly drawn line and a wind-bowed one
@@ -1667,10 +1490,23 @@ export class Field {
     return slideAlongWalls(coords, this.maze);
   }
 
+  /** Most bees one line carries today. */
+  get crewSize(): number {
+    return TUNING.route.beesPerLine + this.modifiers.extraCrew;
+  }
+
+  /** Bees with no line to fly, waiting at the hive for the player. */
+  get idleBees(): number {
+    let idle = 0;
+    for (const bee of this.bees) if (bee.state === 'idle') idle += 1;
+    return idle;
+  }
+
   private assignBee(bee: Bee): void {
     let best: Route | null = null;
+    const crew = this.crewSize;
     for (const route of this.routes) {
-      if (route.dead) continue;
+      if (route.dead || route.beeCount >= crew) continue;
       if (!best || route.beeCount < best.beeCount) best = route;
     }
 
@@ -1691,9 +1527,8 @@ export class Field {
     best.nextDepartAt = departAt + TUNING.bee.departIntervalSeconds;
     bee.timer = departAt - this.elapsed;
 
-    // Queue first even when the slot is free, so a sell line always loads
-    // through the one place that knows how to check the combs. Two departure
-    // paths meant a bee could leave for a buyer with nothing to sell.
+    // Queue first even when the slot is free, so every departure goes through
+    // the one spacing rule and the swarm leaves as a stream.
     bee.state = 'queued';
   }
 
@@ -1761,11 +1596,6 @@ export class Field {
           if (!route || route.dead) {
             this.releaseBee(bee);
             bee.state = 'idle';
-          } else if (route.targetBuyer && !this.loadForSale(bee)) {
-            // Nothing in the combs to carry. Wait at the hive rather than fly
-            // an empty errand: a sell line running on nothing looks identical
-            // to one that is working.
-            bee.timer = 0.4;
           } else {
             bee.s = 0;
             bee.state = 'outbound';
@@ -1833,26 +1663,7 @@ export class Field {
           bee.s += speed * dt;
           if (bee.s >= route.liveLength) {
             bee.s = route.liveLength;
-            const buyer = route.targetBuyer;
-            if (buyer) {
-              if (bee.payload === 'honey' && bee.carrying > 0 && route.reachesBuyer()) {
-                // The sale happens here, at whatever the price is this instant
-                // — which is what makes the long line to the Apothecary a
-                // gamble rather than a calculation. The money is not banked
-                // yet; the bee still has to carry it home.
-                const paid = buyer.sell(bee.carrying);
-                this.events.sold.push({
-                  x: buyer.x,
-                  y: buyer.y,
-                  honey: bee.carrying,
-                  money: paid,
-                  buyer: buyer.id,
-                });
-                bee.carrying = paid;
-                bee.payload = 'money';
-              }
-              bee.state = 'inbound';
-            } else if (route.reachesTarget()) {
+            if (route.reachesTarget()) {
               bee.state = 'collect';
               bee.timer = TUNING.bee.collectSeconds;
             } else {
@@ -1905,67 +1716,16 @@ export class Field {
     }
   }
 
-  /**
-   * Loads a bee with honey for a sell run, if there is any to take.
-   *
-   * Returns false when the hive is empty, and the caller holds the bee at home
-   * rather than sending it. A sell line that keeps dispatching empty bees looks
-   * exactly like a working one and pays nothing, which is the most confusing
-   * possible failure — better that the line visibly idles until there is honey
-   * to move.
-   */
-  private loadForSale(bee: Bee): boolean {
-    if (this.honey <= 0) return false;
-    // Capped by a share of *capacity* as well as by a flat amount, so the
-    // number of trips it takes to empty a full hive stays roughly constant
-    // however far the Honey Store is pushed — and so no single bee ever
-    // shoulders the whole store. See `TUNING.honey.maxTripShare`.
-    const load = Math.min(
-      Math.max(TUNING.honey.perSellTrip, this.honeyCap * TUNING.honey.maxTripShare),
-      this.honey,
-    );
-    this.honey -= load;
-    bee.carrying = load;
-    bee.payload = 'honey';
-    return true;
-  }
-
   /** Banks whatever a bee came home with. */
   private bank(bee: Bee): void {
-    if (bee.carrying <= 0) return;
-    if (bee.payload === 'money') {
-      this.money += bee.carrying;
-      this.events.banked += bee.carrying;
-      bee.carrying = 0;
-      bee.payload = 'nectar';
-      return;
-    }
-    // Honey coming home — either nectar from a flower, or a sell load whose
-    // route died under it before it reached the buyer. Both go in the combs.
-    this.deposit(bee);
-    bee.payload = 'nectar';
-  }
-
-  private deposit(bee: Bee): void {
     if (bee.carrying <= 0) return;
     // Comb Wax is paid here, at the hive, rather than at the flower: what it
     // buys is a better yield from honey the swarm has actually brought home,
     // so nectar lost to a wasp on the way back is not paid for.
     const gained =
       bee.carrying * this.stats.honeyMultiplier * (1 + this.modifiers.honeyBonus);
-
-    // A full hive spills, and the spill is the whole reason selling is urgent.
-    // Bees keep flying and keep arriving — stopping them would turn a brimming
-    // hive into a quiet pause instead of an emergency — but everything past the
-    // brim is money walking out of the door, and the HUD says so.
-    const room = Math.max(0, this.honeyCap - this.honey);
-    const stored = Math.min(gained, room);
-    const lost = gained - stored;
-
-    this.honey += stored;
-    this.spilled += lost;
-    this.events.deposited += bee.carrying;
-    if (lost > 0) this.events.spilled += lost;
+    this.honey += gained;
+    this.events.deposited += gained;
     bee.carrying = 0;
   }
 
@@ -2018,30 +1778,7 @@ export class Field {
   /** Returns and clears this frame's events. */
   drainEvents(): FieldEvents {
     const out = this.events;
-    this.events = {
-      collected: [],
-      deposited: 0,
-      scattered: [],
-      dispatched: 0,
-      deflected: [],
-      found: [],
-      raidWarning: null,
-      struck: [],
-      waspDown: [],
-      stolen: 0,
-      raidLanded: 0,
-      shotLanded: [],
-      stoodDown: [],
-      replaced: [],
-      wilted: [],
-      bloomed: [],
-      spilled: 0,
-      sold: [],
-      banked: 0,
-      beesLost: [],
-      pollenLost: [],
-      droppedBuyer: null,
-    };
+    this.events = emptyEvents();
     return out;
   }
 
@@ -2060,6 +1797,23 @@ export class Field {
       collecting,
     };
   }
+}
+
+/**
+ * A straight path as evenly spaced points.
+ *
+ * Spaced rather than two endpoints because the wall slide works step by step:
+ * a two-point line that crossed a hedge would be judged as one long step and
+ * lose everything past the wall instead of running along it.
+ */
+function straight(ax: number, ay: number, bx: number, by: number): number[] {
+  const len = Math.hypot(bx - ax, by - ay);
+  const steps = Math.max(1, Math.ceil(len / TUNING.route.pointSpacing));
+  const out: number[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    out.push(ax + ((bx - ax) * i) / steps, ay + ((by - ay) * i) / steps);
+  }
+  return out;
 }
 
 function clamp(value: number, min: number, max: number): number {

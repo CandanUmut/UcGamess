@@ -80,6 +80,17 @@ export interface BeeTuning {
 export interface RouteTuning {
   maxCount: number;
   /**
+   * Most bees one line can carry at once.
+   *
+   * The rule that makes lines matter. Without it the swarm's whole output
+   * went down whichever single line existed, so one line and five lines
+   * earned the same and the game played itself once anything was laid —
+   * measured, novice and expert bots finished level. With a crew cap, bees
+   * beyond what the lines can carry wait at the hive, visibly, and laying the
+   * next line is how you put them to work.
+   */
+  beesPerLine: number;
+  /**
    * Strength gained each time a bee completes a delivery on the route.
    *
    * This is what makes a path mean something. A line the swarm has actually
@@ -279,61 +290,63 @@ export interface RaidTuning {
   hornetShare: number;
 }
 
-export interface BuyerTuning {
-  name: string;
-  /** Money paid per unit of honey at this buyer's own normal. */
-  basePrice: number;
-  /** Seconds for the slow wave and the fast one. */
-  periodSlow: number;
-  periodFast: number;
-  /** How far each wave moves the price, as a fraction of base. */
-  swingSlow: number;
-  swingFast: number;
-  /** Price floor, as a fraction of base. Nobody ever pays nothing. */
-  floorFraction: number;
-  /** How much one unit of honey sold here depresses the price. */
-  saturationPerHoney: number;
-  /** How fast that wears off, per second. */
-  saturationRecovery: number;
-  maxSaturation: number;
-  /** Board position, in design units. */
-  x: number;
-  y: number;
-  tint: number;
+/**
+ * The line gesture: press on the hive (or the end of a line), drag, let go.
+ *
+ * A straight "beeline" from where the press started to where the finger is,
+ * previewed while dragging exactly as it will be laid — sliding along any
+ * hedge it runs into. It replaced the dial, which measured at 69% of play time
+ * spent waiting for an arrow to come round.
+ */
+export interface LineTuning {
+  /** How near the hive a press has to land to start a line from it. */
+  startRadius: number;
+  /** How near a line's end a press has to land to carry that line on. */
+  tipGrabRadius: number;
+  /** The longest single leg. Long enough to cross most of the board. */
+  maxLegLength: number;
+  /** How near a tap has to land on a flower to lay a line straight to it. */
+  tapFlowerRadius: number;
+  /** Seconds a line lingers after its flower runs dry, so its bees get home. */
+  retireSeconds: number;
 }
 
-export interface AimTuning {
-  /** Radians per second the arrow sweeps on day one. */
-  spinBase: number;
-  /** How much faster it starts each day. */
-  spinPerDay: number;
-  /** How much it accelerates per second the dial is left open. */
-  spinAccel: number;
-  spinMaxUnused?: never;
-  maxSpin: number;
-  /** How fast a fired path travels, in px per second. */
-  launchSpeed: number;
-  /** How far one shot may travel before it runs out. */
-  maxFlightLength: number;
-  /** Drawn size of the dial. */
-  dialRadius: number;
-  /** How near a tap has to land to carry on from a line's end. */
-  tipTapRadius: number;
+/** Tapping a wasp. */
+export interface SwatTuning {
+  /** How near a tap has to land to hit. Generous: the target moves. */
+  radius: number;
+  /** Honey paid for a wasp downed, as a share of the day's quota. */
+  bountyShare: number;
 }
 
-export interface HoneyTuning {
-  /** Hive capacity at level zero. Deliberately small — see the runtime note. */
-  baseCap: number;
-  /** Most honey one bee carries to a buyer per trip, as a flat amount. */
-  perSellTrip: number;
-  /** And as a fraction of hive capacity, so trips-to-empty stays constant. */
-  maxTripShare: number;
-  /** How near a route's tip must be for its bees to trade. */
-  reachRadius: number;
-  /** How near a drag has to end to count as aimed at a buyer. */
-  aimRadius: number;
-  /** How much board a depot lights at dawn. Not the same as its reach. */
-  revealRadius: number;
+/**
+ * Golden blooms: short-lived, valuable flowers that open during the day.
+ *
+ * The one thing on the board that asks for a reaction rather than a plan. They
+ * are marked as special and come with a visible countdown, which is what keeps
+ * them from reading as the ordinary board rewriting itself.
+ */
+export interface GoldenTuning {
+  startDay: number;
+  firstAt: number;
+  minGap: number;
+  maxGap: number;
+  /** Seconds a golden bloom stays open. */
+  window: number;
+  /** Pollen in one, as a fraction of an ordinary flower's. */
+  poolShare: number;
+}
+
+/** The end of a day. */
+export interface ScoreTuning {
+  /**
+   * Honey paid for each second of daylight left when the meadow is cleared,
+   * as a share of the day's quota. Rewards clearing fast rather than waiting.
+   */
+  sunsetBonusPerSecond: number;
+  /** Stars: one for the quota, two and three for these multiples of it. */
+  twoStars: number;
+  threeStars: number;
 }
 
 export interface MazeTuning {
@@ -377,37 +390,14 @@ export interface MazeTuning {
 }
 
 export interface ItemShopTuning {
-  /** Cards on the table each night. */
+  /** Cards offered between days. */
   offerCount: number;
-  /** Price at day one, by rarity. Grows by `costGrowth` per day. */
-  cost: { common: number; rare: number; epic: number };
-  costGrowth: number;
-  costCapMultiplier: number;
-  rerollBase: number;
-  /** Multiplier on the reroll price for each reroll already taken tonight. */
-  rerollGrowth: number;
   epicChanceBase: number;
   epicChancePerDay: number;
   epicChanceMax: number;
   rareChance: number;
-}
-
-/**
- * Level ceiling for an upgrade that is not meant to have one.
- *
- * A finite number rather than `Infinity` on purpose: it flows through save
- * clamping, cost tables and display, and every one of those has an awkward
- * edge with a non-finite value. At the growth rates here, level 400 costs
- * more honey than exists, so it is a ceiling in the same sense that the
- * speed of light is a speed limit.
- */
-export const UNCAPPED = 400;
-
-export interface UpgradeTuning {
-  base: number;
-  growth: number;
-  levels: number;
-  perLevel: number;
+  /** Added to the rare and epic chances for each star the day earned. */
+  perStar: number;
 }
 
 export interface Tuning {
@@ -417,9 +407,10 @@ export interface Tuning {
   patch: PatchTuning;
   day: DayTuning;
   wasp: WaspTuning;
-  buyers: Record<'market' | 'apothecary', BuyerTuning>;
-  aim: AimTuning;
-  honey: HoneyTuning;
+  line: LineTuning;
+  swat: SwatTuning;
+  golden: GoldenTuning;
+  score: ScoreTuning;
   raid: RaidTuning;
   fog: {
     cellSize: number;
@@ -432,11 +423,6 @@ export interface Tuning {
   };
   maze: MazeTuning;
   items: ItemShopTuning;
-  upgrades: Record<
-    'swarmSize' | 'beeSpeed' | 'routeSlots' | 'bloom' | 'honeyStore' | 'combWax',
-    UpgradeTuning
-  >;
-  offline: { baseCapHoney: number; baseWindowHours: number; honeyPerHour: number };
   ads: {
     rewardedSwarmBoostFromDay: number;
     rewardedSwarmBoostMultiplier: number;
@@ -472,7 +458,7 @@ export const TUNING: Tuning = {
     // linearly to `fog.edgeReveal` at the rim, so a flower only counts as found
     // inside about 0.79 of this — at 340 that was 267px, and day one's band
     // reaches 300, so half the time the tutorial had nothing to point at.
-    sightRadius: 420,
+    sightRadius: 600,
   },
 
   bee: {
@@ -521,7 +507,8 @@ export const TUNING: Tuning = {
   // produces for ~15s and dies at ~22s: about half the hand traffic, and the
   // grace window between "stopped paying" and "gone" grows from 3s to 7s.
   route: {
-    maxCount: 5,
+    maxCount: 3,
+    beesPerLine: 8,
     // Tuned as an equilibrium, not as a count. A route carrying D deliveries a
     // second settles at D x perDelivery / decay, and reaches it with a time
     // constant of 1/decay — about ten seconds.
@@ -583,8 +570,8 @@ export const TUNING: Tuning = {
     // it just has to be gone and got rather than parked on.
     // The throughput per flower is untouched — only how long it lasts — so the
     // 25-35 second figure above still holds for the flower you are on.
-    basePool: 180,
-    poolPerDay: 55,
+    basePool: 40,
+    poolPerDay: 7,
     radiusPerDay: 95,
     distanceYieldNear: 260,
     distanceYieldFar: 1000,
@@ -605,48 +592,23 @@ export const TUNING: Tuning = {
   },
 
   day: {
-    baseSeconds: 45,
-    secondsPerDay: 5,
-    maxSeconds: 90,
+    baseSeconds: 40,
+    secondsPerDay: 4,
+    maxSeconds: 75,
     nightScreenMinSeconds: 6,
-    // Re-tuned against the deeper board. Distance-yield and beaten-in roads
-    // both raise throughput, so the old table left a competent player at three
-    // to four times quota through the whole midgame — no day after the first
-    // was ever in doubt, which is the opposite of what the table is for.
+    // Fitted with the playtest harness (src/playtest), against three simulated
+    // players who differ in reaction time, aim and — most of all — how often
+    // they look up from the bees to act.
     //
-    // Set against a simulated player who actually *spends* what the run earns.
-    // The first attempt was tuned against one that banked more than half its
-    // honey, which made the late game look unclearable when the real problem
-    // was that the model was not buying anything. A player who under-invests
-    // now stalls around day eight, which is the meta-progression working.
-    //
-    // The tail climbs slightly steeper than before, and Comb Wax is why.
-    //
-    // Quotas compound and a player's power did not: every line used to max out
-    // around day ten and hand over its full effect at once, after which the
-    // curve simply ran away. An uncapped economic line changes the shape — a
-    // player who keeps buying keeps earning more, so the quota can keep asking
-    // for more, and the run ends when the player stops keeping up rather than
-    // when the shop runs out.
-    //
-    // Days one to seven are untouched. That is where a new player decides
-    // whether to keep going, and none of this problem lives there.
-    // Provisional, and lower than they were. **Not properly calibrated.**
-    //
-    // The previous table was fitted to a player who drew a line instantly.
-    // Firing shots takes real time — a scripted player lays four to nine lines
-    // in a whole day where drawing laid a dozen — so the same board yields far
-    // less, and against the old figures a measured run scored between 0.0 and
-    // 0.4 of quota on every day past the third. That is unplayable rather than
-    // hard.
-    //
-    // These are roughly half the old ones, which makes an ordinary day
-    // winnable while the mechanic settles. They are a stopgap and should be
-    // re-derived once the dial's own numbers stop moving: a probe that plays
-    // the dial badly measures the probe, not the game, and mine plays it
-    // badly. The first real run is worth more than another afternoon of this.
-    quotas: [70, 110, 150, 195, 240, 290, 340, 395, 450, 505, 560, 620],
-    quotaGrowthAfterTable: 1.06,
+    // The shape is the point: day one is a guaranteed win that clears in about
+    // twenty seconds; a first-timer's run ends around day four to six, a
+    // regular's around day nine to twelve, and a practised player keeps going
+    // well past that. Every day after the second is meant to be in doubt for
+    // somebody. Re-run `pnpm --filter @ucgames/game-beeline playtest` after
+    // changing anything that moves honey, and refit here if the per-day table
+    // drifts.
+    quotas: [80, 170, 280, 390, 480, 580, 680, 790, 910, 1030, 1160, 1300],
+    quotaGrowthAfterTable: 1.11,
   },
 
   // Shifted a day later than the original schedule to make room for brambles on
@@ -680,7 +642,7 @@ export const TUNING: Tuning = {
    * costs bees and choosing what to answer is the game.
    */
   wasp: {
-    startDay: 7,
+    startDay: 4,
     safeRadius: 160,
     interceptRadius: 34,
     scatterSeconds: 1.2,
@@ -881,78 +843,16 @@ export const TUNING: Tuning = {
    * pool for the one item they wanted.
    */
   items: {
-    offerCount: 4,
-    cost: { common: 110, rare: 240, epic: 480 },
-    costGrowth: 1.15,
-    costCapMultiplier: 9,
-    rerollBase: 60,
-    rerollGrowth: 1.9,
-    // Epics stay a rare thrill early and become a real possibility deep in a
-    // run, which is what keeps a long run producing things you have not seen.
-    epicChanceBase: 0.04,
+    // Three, the classic draft. Four made the choice a scan rather than a
+    // decision, and five was the old shop's wall of buttons again.
+    offerCount: 3,
+    epicChanceBase: 0.05,
     epicChancePerDay: 0.012,
-    epicChanceMax: 0.2,
+    epicChanceMax: 0.22,
     rareChance: 0.3,
-  },
-
-  /**
-   * Every level is a thing to want on the night screen.
-   *
-   * The ceiling used to be 12,556 honey to buy literally everything, against a
-   * board that supplied 40,000 by day ten. A player was maxed out with money
-   * left over and a night screen full of nothing — the report was "maxed out on
-   * almost everything, lots of resource, not many places to spend it", and the
-   * arithmetic agreed.
-   *
-   * The lines are extended rather than a sixth line invented. More *kinds* of
-   * upgrade would mean more to read on a screen the player is trying to get
-   * through quickly; more levels of a line they already understand costs no
-   * comprehension at all, and the geometric price curve does the rest — the top
-   * levels of swarm size are the honey sink that the late game was missing.
-   *
-   * Growth rates are unchanged. They were tuned against the shape of the run,
-   * and it is the length of the ladder that was wrong, not its steepness.
-   */
-  upgrades: {
-    swarmSize: { base: 80, growth: 1.55, levels: 12, perLevel: 6 },
-    beeSpeed: { base: 100, growth: 1.6, levels: 9, perLevel: 16 },
-    // 12s → 26s of grace. Still the flagship: the only upgrade that directly
-    // buys relief from the core pressure rather than more throughput.
-    // The flagship. Priced steeply and worth every coin: a line is how much of
-    // the board you can hold at once, and the board always blooms faster than
-    // the lines you own.
-    routeSlots: { base: 260, growth: 1.75, levels: 5, perLevel: 1 },
-    bloom: { base: 120, growth: 1.8, levels: 6, perLevel: 1 },
-    // Seven, not more: the offline window can only ever earn
-    // `baseWindowHours * honeyPerHour` = 2,400, and a cap above that is a
-    // ceiling nothing reaches. Level seven puts it at 2,300, just under. There
-    // is a test that fails the moment this line raises a ceiling that does not
-    // bind, which is what caught an eighth level being added here.
-    // Re-sized when this line stopped being an offline curiosity and became
-    // the hive's actual capacity: 220 at level zero to 710 at the top, so the
-    // pressure to sell eases across a run without ever going away.
-    honeyStore: { base: 70, growth: 1.5, levels: 7, perLevel: 70 },
-    /**
-     * The line that never runs out.
-     *
-     * Every other upgrade has to stop somewhere, and not for want of
-     * generosity: unbounded bee speed breaks a fixed-timestep simulation,
-     * unbounded route hold deletes the decay the whole game is built on, and
-     * unbounded swarm size is a GameObject per bee. Those are real ceilings.
-     *
-     * So the ladder that has no ceiling is an economic one. Comb Wax pays a
-     * flat percentage more honey per delivery, which is safe to grow forever
-     * — it scales income, and the quota curve compounds too, so the two can
-     * chase each other indefinitely without anything in the simulation
-     * having to move faster or hold more.
-     *
-     * It is what makes the night screen never say "nothing to buy". A player
-     * who has capped everything else still has somewhere to put a day's
-     * honey, and still watches a number go up for putting it there. The
-     * growth rate is gentler than the rest (1.28) precisely so it stays a
-     * purchase rather than becoming a monument.
-     */
-    combWax: { base: 90, growth: 1.28, levels: UNCAPPED, perLevel: 0.04 },
+    // A three-star day is worth playing for: it tilts the next draft toward
+    // the good cards.
+    perStar: 0.06,
   },
 
   /**
@@ -967,206 +867,32 @@ export const TUNING: Tuning = {
    * The window stays fixed and generous; it exists only to stop a device clock
    * set years forward from paying out years of honey.
    */
-  /**
-   * The two buyers.
-   *
-   * The Market is close, steady and cheap; the Apothecary is further, wild and
-   * pays much better at its peaks. That contrast is the decision — not "which
-   * number is bigger right now", but whether a longer run to a swinging price
-   * is worth the trips it costs, with a hive filling up while you decide.
-   *
-   * ### Why they sit near the hive
-   *
-   * They used to be planted on the far side of the board, on the theory that
-   * selling should be a real journey. It was the wrong theory. Selling is not
-   * the reward at the end of the loop, it is the *pressure inside* it — the
-   * hive is small, it spills, and the answer to a brimming hive has to be
-   * reachable inside the few seconds before honey starts walking out of the
-   * door. A depot four corridors away turned that pressure into a chore, and
-   * turned the near-versus-far decision into a foregone one, because at that
-   * range both buyers were simply *far*.
-   *
-   * Both now stand in the hive's front yard — the wall-free block in the
-   * bottom-left corner, see `maze.yard`. Money Inc. sits directly below the
-   * hive and Honey Inc. out to its left, both a few seconds' flight away.
-   *
-   * That leaves **the price doing nearly all the work**, and it is worth being
-   * honest that this is a narrower decision than the one the two buyers were
-   * built for. When the shops stood on opposite edges of the board, choosing
-   * between them was half geography: a long line to a volatile price was a real
-   * commitment of bees and of road. Side by side in the yard, the flights are
-   * within a fifth of each other and the question collapses to "steady, or
-   * swinging?".
-   *
-   * That question is still a question — the Apothecary's swings are wide enough
-   * that catching one is the best thing that happens in a day — but if the
-   * market ever stops feeling like a decision, this is the reason, and the fix
-   * is in the swings and the saturation rather than in moving the buildings
-   * back out.
-   *
-   * Both sit on maze cell centres inside the yard, so a shop never lands inside
-   * a wall and the yard never grows one around it. Flower placement blocks the
-   * whole yard — see `Field.randomPatchPosition`.
-   */
-  buyers: {
-    market: {
-      // The studio's own drawings name the two shops, so the fiction follows
-      // the art rather than the other way round.
-      name: 'Money Inc.',
-      basePrice: 1,
-      // A slow wave you can plan around and a small fast one so the number is
-      // never quite still. Steady enough to be the answer when the hive is
-      // brimming and there is no time to gamble.
-      periodSlow: 60,
-      periodFast: 26,
-      swingSlow: 0.2,
-      swingFast: 0.08,
-      floorFraction: 0.45,
-      saturationPerHoney: 0.0011,
-      saturationRecovery: 0.055,
-      maxSaturation: 0.45,
-      // Directly below the hive, a short drop straight down. A sell line here
-      // is barely a corridor — cheap enough to keep standing all day, which is
-      // exactly what the safe buyer should be.
-      x: 266,
-      y: 648,
-      // Read off the drawing, so the price tag, the highlight and the building
-      // are obviously one thing.
-      tint: 0xf221b5,
-    },
-    apothecary: {
-      name: 'Honey Inc.',
-      // Half again as much at its own normal, and it swings by more than half
-      // that on top. Catching a peak here is the best thing that happens in a
-      // day; arriving at a trough after a long flight is the worst.
-      basePrice: 1.5,
-      periodSlow: 42,
-      periodFast: 18,
-      swingSlow: 0.34,
-      swingFast: 0.16,
-      floorFraction: 0.35,
-      // Saturates faster as well as harder: the Apothecary is a specialist, not
-      // a warehouse, and dumping a whole hive into one is meant to be the wrong
-      // shape of sale even when the price is good.
-      saturationPerHoney: 0.0019,
-      saturationRecovery: 0.045,
-      maxSaturation: 0.55,
-      // Out to the left of the hive, hard against the board's edge. Still the
-      // longer flight of the two, though the margin is now small — see the
-      // note on `buyers` about what carries the decision instead.
-      x: 92,
-      y: 516,
-      tint: 0x1fd6c4,
-    },
+  line: {
+    startRadius: 110,
+    tipGrabRadius: 70,
+    maxLegLength: 1100,
+    tapFlowerRadius: 70,
+    retireSeconds: 0.6,
   },
 
-  /**
-   * The dial.
-   *
-   * The most important numbers in the game: this mechanic is the whole verb
-   * now. Base spin is slow enough that a first-time player lands a shot on
-   * their second or third try, and the acceleration is what turns it from a
-   * button into a skill — leave the dial open and the arrow runs away from you.
-   */
-  aim: {
-    spinBase: 1.25,
-    // A little faster every day, so a run that lasts is visibly harder to aim
-    // rather than merely more expensive.
-    spinPerDay: 0.1,
-    // The half of "gitgide hızlanmalı" that lives inside a single shot:
-    // hesitate for three seconds and the arrow is spinning half again as fast.
-    spinAccel: 0.5,
-    maxSpin: 4.2,
-    // Slow enough to stop.
-    //
-    // At 640 a shot crossed a third of the board in seven tenths of a second,
-    // which is faster than a person can decide to tap — so "tap to stop it"
-    // was a promise the game could not keep and every shot ran its full
-    // length. A quarter of that speed makes the stop a real control, and it is
-    // what turns the whole mechanic from a slot machine into aiming.
-    launchSpeed: 210,
-    // About a third of the board per shot, so crossing it is three or four
-    // well-aimed shots and a corner is something you go round deliberately.
-    // Half the board. Measured: at 520 a throw fired from the hive could not
-    // reach a wasp that had just crossed the rim, so the answer to a raid was
-    // "wait until it is nearly on top of you" — which is not an answer, it is
-    // a countdown. The player can stop a shot at any point, so a longer flight
-    // costs them nothing they did not choose.
-    maxFlightLength: 700,
-    dialRadius: 58,
-    // Generous, because this is a phone game and the tip of a line is the most
-    // important thing on the board to be able to hit.
-    tipTapRadius: 190,
+  swat: {
+    radius: 64,
+    bountyShare: 0.04,
   },
 
-  /**
-   * The hive's own stores.
-   *
-   * The cap is deliberately small — a little over three full bee-loads' worth
-   * of trips — and it is now actually enforced: a full hive **spills**, and
-   * every second it spills is money walking away. That is the pressure the
-   * whole selling loop hangs on. A generous cap would mean gathering all day
-   * and selling once at dusk, which is not a loop, it is two chores.
-   */
-  honey: {
-    baseCap: 220,
-    /**
-     * The smallest useful load, in absolute honey.
-     *
-     * A floor rather than the cap it used to be — see `maxTripShare`. It only
-     * binds at the very bottom of the Honey Store, and it is there so a small
-     * hive is emptied by bees rather than by dribbles.
-     */
-    perSellTrip: 26,
-    /**
-     * What one bee shoulders, as a fraction of hive capacity.
-     *
-     * A flat load failed at both ends. Near the brim a sale read as one bee
-     * teleporting a chunk of the day's work to a depot instead of as a swarm
-     * working a line; and once the hive was low, a single bee took *all* of it,
-     * which is the same thing seen from the other side. Worse, a flat load does
-     * not scale — every Honey Store level added trips to empty the hive, so the
-     * upgrade meant to relieve pressure quietly made selling more tedious.
-     *
-     * A share fixes both. Roughly nine trips to empty a full hive at any
-     * capacity, so a sell line is always a standing commitment of several bees
-     * over several seconds, and the Honey Store buys headroom rather than
-     * homework.
-     */
-    maxTripShare: 0.11,
-    /**
-     * How near a route's tip must be for its bees to trade.
-     *
-     * Small on purpose. This ring is drawn on the board, and a depot sitting in
-     * the play area with an 88-unit disc around it covered most of a corridor —
-     * two landmarks reading as craters. The aim assist below is what makes the
-     * ring easy to hit; the ring itself only has to say "here".
-     */
-    reachRadius: 54,
-    /**
-     * How near a drag has to end to count as aimed at a buyer.
-     *
-     * Deliberately under `patch.aimAssistRadius`, and a nearer flower now beats
-     * a buyer outright (see `RouteIntent.applyAimAssist`). While the depots
-     * were exiled to the far edge nothing else was ever within reach of one, so
-     * an unconditional win cost nothing; near the hive it would quietly steal
-     * drags meant for the flowers next door.
-     */
-    aimRadius: 104,
-    /**
-     * How much ground a depot lights at dawn.
-     *
-     * Buyers are landmarks, not discoveries, so their ground is never fogged.
-     * Kept separate from `reachRadius` because it answers a different question
-     * — shrinking the ring you have to touch should not also dim the board.
-     */
-    revealRadius: 190,
+  golden: {
+    startDay: 2,
+    firstAt: 9,
+    minGap: 14,
+    maxGap: 24,
+    window: 7,
+    poolShare: 0.5,
   },
 
-  offline: {
-    baseCapHoney: 200,
-    baseWindowHours: 12,
-    honeyPerHour: 200,
+  score: {
+    sunsetBonusPerSecond: 0.02,
+    twoStars: 1.4,
+    threeStars: 1.9,
   },
 
   ads: {

@@ -87,34 +87,24 @@ pieces still waiting on hand-drawn art.
 
   These three replaced the last of the Phaser primitives on the board.
 
-### shop-market.png, shop-apothecary.png
+### bee-flap.png, wasp-flap.png
 
-- **File:** `sprites/shop-market.png`
-- **File:** `sprites/shop-apothecary.png`
-- **Source:** Original work — drawn by hand by the studio (`left.png`,
-  `right.png`)
-- **Author:** Umut Candan (UC Games)
+- **File:** `sprites/bee-flap.png`
+- **File:** `sprites/wasp-flap.png`
+- **Source:** Derived from the studio's own `bee.png` and `wasp.png` (above)
+- **Author:** Umut Candan (UC Games); frames cut by script
 - **License:** Owned outright by the studio; all rights reserved
-- **URL:** n/a — not published anywhere; the source files live outside the repo
-- **Added:** 2026-08-26
-- **AI:** No. Drawn by hand.
-- **Notes:** Two honey pots with their labels — a magenta **Money Inc.** and a
-  cyan **Honey Inc.** Processed by the same route as `bee.png`: the white
-  background flood-filled inward from the border rather than keyed out by
-  colour, edges feathered to partial alpha, then trimmed from the 2278x3223
-  source to the drawing itself and scaled to 224px wide.
-
-  Both are then **quantised to a 64-colour palette**, which takes the pair from
-  99 KB to 13 KB with no visible change. That is worth doing here and nowhere
-  else on the board: these are flat blocks of colour with hard outlines, which
-  is the one thing a small palette reproduces exactly. The photographic ground
-  tile would fall apart under the same treatment.
-
-  The **shop names set the fiction**, rather than the other way round — the
-  buyers were "The Market" and "The Apothecary" until these arrived. Their two
-  colours are read off the drawings into `TUNING.buyers[*].tint`, so a building,
-  its price tag and its HUD row are visibly one thing; a redrawn shop in a
-  different colour wants that value updated to match.
+- **URL:** n/a
+- **Added:** 2026-09-24
+- **AI:** No new artwork. The frames are mechanical edits of the hand drawings:
+  no pixels were generated.
+- **Notes:** Four-frame wing beats, one frame per 96x83 (bee) or 72x43 (wasp)
+  cell, laid out horizontally. Each frame is the original drawing split at
+  the wing roots: the wing half is squashed toward the body (100%, 62%, 20%,
+  62% of its height) with a faint 85% copy behind it for motion smear, and
+  the body half is drawn over the top, dropping one pixel on the down-beat.
+  Rebuild them from the stills rather than editing by hand, so a redrawn bee
+  gets its wing beat for free.
 
 ### pollen.png
 

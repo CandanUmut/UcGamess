@@ -5,7 +5,6 @@ import { Fog } from './Fog.ts';
 import { Patch } from './Patch.ts';
 import { Route } from './Route.ts';
 import { featuresForDay, patchesForDay } from '../game/DayCycle.ts';
-import { applyAimAssist } from '../game/RouteIntent.ts';
 
 function newDay(day: number): Field {
   const field = new Field();
@@ -108,18 +107,15 @@ describe('discovery', () => {
     // Snapping onto something invisible hands back the information the dark was
     // there to take away, and reads as the game aiming for the player.
     const field = newDay(1);
-    // Placed clear of both buyers on purpose: a drag that ends near one of
-    // them is a sell line, and would snap for a completely different and
-    // perfectly correct reason.
     field.patches = [new Patch(420, 300, 500)];
     const hidden = field.patches[0]!;
     hidden.discovered = false;
 
-    const assisted = applyAimAssist(field, [400, 300, 410, 300]);
-    expect(assisted.connected).toBe(false);
+    const from = { x: 300, y: 300, route: null };
+    expect(field.planLine(from, 330, 300).target).toBeNull();
 
     hidden.discovered = true;
-    expect(applyAimAssist(field, [400, 300, 410, 300]).connected).toBe(true);
+    expect(field.planLine(from, 330, 300).target).toBe(hidden);
   });
 
   it('still lets bees collect from a flower the player has not seen', () => {
@@ -167,10 +163,14 @@ describe('discovery', () => {
     expect(route!.target).not.toBe(hidden);
     expect(route!.target).toBeNull();
 
-    // And the moment the player has actually found it, it is a target again.
-    hidden.discovered = true;
-    field.step(1 / 60);
-    expect(route!.target).toBe(hidden);
+    // And it does not linger pointing at nothing: a line whose flower is done
+    // retires itself, so the slot comes back without a chore.
+    for (let i = 0; i < 60; i += 1) field.step(1 / 60);
+    expect(route!.dead).toBe(true);
+    // (With nothing known left alive the hidden flower *is* then revealed —
+    // on purpose, by `revealLastFlowers`, so the last flower of a day is never
+    // lost in the mist. What must never happen is the old line quietly
+    // re-aiming at it, which is what is checked above.)
   });
 });
 
@@ -375,7 +375,9 @@ describe('paths mature', () => {
 
     for (let i = 0; i < 60 * 10; i += 1) field.step(1 / 60);
 
-    expect(route!.strength).toBeGreaterThan(0.4);
+    // One line carries a crew, not the whole swarm, so a road beats in more
+    // slowly than it did — but it does beat in.
+    expect(route!.strength).toBeGreaterThan(0.1);
     expect(field.honey).toBeGreaterThan(0);
   });
 });

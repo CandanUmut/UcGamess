@@ -3,32 +3,26 @@ import type { DayFeatures } from './DayCycle.ts';
 import type { Glyph } from '../render/itemIcons.ts';
 
 /**
- * The run's item shop.
+ * Boons: what the hive becomes over a run.
  *
- * Replaces the one-slot provision shelf, which the playtest summed up as
- * "spending money don't feel like it adds much value". It was right, and the
- * reason was structural rather than a matter of prices: a provision was spent
- * on a single day and then gone, so no purchase ever changed how the hive
- * played. The night screen asked the same small question fifteen times.
+ * Between days the player is offered three and picks one. That is the whole
+ * between-day screen. It replaced a coin economy with two shops side by side —
+ * six permanent upgrades and a random shelf of items, a reroll button and a
+ * rewarded-ad row — which read as a spreadsheet and took longer to get through
+ * than the day it followed.
  *
- * Items answer it the way a roguelite does:
- *
- *  - **Four random offers a night**, drawn from a pool of fifteen. What is on
- *    the table is itself part of the run, so two runs diverge.
- *  - **They stack and they last the run.** Buying is building something. By day
- *    ten a hive with three Guard Bees and a Propolis Seal is a fortress and one
- *    with Swift Wings and Royal Jelly is a courier service, and neither was
- *    planned at the start.
- *  - **Reroll, at an escalating price.** The out when the table has nothing for
- *    you, priced so that it is a real choice rather than a free spin.
- *
- * The permanent upgrades stay exactly as they were, a smaller meta track that
- * survives a failed run. That split is the point: upgrades are what you keep,
- * items are what this run turned out to be.
+ * What survived is what made the shelf interesting: picks **stack and last the
+ * run**, the offer is random and weighted by rarity, and an offer never
+ * includes something that would do nothing tomorrow. What went is the maths:
+ * there is no price, so there is nothing to save up for and no wrong time to
+ * take the card you want.
  */
 export type ItemId =
+  | 'moreLines'
+  | 'broodChamber'
+  | 'wildflowers'
+  | 'wideLanes'
   | 'scoutBees'
-  | 'waxedTrails'
   | 'earlyRise'
   | 'richLoam'
   | 'swiftWings'
@@ -52,6 +46,12 @@ export type Rarity = 'common' | 'rare' | 'epic';
  * table entry, not a new branch somewhere inside `beginDay`.
  */
 export interface RunModifiers {
+  /** Extra lines the hive can hold at once. */
+  extraLines: number;
+  /** Extra flowers on the board each day. */
+  extraPatches: number;
+  /** Extra bees each line can carry. */
+  extraCrew: number;
   /** Multiplier on every flower's starting pollen. */
   patchPool: number;
   /** Radius the map is lit to around the hive at dawn. 0 for none. */
@@ -62,8 +62,6 @@ export interface RunModifiers {
   waspIntercept: number;
   /** Multiplier on the safe radius around the hive. */
   waspSafeRadius: number;
-  /** Extra seconds of route hold, on top of the upgrade. */
-  extraHoldSeconds: number;
   /** Extra seconds on the day's clock. */
   extraDaySeconds: number;
   /** Extra damage every bee strike does to a wasp. */
@@ -84,12 +82,14 @@ export interface RunModifiers {
 
 export function noModifiers(): RunModifiers {
   return {
+    extraLines: 0,
+    extraPatches: 0,
+    extraCrew: 0,
     patchPool: 1,
     scoutRadius: 0,
     mazeOpennessBonus: 0,
     waspIntercept: 1,
     waspSafeRadius: 1,
-    extraHoldSeconds: 0,
     extraDaySeconds: 0,
     beeDamageBonus: 0,
     stealResist: 1,
@@ -124,6 +124,59 @@ export interface ItemInfo {
 }
 
 export const ITEMS: Record<ItemId, ItemInfo> = {
+  // ---- the three that change the shape of a day, rarer than the rest
+  moreLines: {
+    id: 'moreLines',
+    glyph: 'comb',
+    iconTint: 0xf0c14b,
+    name: 'More Lines',
+    rarity: 'rare',
+    effect: '+1 line at once',
+    // The flagship. A line is how much of the board you can hold at once, and
+    // the board always has more flowers than you have lines.
+    relevant: () => true,
+    apply: (m) => {
+      m.extraLines += 1;
+    },
+  },
+  broodChamber: {
+    id: 'broodChamber',
+    glyph: 'crown',
+    iconTint: 0xffe08a,
+    name: 'Brood Chamber',
+    rarity: 'common',
+    effect: '+4 bees',
+    relevant: () => true,
+    apply: (m) => {
+      m.extraBees += 4;
+    },
+  },
+  wildflowers: {
+    id: 'wildflowers',
+    glyph: 'leaf',
+    iconTint: 0xe2669a,
+    name: 'Wildflowers',
+    rarity: 'rare',
+    effect: '+1 flower a day',
+    relevant: () => true,
+    apply: (m) => {
+      m.extraPatches += 1;
+    },
+  },
+
+  wideLanes: {
+    id: 'wideLanes',
+    glyph: 'wing',
+    iconTint: 0xffd166,
+    name: 'Wide Lanes',
+    rarity: 'rare',
+    effect: '+2 bees per line',
+    relevant: () => true,
+    apply: (m) => {
+      m.extraCrew += 2;
+    },
+  },
+
   // ---- common: the everyday levers, useful on any board
   scoutBees: {
     id: 'scoutBees',
@@ -137,18 +190,6 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     // is worth nothing, and selling a player a second one would be a lie.
     apply: (m) => {
       m.scoutRadius = Math.max(m.scoutRadius, TUNING.fog.scoutRadius);
-    },
-  },
-  waxedTrails: {
-    id: 'waxedTrails',
-    glyph: 'comb',
-    iconTint: 0xf0c14b,
-    name: 'Waxed Trails',
-    rarity: 'common',
-    effect: '+5s route hold',
-    relevant: () => true,
-    apply: (m) => {
-      m.extraHoldSeconds += 5;
     },
   },
   earlyRise: {
@@ -313,34 +354,6 @@ export function isItemId(value: unknown): value is ItemId {
 }
 
 /**
- * What an item costs on a given day.
- *
- * Priced by rarity and grown with the day, so the shop stays a decision. A flat
- * price is a real choice on day three and a rounding error on day fifteen, at
- * which point the row stops asking anything.
- */
-export function itemCost(id: ItemId, day: number): number {
-  const base = TUNING.items.cost[ITEMS[id].rarity];
-  const growth = Math.min(
-    Math.pow(TUNING.items.costGrowth, Math.max(0, day - 1)),
-    TUNING.items.costCapMultiplier,
-  );
-  return Math.round(base * growth);
-}
-
-/** What the next reroll costs, having already rerolled `rerolls` times tonight. */
-export function rerollCost(day: number, rerolls: number): number {
-  const { rerollBase, rerollGrowth, costGrowth, costCapMultiplier } = TUNING.items;
-  const dayGrowth = Math.min(
-    Math.pow(costGrowth, Math.max(0, day - 1)),
-    costCapMultiplier,
-  );
-  return Math.round(
-    rerollBase * dayGrowth * Math.pow(rerollGrowth, Math.max(0, rerolls)),
-  );
-}
-
-/**
  * Draws the night's offers.
  *
  * Weighted by rarity, with the epic chance climbing across the run so that a
@@ -352,15 +365,16 @@ export function rollOffer(
   day: number,
   features: DayFeatures,
   random: () => number = Math.random,
+  stars = 0,
 ): ItemId[] {
   const pool = ITEM_IDS.filter((id) => ITEMS[id].relevant(features));
   const chosen: ItemId[] = [];
   const count = Math.min(TUNING.items.offerCount, pool.length);
 
   while (chosen.length < count) {
-    const rarity = rollRarity(day, random);
+    const rarity = rollRarity(day, random, stars);
     // Falls back to the whole remaining pool rather than rerolling the rarity,
-    // so an early day with no epics in it still fills all four slots instead of
+    // so an early day with no epics in it still fills every slot instead of
     // looping. The weights decide the *shape* of the row, never whether it
     // exists.
     const byRarity = pool.filter(
@@ -375,12 +389,15 @@ export function rollOffer(
   return chosen;
 }
 
-function rollRarity(day: number, random: () => number): Rarity {
-  const { epicChanceBase, epicChancePerDay, epicChanceMax, rareChance } = TUNING.items;
-  const epic = Math.min(epicChanceMax, epicChanceBase + epicChancePerDay * (day - 1));
+function rollRarity(day: number, random: () => number, stars: number): Rarity {
+  const { epicChanceBase, epicChancePerDay, epicChanceMax, rareChance, perStar } =
+    TUNING.items;
+  const bonus = Math.max(0, stars - 1) * perStar;
+  const epic =
+    Math.min(epicChanceMax, epicChanceBase + epicChancePerDay * (day - 1)) + bonus;
   const roll = random();
   if (roll < epic) return 'epic';
-  if (roll < epic + rareChance) return 'rare';
+  if (roll < epic + rareChance + bonus) return 'rare';
   return 'common';
 }
 
