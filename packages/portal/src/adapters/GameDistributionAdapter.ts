@@ -101,6 +101,8 @@ export class GameDistributionAdapter implements PortalAdapter {
   gameplayStart(): void {}
   gameplayStop(): void {}
 
+  happyTime(): void {}
+
   async commercialBreak(): Promise<void> {
     const sdk = this.sdk;
     if (!sdk || !this.ready) return;

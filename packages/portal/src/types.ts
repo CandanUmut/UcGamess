@@ -53,6 +53,12 @@ export interface PortalAdapter {
   /** BCP-47 locale for the player, e.g. "en-US". Falls back to the browser. */
   getLocale(): string;
 
+  /**
+   * A moment of celebration — a level cleared with stars, a world finished.
+   * CrazyGames uses it to time its own celebration UI; elsewhere it is a no-op.
+   */
+  happyTime(): void;
+
   /** Whether an ad blocker was detected during `init()`. */
   isAdBlocked(): boolean;
 
@@ -60,7 +66,7 @@ export interface PortalAdapter {
   readonly name: PortalName;
 }
 
-export type PortalName = 'local' | 'crazygames' | 'poki' | 'gamedistribution';
+export type PortalName = 'local' | 'crazygames' | 'poki' | 'gamedistribution' | 'web';
 
 export interface AdapterOptions {
   /**

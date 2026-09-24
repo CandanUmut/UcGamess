@@ -100,6 +100,9 @@ export class PokiAdapter implements PortalAdapter {
     this.sdk?.gameplayStop();
   }
 
+  /** Poki has no equivalent; celebration is the game's own business there. */
+  happyTime(): void {}
+
   async commercialBreak(): Promise<void> {
     const sdk = this.sdk;
     if (!sdk) return;
