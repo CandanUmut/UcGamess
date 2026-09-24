@@ -2257,12 +2257,12 @@ and places the stars: one star at the lower quartile of a first-timer in world
 one and of a regular after it; two at a regular's typical score; three at what
 a practised player gets. The current table gives, per attempt:
 
-|                               | world 1 | worlds 2-3                              |
-| ----------------------------- | ------- | --------------------------------------- |
-| first-timer passes            | ~85%    | rarely (they do not route round hedges) |
-| regular passes                | ~100%   | ~90%                                    |
-| regular gets 3 stars          | ~25%    | ~15%                                    |
-| practised player gets 3 stars | ~45%    | ~65%                                    |
+|                               | world 1 | worlds 2-3                                   |
+| ----------------------------- | ------- | -------------------------------------------- |
+| first-timer passes            | ~90%    | rarely (the bot does not route round hedges) |
+| regular passes                | ~100%   | ~90%                                         |
+| regular gets 3 stars          | ~20%    | ~15%                                         |
+| practised player gets 3 stars | ~40%    | ~60%                                         |
 
 The harness also found that its "expert" routed worse than the novice on some
 mazes — it always steered by corridors, even when a straight drag would slide
