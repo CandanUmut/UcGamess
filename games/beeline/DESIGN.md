@@ -2177,7 +2177,14 @@ Presentation: a title screen that plays the verb (a line drawing itself, bees
 streaming along it) behind one pulsing button; solid pressable buttons; a HUD
 on dark plates with a counting honey total, star marks on the quota bar and a
 daylight dial; wing-beat animations for bees and wasps cut from the studio's
-own drawings; a tutorial hand that drags from the hive to a flower.
+own drawings; a tutorial hand that drags from the hive to a flower; a comic
+"pow" burst on every swat; a golden bloom with its own flower and turning rays;
+and a drop of honey that flies from the hive into the counter on every
+delivery, so the swarm below and the score above read as one thing. The new
+sprites are drawn by `tools/sprites.mjs` in the studio's style, and four new
+sounds are synthesised like the rest (zero bytes): a swat thwack, a pop when a
+line lands on a flower, a sparkle for a golden bloom, and a fanfare for a
+cleared meadow.
 
 ### Tuning that matters
 
@@ -2191,7 +2198,10 @@ own drawings; a tutorial hand that drags from the hive to a flower.
 ### Still to verify
 
 - With real people. The harness's personas are assumptions.
-- Audio for the swat reuses the wasp buzz; a proper "thwack" would help.
+- In the headless browser used for screenshots (SwiftShader), a flower that
+  first appears mid-day sometimes renders with rectangular pieces missing for
+  a moment. It is not the fog (revealing the map does not change it) and it
+  has not been seen on a real GPU yet — check on a real device.
 - The golden bloom's position can land far into a maze on later days, where
   its seven seconds are not enough to route to it. That may be fine (it is a
   bonus), or it may want to prefer reachable cells.

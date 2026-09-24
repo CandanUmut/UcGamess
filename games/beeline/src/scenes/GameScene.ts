@@ -16,7 +16,7 @@ import {
 } from '../sim/Field.ts';
 import type { Route } from '../sim/Route.ts';
 import { type SamplePoint } from '../sim/polyline.ts';
-import { createGeneratedTextures, loadShippedTextures } from '../render/textures.ts';
+import { createGeneratedTextures, loadShippedTextures, TEX } from '../render/textures.ts';
 import { createItemIcons } from '../render/itemIcons.ts';
 import { createBeeRenderer, type BeeRenderer } from '../render/BeeRenderer.ts';
 import { RouteRenderer } from '../render/RouteRenderer.ts';
@@ -655,6 +655,7 @@ export class GameScene extends BaseGameplayScene {
         18 + Math.min(14, amount),
       );
       this.sfx.playNote('sell', 0.16);
+      this.flyDrop();
     }
 
     for (const hit of events.scattered) this.juice.scatter(hit.x, hit.y);
@@ -686,7 +687,7 @@ export class GameScene extends BaseGameplayScene {
       this.fieldRenderer.splat(hit.x, hit.y);
       this.cameras.main.shake(70, 0.0025);
     }
-    if (events.struck.length > 0) this.sfx.playVaried('wasp', 0.3, 520);
+    if (events.struck.length > 0) this.sfx.playVaried('swat', 0.55, 180);
 
     for (const down of events.waspDown) {
       for (let i = 0; i < 14; i += 1) this.juice.scatter(down.x, down.y);
@@ -720,6 +721,7 @@ export class GameScene extends BaseGameplayScene {
 
     for (const spot of events.lineLaid) {
       for (let i = 0; i < 6; i += 1) this.juice.collect(spot.x, spot.y, 2);
+      if (spot.connected) this.sfx.playVaried('pop', 0.35, 150);
     }
 
     for (const spot of events.drained) {
@@ -734,7 +736,7 @@ export class GameScene extends BaseGameplayScene {
 
     for (const bloom of events.bloomed) {
       for (let i = 0; i < 12; i += 1) this.juice.collect(bloom.x, bloom.y, 4);
-      this.sfx.play('upgrade', 0.3);
+      this.sfx.play('sparkle', 0.45);
       this.hud.showBanner('A golden bloom! Quick — it closes soon', '#ffe38a');
     }
 
@@ -750,9 +752,49 @@ export class GameScene extends BaseGameplayScene {
         `Meadow cleared! +${sunsetBonus(this.day, this.secondsLeft)} sunset bonus`,
         '#ffe38a',
       );
-      this.sfx.play('upgrade', 0.5);
+      this.sfx.play('fanfare', 0.55);
       this.cameras.main.flash(260, 255, 230, 150);
     }
+  }
+
+  /**
+   * A drop of honey flies from the hive up into the counter.
+   *
+   * Ties the two halves of the reward together: the swarm is doing it down
+   * there, and it is adding up up here. In screen space, since the counter is
+   * part of the HUD and the HUD does not scroll.
+   */
+  private flyDrop(): void {
+    if (!this.textures.exists(TEX.honeyDrop) || !this.hud) return;
+    const cam = this.cameras.main;
+    const from = {
+      x: this.field.hiveX - cam.scrollX,
+      y: this.field.hiveY - cam.scrollY - 30,
+    };
+    const to = this.hud.honeyAnchor;
+    const drop = this.add
+      .image(from.x, from.y, TEX.honeyDrop)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.hud + 2)
+      .setDisplaySize(26, 26);
+    // Up first, then over — an arc reads as thrown, a straight line as slid.
+    const lift = 60 + Math.random() * 40;
+    this.tweens.addCounter({
+      from: 0,
+      to: 1,
+      duration: 620,
+      ease: 'Sine.easeIn',
+      onUpdate: (tween) => {
+        const t = tween.getValue() ?? 0;
+        const x = from.x + (to.x - from.x) * t;
+        const y = from.y + (to.y - from.y) * t - Math.sin(Math.PI * t) * lift;
+        drop.setPosition(x, y).setRotation(t * 1.5);
+      },
+      onComplete: () => {
+        drop.destroy();
+        this.hud.catchDrop();
+      },
+    });
   }
 
   private scheduleBuzz(): void {

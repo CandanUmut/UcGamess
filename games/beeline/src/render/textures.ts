@@ -34,6 +34,9 @@ export const TEX = {
   /** A pollen grain, for the moment a bee picks one up. */
   pollen: 'pollen',
   beeFlap: 'bee-flap',
+  swatBurst: 'swat-burst',
+  flowerGolden: 'flower-golden',
+  honeyDrop: 'honey-drop',
   waspFlap: 'wasp-flap',
 } as const;
 
@@ -57,6 +60,8 @@ export const TEX_FILES: ReadonlyArray<readonly [key: string, path: string]> = [
   [TEX.pollen, 'sprites/pollen.png'],
   [TEX.sparkle, 'particles/sparkle.png'],
   [TEX.glint, 'particles/glint.png'],
+  [TEX.flowerGolden, 'sprites/flower-golden.png'],
+  [TEX.honeyDrop, 'sprites/honey-drop.png'],
   ...FLOWER_TEX.map((key) => [key, `sprites/${key}.png`] as const),
 ];
 
@@ -190,8 +195,11 @@ export function loadShippedTextures(scene: Phaser.Scene): void {
 
 /** Frames in a wing-beat sheet. */
 export const FLAP_FRAMES = 4;
+/** Frames in the swat burst. */
+export const BURST_FRAMES = 6;
 
 const FLAP_SHEETS: ReadonlyArray<readonly [string, string, number, number]> = [
   [TEX.beeFlap, 'sprites/bee-flap.png', 96, 83],
   [TEX.waspFlap, 'sprites/wasp-flap.png', 72, 43],
+  [TEX.swatBurst, 'sprites/swat-burst.png', 128, 128],
 ];

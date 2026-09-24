@@ -27,6 +27,8 @@ export class Hud {
   private readonly root: Phaser.GameObjects.Container;
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly honeyText: Phaser.GameObjects.Text;
+  /** A drop of honey beside the count, where the flying drops land. */
+  private readonly dropIcon: Phaser.GameObjects.Image | null;
   private readonly quotaText: Phaser.GameObjects.Text;
   private readonly dayText: Phaser.GameObjects.Text;
   private readonly timerText: Phaser.GameObjects.Text;
@@ -78,8 +80,13 @@ export class Hud {
       .setAlpha(0)
       .setWordWrapWidth(900);
 
+    this.dropIcon = scene.textures.exists('honey-drop')
+      ? scene.add.image(0, 0, 'honey-drop').setDisplaySize(30, 30)
+      : null;
+
     this.root.add([
       this.gfx,
+      ...(this.dropIcon ? [this.dropIcon] : []),
       this.dayText,
       this.timerText,
       this.honeyText,
@@ -134,6 +141,10 @@ export class Hud {
     this.shown += (this.target - this.shown) * k;
     if (Math.abs(this.target - this.shown) < 0.5) this.shown = this.target;
     this.honeyText.setText(Math.floor(this.shown).toLocaleString('en-US'));
+    this.dropIcon?.setPosition(
+      this.honeyText.x - this.honeyText.displayWidth / 2 - 22,
+      this.honeyText.y,
+    );
 
     const met = honey >= quota;
     this.quotaText.setText(met ? 'quota met — keep going for stars' : `goal ${quota}`);
@@ -233,6 +244,26 @@ export class Hud {
     g.beginPath();
     g.arc(sx, sy, 26, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * this.dayFraction, false);
     g.strokePath();
+  }
+
+  /** Where a flying drop of honey should land, in screen space. */
+  get honeyAnchor(): { x: number; y: number } {
+    const target = this.dropIcon ?? this.honeyText;
+    return { x: target.x, y: target.y };
+  }
+
+  /** A drop just landed in the counter. */
+  catchDrop(): void {
+    if (!this.dropIcon) return;
+    this.scene.tweens.killTweensOf(this.dropIcon);
+    this.dropIcon.setDisplaySize(40, 40);
+    this.scene.tweens.add({
+      targets: this.dropIcon,
+      displayWidth: 30,
+      displayHeight: 30,
+      duration: 180,
+      ease: 'Quad.easeOut',
+    });
   }
 
   private punch(target: Phaser.GameObjects.Text, scale: number): void {

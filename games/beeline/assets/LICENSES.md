@@ -103,8 +103,28 @@ pieces still waiting on hand-drawn art.
   the wing roots: the wing half is squashed toward the body (100%, 62%, 20%,
   62% of its height) with a faint 85% copy behind it for motion smear, and
   the body half is drawn over the top, dropping one pixel on the down-beat.
-  Rebuild them from the stills rather than editing by hand, so a redrawn bee
-  gets its wing beat for free.
+  Rebuilt by `tools/sprites.mjs` from the stills, so a redrawn bee gets its
+  wing beat for free.
+
+### swat-burst.png, flower-golden.png, honey-drop.png
+
+- **File:** `sprites/swat-burst.png`
+- **File:** `sprites/flower-golden.png`
+- **File:** `sprites/honey-drop.png`
+- **Source:** Original work — drawn in code by `tools/sprites.mjs` (Canvas 2D)
+- **Author:** UC Games
+- **License:** Owned outright by the studio; all rights reserved
+- **URL:** n/a
+- **Added:** 2026-09-24
+- **AI:** No generative tools. The shapes are plain Canvas 2D paths written by
+  hand in the script; the look (flat fills, a dark double outline with a
+  slight offset) imitates the studio's hand drawings so the board stays one
+  style.
+- **Notes:** `swat-burst.png` is six 128x128 frames of a comic "pow" star
+  that grows, holds and breaks into flecks; `flower-golden.png` is the golden
+  bloom (96px, same size as the other flowers); `honey-drop.png` is the 48px
+  drop used by the HUD and the drops that fly into it. Re-run
+  `node games/beeline/tools/sprites.mjs` rather than editing the PNGs.
 
 ### pollen.png
 

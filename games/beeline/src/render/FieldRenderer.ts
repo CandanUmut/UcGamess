@@ -6,7 +6,7 @@ import {
   WORLD_HEIGHT as PLAYFIELD_HEIGHT,
   WORLD_WIDTH as PLAYFIELD_WIDTH,
 } from '../sim/Field.ts';
-import { FLAP_FRAMES, FLOWER_TEX, TEX } from './textures.ts';
+import { BURST_FRAMES, FLAP_FRAMES, FLOWER_TEX, TEX } from './textures.ts';
 
 /**
  * Overrides for the two flowers that are not ordinary.
@@ -143,6 +143,8 @@ export class FieldRenderer {
   private hivePing = 0;
   /** Splats where a swat landed, fading. */
   private splats: Array<{ x: number; y: number; life: number }> = [];
+  /** The pow bursts, one image each, pooled. */
+  private bursts: Array<{ sprite: Phaser.GameObjects.Image; life: number }> = [];
   /** Field time at the last frame, for a delta the draw call is not given. */
   private lastFieldTime = 0;
   /** One per wasp, reused. There are never more than a couple. */
@@ -280,10 +282,44 @@ export class FieldRenderer {
 
   /** A swat landed here. */
   splat(x: number, y: number): void {
+    if (this.scene.textures.exists(TEX.swatBurst)) {
+      let slot = this.bursts.find((b) => b.life <= 0);
+      if (!slot) {
+        slot = {
+          sprite: this.scene.add
+            .image(0, 0, TEX.swatBurst, 0)
+            .setDepth(this.labelDepth - 0.4),
+          life: 0,
+        };
+        this.bursts.push(slot);
+      }
+      slot.life = 1;
+      slot.sprite
+        .setPosition(x, y)
+        .setVisible(true)
+        .setRotation(Math.random() * Math.PI * 2)
+        .setScale(0.9 + Math.random() * 0.3);
+      return;
+    }
     this.splats.push({ x, y, life: 1 });
   }
 
   private drawSplats(dt: number): void {
+    // The pow burst plays through its frames in about a third of a second.
+    for (const burst of this.bursts) {
+      if (burst.life <= 0) continue;
+      burst.life -= dt * 3;
+      if (burst.life <= 0) {
+        burst.sprite.setVisible(false);
+        continue;
+      }
+      const frame = Math.min(
+        BURST_FRAMES - 1,
+        Math.floor((1 - burst.life) * BURST_FRAMES),
+      );
+      burst.sprite.setFrame(frame);
+    }
+
     const g = this.hiveGfx;
     g.clear();
     for (const s of this.splats) {
@@ -332,6 +368,18 @@ export class FieldRenderer {
       // lands on when it opens.
       g.fillStyle(0xffd23f, 0.22 + 0.12 * Math.sin(time * 6));
       g.fillCircle(patch.x, patch.y, radius * 2.1);
+      // Slowly turning rays, the way a coin glints in a cartoon.
+      const rays = 12;
+      for (let i = 0; i < rays; i += 1) {
+        const a = time * 0.6 + (i / rays) * Math.PI * 2;
+        const inner = radius * 1.35;
+        const outer = radius * (2.3 + 0.25 * Math.sin(time * 5 + i));
+        g.lineStyle(i % 2 ? 3 : 5, 0xffe38a, 0.55);
+        g.beginPath();
+        g.moveTo(patch.x + Math.cos(a) * inner, patch.y + Math.sin(a) * inner);
+        g.lineTo(patch.x + Math.cos(a) * outer, patch.y + Math.sin(a) * outer);
+        g.strokePath();
+      }
     }
 
     if (patch.kind === 'rich' && patch.alive) {
@@ -462,7 +510,10 @@ export class FieldRenderer {
         continue;
       }
 
-      const key = FLOWER_TEX[patch.species % FLOWER_TEX.length] ?? FLOWER_TEX[0];
+      const key =
+        patch.kind === 'night' && this.scene.textures.exists(TEX.flowerGolden)
+          ? TEX.flowerGolden
+          : (FLOWER_TEX[patch.species % FLOWER_TEX.length] ?? FLOWER_TEX[0]);
       if (key && flower.texture.key !== key && this.scene.textures.exists(key)) {
         flower.setTexture(key);
       }
@@ -813,6 +864,8 @@ export class FieldRenderer {
     this.hiveSprite?.destroy();
     this.hiveGfx.destroy();
     this.plateGfx.destroy();
+    for (const burst of this.bursts) burst.sprite.destroy();
+    this.bursts = [];
     for (const wasp of this.wasps) wasp.destroy();
     this.wasps = [];
     for (const bar of this.wallBars) bar.destroy();
