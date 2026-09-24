@@ -5,6 +5,7 @@ import {
   LEVELS_PER_WORLD,
   WORLDS,
   isUnlocked,
+  totalStars,
   type LevelDef,
 } from '../game/Levels.ts';
 import { coerceSave, SAVE_KEY } from '../game/SaveState.ts';
@@ -252,7 +253,7 @@ export class LevelDoneScene extends BaseScene {
   }
 
   /** Petals falling across the card. */
-  private confetti(count: number): void {
+  private confetti(count: number, depth = 0): void {
     const view = viewRect(this);
     for (let i = 0; i < count; i += 1) {
       const colour = PETALS[i % PETALS.length] ?? 0xffd23f;
@@ -264,7 +265,8 @@ export class LevelDoneScene extends BaseScene {
           7,
           colour,
         )
-        .setAngle(Math.random() * 360);
+        .setAngle(Math.random() * 360)
+        .setDepth(depth);
       this.tweens.add({
         targets: petal,
         y: view.bottom + 30,
@@ -311,18 +313,22 @@ export class LevelDoneScene extends BaseScene {
       this.text(`${info.name} complete!`, DESIGN_WIDTH / 2, 420, 44, '#ffe38a', true),
     );
     const nextWorld = WORLDS[world + 1];
+    const save = coerceSave(this.context.save.get<unknown>(SAVE_KEY, null));
+    const have = totalStars(save.levelStars);
     layer.add(
       this.text(
-        nextWorld
-          ? `Next: ${nextWorld.name} — opens at ${nextWorld.starsToOpen} ★`
-          : 'You filled the whole honeycomb. The hive is proud of you.',
+        !nextWorld
+          ? 'You filled the whole honeycomb. The hive is proud of you.'
+          : have >= nextWorld.starsToOpen
+            ? `${nextWorld.name} is open!`
+            : `Next: ${nextWorld.name} — opens at ${nextWorld.starsToOpen} ★ (you have ${have})`,
         DESIGN_WIDTH / 2,
         470,
-        20,
+        22,
         '#e9dcc0',
       ),
     );
-    this.confetti(90);
+    this.confetti(90, 55);
 
     const close = new Button(this, {
       x: DESIGN_WIDTH / 2,
