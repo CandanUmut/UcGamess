@@ -22,6 +22,8 @@ export abstract class BaseGameplayScene extends BaseScene {
   protected timestep!: FixedTimestep;
 
   private gameplayActive = false;
+  /** Play was running when the window lost focus, so focus should bring it back. */
+  private stoppedByBlur = false;
 
   /** Override to change simulation rate. Default 60 Hz. */
   protected timestepOptions(): FixedTimestepOptions {
@@ -39,11 +41,11 @@ export abstract class BaseGameplayScene extends BaseScene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.stopGameplay, this);
 
     // Tab-away is a pause the scene system does not see.
-    this.game.events.on(Phaser.Core.Events.BLUR, this.stopGameplay, this);
-    this.game.events.on(Phaser.Core.Events.FOCUS, this.onResume, this);
+    this.game.events.on(Phaser.Core.Events.BLUR, this.onBlur, this);
+    this.game.events.on(Phaser.Core.Events.FOCUS, this.onFocus, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.game.events.off(Phaser.Core.Events.BLUR, this.stopGameplay, this);
-      this.game.events.off(Phaser.Core.Events.FOCUS, this.onResume, this);
+      this.game.events.off(Phaser.Core.Events.BLUR, this.onBlur, this);
+      this.game.events.off(Phaser.Core.Events.FOCUS, this.onFocus, this);
     });
   }
 
@@ -90,6 +92,8 @@ export abstract class BaseGameplayScene extends BaseScene {
 
   /** Signals the portal and metrics that play has stopped. Safe to call twice. */
   protected stopGameplay(): void {
+    // A game stopping play itself takes over from any blur that came first.
+    this.stoppedByBlur = false;
     if (!this.gameplayActive) return;
     this.gameplayActive = false;
     this.context.portal.gameplayStop();
@@ -143,5 +147,24 @@ export abstract class BaseGameplayScene extends BaseScene {
 
   private onResume(): void {
     this.timestep.reset();
+  }
+
+  private onBlur(): void {
+    const wasActive = this.gameplayActive;
+    this.stopGameplay();
+    this.stoppedByBlur = wasActive;
+  }
+
+  /**
+   * Focus returning restarts play that blur stopped — and only that. Without
+   * this, clicking outside a portal iframe froze the game until the scene next
+   * called `startGameplay()` itself. A scene the game paused in the meantime
+   * (a pause menu opened on blur, say) is left for the game to resume.
+   */
+  private onFocus(): void {
+    this.timestep.reset();
+    const restart = this.stoppedByBlur && this.scene.isActive();
+    this.stoppedByBlur = false;
+    if (restart) this.startGameplay();
   }
 }
