@@ -15,7 +15,8 @@ const RICH_PATCH_DAY = 9;
  * announcement always names the day the size actually changes.
  */
 const SECOND_WASP_DAY = TUNING.wasp.startDay + TUNING.raid.sizeEveryDays;
-const NIGHT_BLOOM_DAY = 12;
+/** Nothing new arrives here — it is a milestone the forecast can point at. */
+const WILD_DAY = 12;
 
 /** Seconds a given day runs for. Grows early, then flattens. */
 export function dayLength(day: number): number {
@@ -155,7 +156,8 @@ export function featuresForDay(day: number): DayFeatures {
     wave: waveForDay(day),
     mazeOpenness: mazeOpennessForDay(day),
     richPatches: day >= RICH_PATCH_DAY,
-    nightBloom: day >= NIGHT_BLOOM_DAY,
+    // Golden blooms, from the day the tuning says.
+    nightBloom: day >= TUNING.golden.startDay,
   };
 }
 
@@ -176,7 +178,7 @@ export function dayIntroduction(day: number): string | null {
       return 'Drones. Fast, fragile, and they come for your bees.';
     case TUNING.raid.hornetFromDay:
       return 'Hornets. Slow, tough, and costly to ignore.';
-    case NIGHT_BLOOM_DAY:
+    case WILD_DAY:
       return 'The meadow runs wild. More flowers, further out.';
     default:
       return null;
@@ -219,7 +221,7 @@ export function forecastFor(day: number): string[] {
     );
   }
   if (features.richPatches) out.push('rich blooms');
-  if (features.nightBloom) out.push('night bloom');
+  if (features.nightBloom) out.push('golden blooms');
 
   return out;
 }
@@ -240,7 +242,8 @@ function unlockName(day: number): string | null {
   if (day === SECOND_WASP_DAY) return 'bigger waves';
   if (day === TUNING.raid.droneFromDay) return 'drones';
   if (day === TUNING.raid.hornetFromDay) return 'hornets';
-  if (day === NIGHT_BLOOM_DAY) return 'night bloom';
+  if (day === TUNING.golden.startDay) return 'golden blooms';
+  if (day === WILD_DAY) return 'a wilder meadow';
   return null;
 }
 

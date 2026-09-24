@@ -117,6 +117,10 @@ export interface FieldEvents {
   beesLost: Array<{ x: number; y: number }>;
   /** Every ordinary flower on the board is dry. The day can end early. */
   cleared: boolean;
+  /** The Busy Hive multiplier reached a new whole tier (2..max). */
+  comboUp: number;
+  /** The multiplier slipped below a whole tier. */
+  comboDown: number;
 }
 
 function emptyEvents(): FieldEvents {
@@ -139,6 +143,8 @@ function emptyEvents(): FieldEvents {
     bloomed: [],
     beesLost: [],
     cleared: false,
+    comboUp: 0,
+    comboDown: 0,
   };
 }
 
@@ -242,6 +248,15 @@ export class Field {
   private nextGoldenAt = Number.POSITIVE_INFINITY;
   /** Set once the cleared event has fired today, so it fires once. */
   private clearedAnnounced = false;
+  /**
+   * The Busy Hive multiplier, 1..max, continuous. Honey banked is multiplied
+   * by its whole part. See `TUNING.combo`.
+   */
+  combo = 1;
+  /** Highest whole tier reached today, for the day's report. */
+  bestCombo = 1;
+  /** Seconds bees have been waiting with a line free for them. */
+  private waiting = 0;
 
   /** Decides when the next raid lands. See sim/Raid.ts. */
   readonly raid = new RaidClock();
@@ -319,8 +334,12 @@ export class Field {
     this.elapsed = 0;
     this.jobless.clear();
     this.clearedAnnounced = false;
-    this.nextGoldenAt =
-      day >= TUNING.golden.startDay ? TUNING.golden.firstAt : Number.POSITIVE_INFINITY;
+    this.combo = 1;
+    this.bestCombo = 1;
+    this.waiting = 0;
+    this.nextGoldenAt = features.nightBloom
+      ? TUNING.golden.firstAt
+      : Number.POSITIVE_INFINITY;
     this.day = day;
 
     this.clearRoutes();
@@ -936,6 +955,7 @@ export class Field {
     }
 
     for (const bee of this.bees) this.stepBee(bee, dt);
+    this.stepCombo(dt);
 
     this.revealFromSwarm();
     this.updateDiscoveries();
@@ -977,6 +997,55 @@ export class Field {
     if (hadFlower) this.events.drained.push({ x: route.tipX, y: route.tipY });
     else this.events.fizzled.push({ x: route.tipX, y: route.tipY });
     this.killRoute(route);
+  }
+
+  /** The whole tier of the Busy Hive multiplier: what honey is paid at. */
+  get comboTier(): number {
+    return Math.floor(this.combo);
+  }
+
+  /**
+   * Climbs the multiplier while the hive is busy, lets it slip when it is not.
+   *
+   * "Not busy" is deliberately narrow: bees waiting at the hive *and* a line
+   * free for them. Bees idle because every line is already full are not the
+   * player's fault, and neither is an empty board before the first line.
+   */
+  private stepCombo(dt: number): void {
+    const { max, risePerSecond, fallPerSecond, graceSeconds, idleTolerance } =
+      TUNING.combo;
+    const before = this.comboTier;
+    const slotFree = this.routes.length < this.stats.routeSlots;
+    const waitingBees = this.idleBees >= idleTolerance && slotFree;
+
+    if (waitingBees) {
+      this.waiting += dt;
+      if (this.waiting > graceSeconds) {
+        this.combo = Math.max(1, this.combo - fallPerSecond * dt);
+      }
+    } else {
+      this.waiting = 0;
+      const working = this.routes.some((r) => r.target !== null);
+      if (working) this.combo = Math.min(max, this.combo + risePerSecond * dt);
+    }
+
+    const after = this.comboTier;
+    if (after > before) {
+      this.events.comboUp = after;
+      this.bestCombo = Math.max(this.bestCombo, after);
+    } else if (after < before) {
+      this.events.comboDown = after;
+    }
+  }
+
+  /** 0..1, how far the multiplier is toward its next tier. */
+  get comboProgress(): number {
+    return this.combo >= TUNING.combo.max ? 1 : this.combo - Math.floor(this.combo);
+  }
+
+  /** True while bees are waiting long enough to be costing the multiplier. */
+  get comboSlipping(): boolean {
+    return this.waiting > TUNING.combo.graceSeconds && this.combo > 1;
   }
 
   /**
@@ -1720,7 +1789,10 @@ export class Field {
     // buys is a better yield from honey the swarm has actually brought home,
     // so nectar lost to a wasp on the way back is not paid for.
     const gained =
-      bee.carrying * this.stats.honeyMultiplier * (1 + this.modifiers.honeyBonus);
+      bee.carrying *
+      this.stats.honeyMultiplier *
+      (1 + this.modifiers.honeyBonus) *
+      this.comboTier;
     this.honey += gained;
     this.events.deposited += gained;
     bee.carrying = 0;

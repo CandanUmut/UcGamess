@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CASUAL, EXPERT, NOVICE, type Persona } from './personas.ts';
-import { playRun } from './session.ts';
+import { playLevel, playRun } from './session.ts';
+import { LEVELS, levelStarsFor } from '../game/Levels.ts';
 import { summarise, type PersonaSummary } from './metrics.ts';
 
 /**
@@ -50,5 +51,41 @@ describe('engagement gate', () => {
 
   it('rewards skill: a practised player goes further than a first-timer', () => {
     expect(expert.daysReached).toBeGreaterThan(novice.daysReached + 1);
+  });
+}, 180_000);
+
+describe('campaign gate', () => {
+  /**
+   * The fitted star thresholds, checked against the players they were fitted
+   * for. Samples three levels per world with two runs each, so it stays fast;
+   * `fit-levels.ts` is the full version.
+   */
+  const sample = [1, 4, 8, 11, 15, 19, 21, 25, 29];
+  const starsFor = (persona: Persona): number[] =>
+    sample.flatMap((id) => {
+      const level = LEVELS[id - 1];
+      if (!level) return [];
+      return [0, 1].map((run) =>
+        levelStarsFor(level, playLevel(persona, level, 9000 + run * 31).honey),
+      );
+    });
+  const casual = starsFor(CASUAL);
+  const expert = starsFor(EXPERT);
+  const novice = starsFor(NOVICE);
+  const share = (stars: number[], min: number): number =>
+    stars.filter((s) => s >= min).length / Math.max(1, stars.length);
+
+  it('lets a regular player pass most levels', () => {
+    expect(share(casual, 1)).toBeGreaterThan(0.7);
+  });
+
+  it('keeps three stars for players who play well', () => {
+    expect(share(expert, 3)).toBeGreaterThan(share(casual, 3));
+    expect(share(casual, 3)).toBeLessThan(0.6);
+  });
+
+  it('lets a first-timer through the first world', () => {
+    const firstWorld = novice.slice(0, 6);
+    expect(share(firstWorld, 1)).toBeGreaterThan(0.6);
   });
 }, 180_000);

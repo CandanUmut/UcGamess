@@ -106,8 +106,9 @@ pieces still waiting on hand-drawn art.
   Rebuilt by `tools/sprites.mjs` from the stills, so a redrawn bee gets its
   wing beat for free.
 
-### swat-burst.png, flower-golden.png, honey-drop.png
+### swat-burst.png, flower-golden.png, honey-drop.png, medal.png
 
+- **File:** `sprites/medal.png`
 - **File:** `sprites/swat-burst.png`
 - **File:** `sprites/flower-golden.png`
 - **File:** `sprites/honey-drop.png`
@@ -123,7 +124,9 @@ pieces still waiting on hand-drawn art.
 - **Notes:** `swat-burst.png` is six 128x128 frames of a comic "pow" star
   that grows, holds and breaks into flecks; `flower-golden.png` is the golden
   bloom (96px, same size as the other flowers); `honey-drop.png` is the 48px
-  drop used by the HUD and the drops that fly into it. Re-run
+  drop used by the HUD and the drops that fly into it; `medal.png` (160x200)
+  is the world-complete medal, a gold disc with a seven-cell honeycomb on two
+  ribbons. Re-run
   `node games/beeline/tools/sprites.mjs` rather than editing the PNGs.
 
 ### pollen.png

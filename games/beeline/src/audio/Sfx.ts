@@ -192,6 +192,14 @@ export class Sfx {
    */
   startMusic(): void {
     if (this.music) return;
+    // One track for the whole game. The map, the menu and every level each
+    // build their own Sfx, and the sound manager is global — so a loop that
+    // is already playing is adopted rather than started again on top of it.
+    const existing = this.scene.sound.get(MUSIC_KEY);
+    if (existing?.isPlaying) {
+      this.music = existing;
+      return;
+    }
     if (!this.scene.cache.audio.exists(MUSIC_KEY)) return;
     try {
       this.music = this.scene.sound.add(MUSIC_KEY, { loop: true, volume: 0.3 });
@@ -202,10 +210,15 @@ export class Sfx {
     }
   }
 
-  stopHum(): void {
+  /** Stops the hive's hum only; the music carries on to the next screen. */
+  stopHumOnly(): void {
     this.hum?.stop();
     this.hum?.destroy();
     this.hum = undefined;
+  }
+
+  stopHum(): void {
+    this.stopHumOnly();
     this.music?.stop();
     this.music?.destroy();
     this.music = undefined;

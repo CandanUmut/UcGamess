@@ -8,6 +8,7 @@ import {
 } from '@ucgames/core';
 import { COLORS } from '../config/tuning.ts';
 import { Button } from '../ui/Button.ts';
+import { LEVELS, totalStars } from '../game/Levels.ts';
 import {
   coerceSave,
   newSave,
@@ -185,44 +186,44 @@ export class MenuScene extends BaseScene {
       .setOrigin(0.5);
 
     const resuming = this.save.day > 1;
+    const stars = totalStars(this.save.levelStars);
 
+    // Two ways to play, and the campaign is the one the screen is about: it is
+    // the one with an end, and the one a first-timer should meet first.
     new Button(this, {
       x: cx,
-      y: 318,
-      width: 380,
-      label: resuming ? `▶  Continue — day ${this.save.day}` : '▶  Play',
+      y: 300,
+      width: 400,
+      label: '▶  Adventure',
+      sublabel: stars > 0 ? `★ ${stars} / ${LEVELS.length * 3}` : '30 meadows to fill',
       tint: 0x3aa860,
       big: true,
-      onClick: () => this.start(),
+      onClick: () => this.scene.start('Map'),
     }).pulse();
+
+    const best =
+      this.save.bestScore > 0
+        ? `best ${Math.floor(this.save.bestScore).toLocaleString('en-US')} honey · day ${Math.max(1, this.save.bestRunDay)}`
+        : 'how far can the hive go?';
+    new Button(this, {
+      x: cx,
+      y: 410,
+      width: 400,
+      label: resuming ? `Endless — day ${this.save.day}` : 'Endless',
+      sublabel: best,
+      tint: 0x2f8fb8,
+      onClick: () => this.start(),
+    });
 
     if (resuming) {
       new Button(this, {
         x: cx,
-        y: 406,
-        width: 260,
-        label: 'New run',
+        y: 500,
+        width: 240,
+        label: 'New endless run',
         tint: 0xb8742a,
         onClick: () => this.confirmReset(),
       });
-    }
-
-    if (this.save.bestScore > 0 || this.save.bestRunDay > 0) {
-      this.add
-        .text(
-          cx,
-          resuming ? 468 : 400,
-          `Best run: ${Math.floor(this.save.bestScore).toLocaleString('en-US')} honey · day ${Math.max(1, this.save.bestRunDay)}`,
-          {
-            fontFamily: FONT,
-            fontSize: '20px',
-            fontStyle: 'bold',
-            color: '#ffe38a',
-            stroke: '#2a1d08',
-            strokeThickness: 5,
-          },
-        )
-        .setOrigin(0.5);
     }
   }
 
@@ -281,7 +282,7 @@ export class MenuScene extends BaseScene {
       )
       .setInteractive();
     const warning = this.add
-      .text(cx, 300, 'Start a new run?\nThis run will be lost.', {
+      .text(cx, 300, 'Start a new endless run?\nThe current one will be lost.', {
         fontFamily: FONT,
         fontSize: '30px',
         fontStyle: 'bold',
@@ -297,13 +298,19 @@ export class MenuScene extends BaseScene {
       label: 'New run',
       tint: 0xc0472c,
       onClick: () => {
-        const fresh = newSave();
-        fresh.bestScore = this.save.bestScore;
-        fresh.bestRunDay = this.save.bestRunDay;
-        fresh.tutorialDone = this.save.tutorialDone;
+        // Only the endless run starts over. Records and the campaign stay.
+        const fresh = {
+          ...newSave(),
+          bestScore: this.save.bestScore,
+          bestRunDay: this.save.bestRunDay,
+          tutorialDone: this.save.tutorialDone,
+          levelStars: this.save.levelStars,
+          levelBest: this.save.levelBest,
+          worldsCelebrated: this.save.worldsCelebrated,
+        };
         writeSave(this.context.save, fresh);
         void this.context.save.flush();
-        this.scene.start('Game');
+        this.scene.start('Game', { mode: 'endless' });
       },
     });
     const no = new Button(this, {
@@ -323,6 +330,6 @@ export class MenuScene extends BaseScene {
 
   private start(): void {
     if (!this.ready) return;
-    this.scene.start('Game');
+    this.scene.start('Game', { mode: 'endless' });
   }
 }

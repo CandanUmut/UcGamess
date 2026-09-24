@@ -12,6 +12,13 @@ import {
 import { deriveStats } from '../game/Upgrades.ts';
 import { ITEMS, modifiersFor, rollOffer, type ItemId } from '../game/Items.ts';
 import { gaussian, seeded, type Persona } from './personas.ts';
+import {
+  levelFeatures,
+  levelModifiers,
+  levelSunsetBonus,
+  withSeed,
+  type LevelDef,
+} from '../game/Levels.ts';
 import type { Activity, DayRecord, RunLog } from './metrics.ts';
 
 const DT = 1 / 60;
@@ -110,13 +117,11 @@ class DragBot {
       plan.target !== p.target &&
       this.persona.sloppiness <= 0.4
     ) {
+      // Steer to the corridor corner instead. If even that lands on another
+      // flower, let go anyway — a line to *a* flower still pays, and a person
+      // does not hover over the board forever.
       const corner = waypoint(field, start.x, start.y, p.target.x, p.target.y);
       plan = field.planLine(start, corner.x, corner.y);
-      if (plan.target && plan.target !== p.target) {
-        // Nothing sensible to release on: lift the finger, try again later.
-        this.inputs -= 1;
-        return;
-      }
     }
     const route = field.commitLine(plan);
     if (!route) this.wasted += 1;
@@ -173,8 +178,12 @@ class DragBot {
 
     // Where to aim this leg: straight at the flower, or — for a player who
     // reads the maze — at the furthest corridor corner they can see from here.
+    // A person drags straight at the flower first and watches the preview: if
+    // it turns green, they let go. Only when it does not do they steer for
+    // the corridor corner — and a first-timer does not know to do even that.
+    const straightPlan = field.planLine(from, target.x, target.y);
     const aim =
-      sloppy || this.persona.sloppiness > 0.4
+      sloppy || this.persona.sloppiness > 0.4 || straightPlan.target === target
         ? { x: target.x, y: target.y }
         : waypoint(field, from.x, from.y, target.x, target.y);
     const pending = this.line(field, from, aim);
@@ -202,11 +211,16 @@ class DragBot {
 
   private pick(field: Field, open: Patch[], sloppy: boolean): Patch | null {
     const scored = open.map((p) => {
-      const dist = Math.hypot(p.x - field.hiveX, p.y - field.hiveY);
+      const straightLine = Math.hypot(p.x - field.hiveX, p.y - field.hiveY);
+      // A player who reads the maze judges distance by the corridors; a
+      // first-timer judges it by eye.
+      const dist = sloppy
+        ? straightLine
+        : Math.max(straightLine, field.pathDistanceTo(p.x, p.y));
       const golden = p.kind === 'night' ? 4 : 1;
       return {
         p,
-        value: sloppy ? -dist : (golden * p.honeyLeft) / (120 + dist),
+        value: sloppy ? -straightLine : (golden * p.honeyLeft) / (120 + dist),
       };
     });
     scored.sort((a, b) => b.value - a.value);
@@ -331,13 +345,110 @@ export function playRun(persona: Persona, seed: number, maxDays = MAX_DAYS): Run
   }
 }
 
-function playRunInner(persona: Persona, maxDays: number): RunLog {
+interface DayPlay {
+  t: number;
+  cleared: boolean;
+  stolen: number;
+  swarmIdle: number;
+}
+
+/**
+ * Plays one day to dusk or to a cleared meadow, accumulating into `log`.
+ *
+ * Shared by the endless run and the campaign, so the two are measured the
+ * same way. `log.firstScoreAt` is set against the log's own running clock.
+ */
+function playDay(
+  field: Field,
+  bot: DragBot,
+  seconds: number,
+  log: RunLog,
+  traceDay: number,
+): DayPlay {
+  const clockBefore = log.days.reduce((a, d) => a + d.seconds, 0);
+  let lastScoreChange = 0;
+  let lastScoreFeedback = -99;
+  let lastScore = 0;
+  let t = 0;
+  let cleared = false;
+  let stolen = 0;
+  let swarmIdle = 0;
+
+  for (; t < seconds; t += DT) {
+    const activity = bot.step(field);
+    field.step(DT);
+    log.activity[activity] += DT;
+
+    const events = field.drainEvents();
+    stolen += events.stolen;
+    if (field.idleBees * 2 >= field.bees.length) swarmIdle += DT;
+    if (TRACE === traceDay && Math.floor(t) !== Math.floor(t - DT)) trace(field, t);
+    log.feedbackEvents +=
+      events.found.length +
+      events.waspDown.length +
+      events.struck.length +
+      events.drained.length +
+      events.bloomed.length +
+      events.lineLaid.length +
+      (events.comboUp > 0 ? 1 : 0);
+
+    const score = field.honey;
+    if (score > lastScore + 1e-9) {
+      if (log.firstScoreAt < 0) log.firstScoreAt = clockBefore + t;
+      lastScoreChange = t;
+      if (t - lastScoreFeedback >= SCORE_FEEDBACK_GAP) {
+        log.feedbackEvents += 1;
+        lastScoreFeedback = t;
+      }
+    }
+    lastScore = score;
+    if (activity === 'idle' && t - lastScoreChange > DEAD_AFTER) log.deadSeconds += DT;
+
+    if (events.cleared) {
+      cleared = true;
+      break;
+    }
+  }
+  return { t: Math.min(t, seconds), cleared, stolen, swarmIdle };
+}
+
+export interface LevelPlay {
+  honey: number;
+  cleared: boolean;
+  bestCombo: number;
+  seconds: number;
+}
+
+/** Plays one campaign level once, the way `persona` would. */
+export function playLevel(persona: Persona, level: LevelDef, seed: number): LevelPlay {
   const field = new Field();
   const bot = new DragBot(persona);
-  const items: ItemId[] = [];
+  const modifiers = levelModifiers(level);
+  field.setStats(deriveStats(modifiers));
+  withSeed(level.seed, () =>
+    field.beginDay(level.difficulty, levelFeatures(level), level.flowers, 1, modifiers),
+  );
+  const realRandom = Math.random;
+  Math.random = seeded(seed);
+  try {
+    bot.beginDay();
+    const log = emptyLog(persona.name);
+    const play = playDay(field, bot, level.seconds, log, 0);
+    const bonus = play.cleared ? levelSunsetBonus(level, level.seconds - play.t) : 0;
+    return {
+      honey: Math.floor(field.honey) + bonus,
+      cleared: play.cleared,
+      bestCombo: field.bestCombo,
+      seconds: play.t,
+    };
+  } finally {
+    Math.random = realRandom;
+  }
+}
 
-  const log: RunLog = {
-    persona: persona.name,
+function emptyLog(persona: string): RunLog {
+  return {
+    persona,
     days: [],
     activity: { acting: 0, waiting: 0, idle: 0 },
     deadSeconds: 0,
@@ -347,6 +458,14 @@ function playRunInner(persona: Persona, maxDays: number): RunLog {
     firstScoreAt: -1,
     overheadSeconds: 0,
   };
+}
+
+function playRunInner(persona: Persona, maxDays: number): RunLog {
+  const field = new Field();
+  const bot = new DragBot(persona);
+  const items: ItemId[] = [];
+
+  const log = emptyLog(persona.name);
   let clock = 0;
 
   for (let day = 1; day <= maxDays; day += 1) {
@@ -358,49 +477,8 @@ function playRunInner(persona: Persona, maxDays: number): RunLog {
     bot.beginDay();
 
     const seconds = dayLength(day) + modifiers.extraDaySeconds;
-    let lastScoreChange = 0;
-    let lastScoreFeedback = -99;
-    let lastScore = 0;
-    let t = 0;
-    let cleared = false;
-    let stolen = 0;
-    let swarmIdle = 0;
-
-    for (; t < seconds; t += DT) {
-      const activity = bot.step(field);
-      field.step(DT);
-      clock += DT;
-      log.activity[activity] += DT;
-
-      const events = field.drainEvents();
-      stolen += events.stolen;
-      if (field.idleBees * 2 >= field.bees.length) swarmIdle += DT;
-      if (TRACE === day && Math.floor(t) !== Math.floor(t - DT)) trace(field, t);
-      log.feedbackEvents +=
-        events.found.length +
-        events.waspDown.length +
-        events.struck.length +
-        events.drained.length +
-        events.bloomed.length +
-        events.lineLaid.length;
-
-      const score = field.honey;
-      if (score > lastScore + 1e-9) {
-        if (log.firstScoreAt < 0) log.firstScoreAt = clock;
-        lastScoreChange = t;
-        if (t - lastScoreFeedback >= SCORE_FEEDBACK_GAP) {
-          log.feedbackEvents += 1;
-          lastScoreFeedback = t;
-        }
-      }
-      lastScore = score;
-      if (activity === 'idle' && t - lastScoreChange > DEAD_AFTER) log.deadSeconds += DT;
-
-      if (events.cleared) {
-        cleared = true;
-        break;
-      }
-    }
+    const { t, cleared, stolen, swarmIdle } = playDay(field, bot, seconds, log, day);
+    clock += t;
 
     const bonus = cleared ? sunsetBonus(day, seconds - t) : 0;
     const result = evaluateDay(day, field.honey + bonus, bonus);

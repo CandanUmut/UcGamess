@@ -5,6 +5,9 @@ export const SAVE_KEY = 'beeline.save';
 export const SAVE_KEYS = [SAVE_KEY] as const;
 
 /**
+ * Version 3 adds the campaign — stars and best honey per level — on top of
+ * version 2 without disturbing it. A v2 save keeps its endless run as-is.
+ *
  * Version 2: the coin economy is gone.
  *
  * Version 1 saved spendable money, permanent upgrade levels and a night shop's
@@ -13,7 +16,9 @@ export const SAVE_KEYS = [SAVE_KEY] as const;
  * reached and whether the tutorial has been seen. Anything else would be a
  * number the player can no longer spend.
  */
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
+/** Saves from before this version played a different game; see below. */
+const FIRST_COMPATIBLE_VERSION = 2;
 
 export interface BeelineSave {
   version: number;
@@ -31,6 +36,12 @@ export interface BeelineSave {
   bestScore: number;
   /** Whether the first-run tutorial has been played through. */
   tutorialDone: boolean;
+  /** Best stars per campaign level, 0-3, indexed by level id - 1. */
+  levelStars: number[];
+  /** Best honey per campaign level, indexed the same way. */
+  levelBest: number[];
+  /** Worlds whose completion has already been celebrated. */
+  worldsCelebrated: number[];
 }
 
 export function newSave(): BeelineSave {
@@ -43,6 +54,9 @@ export function newSave(): BeelineSave {
     bestRunDay: 0,
     bestScore: 0,
     tutorialDone: false,
+    levelStars: [],
+    levelBest: [],
+    worldsCelebrated: [],
   };
 }
 
@@ -59,7 +73,8 @@ export function coerceSave(raw: unknown): BeelineSave {
   if (typeof raw !== 'object' || raw === null) return fresh;
 
   const data = raw as Partial<Record<keyof BeelineSave, unknown>>;
-  const legacy = data.version !== CURRENT_VERSION;
+  const version = typeof data.version === 'number' ? data.version : 0;
+  const legacy = version < FIRST_COMPATIBLE_VERSION;
 
   return {
     version: CURRENT_VERSION,
@@ -71,7 +86,15 @@ export function coerceSave(raw: unknown): BeelineSave {
     bestRunDay: clampInt(data.bestRunDay, 0, 9999),
     bestScore: clampNumber(data.bestScore, 0, Number.MAX_SAFE_INTEGER, 0),
     tutorialDone: data.tutorialDone === true,
+    levelStars: coerceNumbers(data.levelStars, 0, 3),
+    levelBest: coerceNumbers(data.levelBest, 0, Number.MAX_SAFE_INTEGER),
+    worldsCelebrated: coerceNumbers(data.worldsCelebrated, 0, 9),
   };
+}
+
+function coerceNumbers(value: unknown, min: number, max: number): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 100).map((v) => Math.floor(clampNumber(v, min, max, min)));
 }
 
 function coerceItems(value: unknown): ItemId[] {

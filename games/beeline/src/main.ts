@@ -2,6 +2,8 @@ import { createGame } from '@ucgames/core';
 import { MenuScene } from './scenes/MenuScene.ts';
 import { GameScene } from './scenes/GameScene.ts';
 import { NightScene } from './scenes/NightScene.ts';
+import { MapScene } from './scenes/MapScene.ts';
+import { LevelDoneScene } from './scenes/LevelDoneScene.ts';
 import { COLORS } from './config/tuning.ts';
 import { SAVE_KEYS } from './game/SaveState.ts';
 import { installRotateGate } from './ui/rotateGate.ts';
@@ -69,7 +71,7 @@ async function boot(): Promise<void> {
     parent: 'game',
     backgroundColor: COLORS.background,
     saveKeys: SAVE_KEYS,
-    scenes: [MenuScene, GameScene, NightScene],
+    scenes: [MenuScene, MapScene, GameScene, NightScene, LevelDoneScene],
   });
 
   // Nothing was preloaded, but the portal still has to be told the game is
