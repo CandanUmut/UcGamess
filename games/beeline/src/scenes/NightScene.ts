@@ -314,12 +314,14 @@ export class NightScene extends BaseScene {
       '#ffe38a',
       30,
     );
-    this.line(
-      isBest ? 'New best run!' : `Best run: ${best.toLocaleString('en-US')} honey`,
-      282,
-      isBest ? '#9ff0a8' : '#c9b98f',
-      20,
-    );
+    if (isBest || best > 0) {
+      this.line(
+        isBest ? 'New best run!' : `Best run: ${best.toLocaleString('en-US')} honey`,
+        282,
+        isBest ? '#9ff0a8' : '#c9b98f',
+        20,
+      );
+    }
 
     let y = 380;
     if (adsAvailable && result.nearMiss && !this.rewardTaken) {

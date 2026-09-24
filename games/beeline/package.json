@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The scaffold every UC Games game is cloned from. Playable, and passes every quality gate as-is.",
+  "description": "Beeline: drag lines from the hive, feed the swarm.",
   "scripts": {
     "dev": "vite",
     "build": "vite build && node ../../packages/devtools/src/size-budget.ts",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "playtest": "node src/playtest/report.ts"
   },
   "dependencies": {
     "@ucgames/core": "workspace:*",

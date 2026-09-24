@@ -135,7 +135,7 @@ export class FieldRenderer {
   private readonly ground: Phaser.GameObjects.TileSprite | null;
   /** The hive itself, drawn over its glow. Null if the file never arrived. */
   private readonly hiveSprite: Phaser.GameObjects.Image | null;
-  /** Splats and the hive's own effects, over the skep. */
+  /** Swat splats, above the mist like the wasps they land on. */
   private readonly hiveGfx: Phaser.GameObjects.Graphics;
   /** A squash that decays, punched every time honey lands. */
   private hiveBump = 0;
@@ -183,8 +183,10 @@ export class FieldRenderer {
           .setOrigin(0.5, 0.62)
           .setDepth(depth + 2)
       : null;
-    this.hiveGfx = scene.add.graphics().setDepth(depth + 2.6);
-    this.waspGfx = scene.add.graphics().setDepth(depth + 3);
+    this.hiveGfx = scene.add.graphics().setDepth(labelDepth - 0.5);
+    // Wasps fly above the mist. A raid you cannot see coming is not a threat
+    // to answer, it is a tax — and "tap to swat" needs a target to tap.
+    this.waspGfx = scene.add.graphics().setDepth(labelDepth - 2);
     this.wallGfx = scene.add.graphics().setDepth(depth + 4);
     this.surroundGfx = scene.add.graphics().setDepth(depth + 60);
   }
@@ -704,7 +706,7 @@ export class FieldRenderer {
       const sprite = this.scene.add
         .image(0, 0, key)
         .setOrigin(0.5)
-        .setDepth(this.depth + 3);
+        .setDepth(this.labelDepth - 1);
       this.wasps.push(sprite);
     }
     for (let i = field.wasps.length; i < this.wasps.length; i += 1) {

@@ -607,7 +607,7 @@ export const TUNING: Tuning = {
     // somebody. Re-run `pnpm --filter @ucgames/game-beeline playtest` after
     // changing anything that moves honey, and refit here if the per-day table
     // drifts.
-    quotas: [80, 170, 280, 390, 480, 580, 680, 790, 910, 1030, 1160, 1300],
+    quotas: [80, 170, 260, 340, 430, 530, 630, 750, 870, 1000, 1140, 1290],
     quotaGrowthAfterTable: 1.11,
   },
 

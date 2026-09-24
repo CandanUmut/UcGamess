@@ -1125,13 +1125,10 @@ export class Field {
       return carried;
     }
 
-    // A second line to a flower that already has one replaces it rather than
-    // spending a slot on a duplicate.
-    if (plan.target) {
-      const existing = this.routeTargeting(plan.target);
-      if (existing) this.killRoute(existing);
-    }
-
+    // A second line to a flower that already has one is a second crew on it,
+    // not a replacement. Replacing it used to reset every bee already working
+    // the first line — a drag that slid along a hedge onto the wrong flower
+    // could quietly undo a line that was paying.
     const route = this.createRoute(plan.coords);
     if (!route) return null;
     this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!route.target });

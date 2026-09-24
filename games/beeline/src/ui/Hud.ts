@@ -109,7 +109,7 @@ export class Hud {
     this.linesText.setPosition(safe.x + 30, top + 50);
     this.idleText.setPosition(safe.x + 30, top + 80);
     this.alertText.setPosition(safe.centerX, top + 86);
-    this.banner.setPosition(safe.centerX, safe.y + 190);
+    this.banner.setPosition(safe.centerX, safe.y + 236);
   }
 
   /** Called every frame with the day's numbers. */

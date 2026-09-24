@@ -30,6 +30,12 @@ export interface DayRecord {
   score: number;
   quota: number;
   met: boolean;
+  /** Honey wasps took from the hive. */
+  stolen?: number;
+  /** Bees driven off by raids. */
+  beesLost?: number;
+  /** Seconds the whole swarm had nothing to fly (idle bees >= half). */
+  swarmIdle?: number;
 }
 
 /** Everything one simulated run produced. */
@@ -72,6 +78,8 @@ export interface PersonaSummary {
   wasteFraction: number;
   /** Mean score/quota on the days that were played, excluding day one. */
   quotaRatio: number;
+  /** Share of runs that were over by day four — an early wall. */
+  endedByDay4: number;
 }
 
 function mean(values: number[]): number {
@@ -120,6 +128,7 @@ export function summarise(persona: string, logs: RunLog[]): PersonaSummary {
     feedbackPerMinute: mean(perRun.map((r) => r.feedback)),
     wasteFraction: mean(perRun.map((r) => r.waste)),
     quotaRatio: mean(perRun.map((r) => r.ratio)),
+    endedByDay4: mean(perRun.map((r) => (r.endDay <= 4 && r.days < 25 ? 1 : 0))),
   };
 }
 
@@ -189,9 +198,9 @@ export function engagementScore(
     {
       name: 'Inputs per minute (casual)',
       weight: 12,
-      score: band(casual.inputsPerMinute, 18, 3),
+      score: band(casual.inputsPerMinute, 25, 5),
       value: casual.inputsPerMinute.toFixed(1),
-      target: '>= 18',
+      target: '>= 25',
     },
     {
       name: 'Time spent waiting on the game',
@@ -203,16 +212,16 @@ export function engagementScore(
     {
       name: 'Dead time (nothing to do, nothing happening)',
       weight: 15,
-      score: band(casual.deadFraction, 0.04, 0.35),
+      score: band(casual.deadFraction, 0.02, 0.25),
       value: pct(casual.deadFraction),
-      target: '<= 4%',
+      target: '<= 2%',
     },
     {
       name: 'Feedback moments per minute',
       weight: 10,
-      score: band(casual.feedbackPerMinute, 30, 6),
+      score: band(casual.feedbackPerMinute, 40, 6),
       value: casual.feedbackPerMinute.toFixed(1),
-      target: '>= 30',
+      target: '>= 40',
     },
     {
       name: 'Challenge fit (score / quota, days 2+)',
@@ -237,6 +246,22 @@ export function engagementScore(
         band(novice.daysReached, 3, 1),
       value: `${(expert.daysReached / Math.max(1, novice.daysReached)).toFixed(2)}x (novice day ${novice.daysReached.toFixed(1)})`,
       target: '1.5 - 4x, novice >= day 3',
+    },
+    {
+      name: 'Early wall (casual runs over by day 4)',
+      weight: 8,
+      score: band(casual.endedByDay4, 0.1, 0.5),
+      value: pct(casual.endedByDay4),
+      target: '<= 10%',
+    },
+    {
+      // Poki's second Player Fit threshold, asked of the hardest audience: a
+      // first-timer's first run, before they have learnt anything.
+      name: 'Novice first runs over 3 minutes',
+      weight: 8,
+      score: band(novice.over3Min, 0.75, 0.25),
+      value: pct(novice.over3Min),
+      target: '>= 75%',
     },
     {
       name: 'Wasted inputs (casual)',
@@ -270,6 +295,7 @@ export function formatReport(
     ['feedback / min', (s) => s.feedbackPerMinute.toFixed(1)],
     ['wasted inputs', (s) => `${Math.round(s.wasteFraction * 100)}%`],
     ['score / quota', (s) => s.quotaRatio.toFixed(2)],
+    ['over by day 4', (s) => `${Math.round(s.endedByDay4 * 100)}%`],
   ];
 
   const pad = (s: string, n: number): string => s.padEnd(n);

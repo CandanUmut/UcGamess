@@ -15,15 +15,16 @@ import { gaussian, seeded, type Persona } from './personas.ts';
 import type { Activity, DayRecord, RunLog } from './metrics.ts';
 
 const DT = 1 / 60;
+const ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+  .process?.env;
+/** Set BEELINE_TRACE=<day> to print that day second by second. */
+const TRACE = Number(ENV?.BEELINE_TRACE ?? 0);
 /** Idle this long with the score frozen counts as dead time. */
 const DEAD_AFTER = 3;
 /** A stream of score is one feedback moment per this many seconds, not sixty. */
 const SCORE_FEEDBACK_GAP = 1;
 /** Runs are cut here; a run this long is already a pass. */
-export const MAX_DAYS = Number(
-  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
-    ?.BEELINE_MAX_DAYS ?? 25,
-);
+export const MAX_DAYS = Number(ENV?.BEELINE_MAX_DAYS ?? 25);
 
 /** One input the bot has decided on, landing after its reaction time. */
 interface Pending {
@@ -35,6 +36,8 @@ interface Pending {
   /** Where the drag is released, or the tap lands. */
   x: number;
   y: number;
+  /** The flower this drag is meant to end on, if it is the last leg. */
+  target?: Patch | null;
 }
 
 /**
@@ -96,7 +99,25 @@ class DragBot {
       this.wasted += 1;
       return;
     }
-    const plan = field.planLine(start, x, y);
+    let plan = field.planLine(start, x, y);
+    // A person watches the preview while dragging. If it has snapped onto
+    // some other flower — the line slid along a hedge — they steer to the
+    // corridor corner instead of letting go on the wrong thing. Only a player
+    // who reads the maze does this; a first-timer lets go regardless.
+    if (
+      p.target &&
+      plan.target &&
+      plan.target !== p.target &&
+      this.persona.sloppiness <= 0.4
+    ) {
+      const corner = waypoint(field, start.x, start.y, p.target.x, p.target.y);
+      plan = field.planLine(start, corner.x, corner.y);
+      if (plan.target && plan.target !== p.target) {
+        // Nothing sensible to release on: lift the finger, try again later.
+        this.inputs -= 1;
+        return;
+      }
+    }
     const route = field.commitLine(plan);
     if (!route) this.wasted += 1;
   }
@@ -156,7 +177,9 @@ class DragBot {
       sloppy || this.persona.sloppiness > 0.4
         ? { x: target.x, y: target.y }
         : waypoint(field, from.x, from.y, target.x, target.y);
-    return this.line(field, from, aim);
+    const pending = this.line(field, from, aim);
+    pending.target = target;
+    return pending;
   }
 
   /** A line with no flower under its tip, still young enough to carry on. */
@@ -258,6 +281,26 @@ function waypoint(
   return best;
 }
 
+/** One line of the second-by-second trace, for diagnosing a bad day. */
+function trace(field: Field, t: number): void {
+  const known = field.patches.filter((q) => q.alive && q.discovered).length;
+  const hidden = field.patches.filter((q) => q.alive && !q.discovered).length;
+  const lines = field.routes
+    .map((r) => {
+      const tag = r.target
+        ? `F${Math.round(r.target.pool)}`
+        : r.hadTarget
+          ? 'dry'
+          : 'scout';
+      return `${tag}:${r.beeCount}`;
+    })
+    .join(',');
+  const out = `t${Math.floor(t)} honey${Math.round(field.honey)} known${known} hidden${hidden} idle${field.idleBees} lines[${lines}]`;
+  (
+    globalThis as { process?: { stdout?: { write(s: string): void } } }
+  ).process?.stdout?.write(`${out}\n`);
+}
+
 /** Picks a card from the draft, the way each persona would. */
 function draftPick(offer: ItemId[], persona: Persona): ItemId | undefined {
   if (Math.random() < persona.sloppiness) {
@@ -278,17 +321,17 @@ function draftPick(offer: ItemId[], persona: Persona): ItemId | undefined {
 }
 
 /** Plays one whole run, from day one to the first missed quota. */
-export function playRun(persona: Persona, seed: number): RunLog {
+export function playRun(persona: Persona, seed: number, maxDays = MAX_DAYS): RunLog {
   const realRandom = Math.random;
   Math.random = seeded(seed);
   try {
-    return playRunInner(persona);
+    return playRunInner(persona, maxDays);
   } finally {
     Math.random = realRandom;
   }
 }
 
-function playRunInner(persona: Persona): RunLog {
+function playRunInner(persona: Persona, maxDays: number): RunLog {
   const field = new Field();
   const bot = new DragBot(persona);
   const items: ItemId[] = [];
@@ -306,7 +349,7 @@ function playRunInner(persona: Persona): RunLog {
   };
   let clock = 0;
 
-  for (let day = 1; day <= MAX_DAYS; day += 1) {
+  for (let day = 1; day <= maxDays; day += 1) {
     const modifiers = modifiersFor(items);
     const stats = deriveStats(modifiers);
     field.setStats(stats);
@@ -320,6 +363,8 @@ function playRunInner(persona: Persona): RunLog {
     let lastScore = 0;
     let t = 0;
     let cleared = false;
+    let stolen = 0;
+    let swarmIdle = 0;
 
     for (; t < seconds; t += DT) {
       const activity = bot.step(field);
@@ -328,6 +373,9 @@ function playRunInner(persona: Persona): RunLog {
       log.activity[activity] += DT;
 
       const events = field.drainEvents();
+      stolen += events.stolen;
+      if (field.idleBees * 2 >= field.bees.length) swarmIdle += DT;
+      if (TRACE === day && Math.floor(t) !== Math.floor(t - DT)) trace(field, t);
       log.feedbackEvents +=
         events.found.length +
         events.waspDown.length +
@@ -362,6 +410,9 @@ function playRunInner(persona: Persona): RunLog {
       score: result.score,
       quota: dayQuota(day),
       met: result.outcome === 'met',
+      stolen,
+      beesLost: field.beesLost,
+      swarmIdle,
     };
     log.days.push(record);
     // The day-end card: a few seconds to read the result.

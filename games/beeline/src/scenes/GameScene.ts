@@ -1008,6 +1008,10 @@ export class GameScene extends BaseGameplayScene {
       endDayNow: () => {
         this.secondsLeft = 0.01;
       },
+      jumpToDay: (day: number) => {
+        this.save.day = day;
+        this.beginDay();
+      },
       size: { width: DESIGN_WIDTH, height: DESIGN_HEIGHT },
     };
   }
