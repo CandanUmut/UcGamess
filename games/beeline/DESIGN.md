@@ -3,12 +3,13 @@
 > Working title. Verify against CrazyGames and Poki catalogues before submission —
 > a name confusable with an existing game is a documented rejection cause.
 
-**One sentence:** You draw flight routes from your hive out into a dark field,
-and the lines your swarm actually works become roads.
+**One sentence:** You drag beelines from your hive to flowers, and every bee
+that comes home is honey on the scoreboard.
 
-> §18 is the current shape of the game. Sections 1-8 are the original design and
-> are still broadly true, but the board is dark now, the hive sits in a corner,
-> and a route is something you build up rather than something you replace.
+> **§33 is the current shape of the game** and supersedes everything it
+> contradicts: the dial, the shops and prices, the coin economy and the ten
+> button night screen are gone. The earlier sections are kept as the record of
+> how the game got here.
 
 **The core verb is drawing.** Not tapping upgrade buttons, not managing menus.
 Every design decision below is checked against one question: does this keep the
@@ -2092,6 +2093,118 @@ pipeline stops at compression, and a second renderer to maintain is exactly the
 kind of infrastructure that does not help ship the game. What _is_ in the repo
 is the assertion that came out of it: the shops must clear the hive and each
 other, one to its left and one below.
+
+## 33. Measured fun: the redesign from a playtest harness
+
+The feedback after §32 was "it has many features but it's not fun". Rather than
+argue about that from taste, this pass built a harness that plays the game and
+measures the things that reliably lose casual players, then changed the game
+until the measurements moved.
+
+### The harness (`src/playtest`)
+
+Three simulated players drive the real `Field` — the same simulation the game
+runs — through whole runs, day by day, draft included:
+
+| persona | reaction | aim error | looks up to act | picks the worse option |
+| ------- | -------- | --------- | --------------- | ---------------------- |
+| novice  | 0.48s    | 34px      | 0.6 / s         | half the time          |
+| casual  | 0.34s    | 20px      | 1.2 / s         | a quarter              |
+| expert  | 0.23s    | 9px       | 3 / s           | rarely                 |
+
+Each run records what the player was doing every frame (acting, waiting on the
+game, idle), dead time (idle _and_ the score frozen for 3s), inputs, wasted
+inputs, feedback moments, time to first score, and score against quota per day.
+`metrics.ts` turns that into a 0-100 proxy against target bands taken from
+design-rules.md and Poki's Player Fit thresholds. `pnpm --filter
+@ucgames/game-beeline playtest` prints it; `--days` prints the per-day table
+the quotas are fitted against; `BEELINE_TRACE=<day>` prints one day second by
+second. `engagement.test.ts` holds the shape as a CI gate.
+
+**It is a proxy, not people.** It cannot see charm, art or sound, and its
+numbers depend on persona assumptions — how often a first-timer looks up from
+the swarm matters more than any other figure in it. Use it to compare versions
+of the game, and confirm with real players and `ucgames.summary()`.
+
+### What it found, and what changed
+
+Same metric and personas, run against the game as of §32 and as of now:
+
+| measure                               | before §33    | after      |
+| ------------------------------------- | ------------- | ---------- |
+| first point of score (novice)         | 27s           | 3.8s       |
+| time waiting on the game              | 59%           | 0%         |
+| dead time (casual)                    | 10%           | 4%         |
+| score / quota, days 2+ (casual)       | 4.1x          | 1.4x       |
+| median last day: novice/casual/expert | 8 / 25+ / 25+ | 5 / 8 / 13 |
+| engagement proxy                      | 71.0          | 96.6       |
+
+1. **The dial made the player wait.** Most of play was watching an arrow come
+   round, then watching a shot fly. The verb is now a **drag**: press the hive
+   or a line's end, drag, let go. The preview is exactly the line that will be
+   laid — straight, sliding along hedges — and turns green when it will land on
+   a flower. Tapping a found flower lays a beeline to it; tapping a wasp swats
+   it. Hold on a line to erase it.
+2. **The reward was two trips away.** Honey had to be carried to a shop and
+   sold before it counted. **Honey is the score now**: a bee landing at the
+   hive is the reward, with a "+N" and a coin note. Shops, prices, the hive cap
+   and spilling are gone.
+3. **One line carried the whole swarm**, so the game played itself once
+   anything was laid and skill changed nothing (novice and expert finished
+   level). **A line carries a crew of 8**; bees beyond that wait at the hive
+   with a nudge to lay another line. More lines = more honey, and noticing a
+   dry flower quickly is now the skill.
+4. **Days ended in dead time.** A dry flower's line **retires itself** and the
+   slot comes back. Clearing every flower **ends the day early** with a sunset
+   bonus for the daylight left. **Golden blooms** open briefly from day two as
+   the one thing that asks for a reaction; once the known flowers are dry the
+   last hidden ones are revealed so a day never stalls in the mist.
+5. **Every day was trivially easy** (4x quota) — the quotas had been halved as
+   a stopgap. They are refitted against the harness so each day after the
+   second is in doubt for somebody, with 1-3 stars for beating it well.
+6. **The night screen was a spreadsheet.** It is now a result card with stars
+   and **one pick from three boon cards**. The permanent upgrades and the item
+   shop are folded into that one draft (More Lines, Brood Chamber, Wildflowers,
+   Wide Lanes, and the old items); stars tilt the draft toward rarer cards. A
+   failed day shows the run's score and best, a rewarded +15s on a near miss,
+   and Play Again.
+7. **Two real bugs**, found by the harness rather than by reading: a line that
+   slid onto a flower that already had a line _replaced_ it and reset every bee
+   on it (a second line is now a second crew), and wasps flew under the mist,
+   so a raid could not be seen until it arrived.
+
+Presentation: a title screen that plays the verb (a line drawing itself, bees
+streaming along it) behind one pulsing button; solid pressable buttons; a HUD
+on dark plates with a counting honey total, star marks on the quota bar and a
+daylight dial; wing-beat animations for bees and wasps cut from the studio's
+own drawings; a tutorial hand that drags from the hive to a flower; a comic
+"pow" burst on every swat; a golden bloom with its own flower and turning rays;
+and a drop of honey that flies from the hive into the counter on every
+delivery, so the swarm below and the score above read as one thing. The new
+sprites are drawn by `tools/sprites.mjs` in the studio's style, and four new
+sounds are synthesised like the rest (zero bytes): a swat thwack, a pop when a
+line lands on a flower, a sparkle for a golden bloom, and a fanfare for a
+cleared meadow.
+
+### Tuning that matters
+
+- `route.beesPerLine` (8) against `bee.baseCount` (24) and `route.maxCount`
+  (3): three lines exactly employ the starting swarm, so More Lines only pays
+  once Brood Chamber has added bees, and the two picks want each other.
+- `patch.basePool` / `poolPerDay`: small, so a flower runs dry in ~10s and
+  there is a decision every ten seconds rather than a minute.
+- `day.quotas`: fitted, not chosen. Refit after anything that moves honey.
+
+### Still to verify
+
+- With real people. The harness's personas are assumptions.
+- In the headless browser used for screenshots (SwiftShader), a flower that
+  first appears mid-day sometimes renders with rectangular pieces missing for
+  a moment. It is not the fog (revealing the map does not change it) and it
+  has not been seen on a real GPU yet — check on a real device.
+- The golden bloom's position can land far into a maze on later days, where
+  its seven seconds are not enough to route to it. That may be fine (it is a
+  bonus), or it may want to prefer reachable cells.
 
 ## 25. Success criteria
 

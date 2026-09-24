@@ -5,9 +5,7 @@ import {
   ITEMS,
   ITEM_IDS,
   inventoryLines,
-  itemCost,
   modifiersFor,
-  rerollCost,
   rollOffer,
   type ItemId,
 } from './Items.ts';
@@ -70,35 +68,28 @@ describe('the night offer', () => {
   });
 });
 
-describe('prices', () => {
-  it('grows with the day, then stops', () => {
-    // A flat price is a real choice on day three and a rounding error on day
-    // fifteen; an uncapped one prices the shop out of a long run entirely.
-    const early = itemCost('scoutBees', 1);
-    const later = itemCost('scoutBees', 10);
-    expect(later).toBeGreaterThan(early);
-    expect(itemCost('scoutBees', 90)).toBe(itemCost('scoutBees', 200));
-  });
-
-  it('charges more for rarer things', () => {
-    expect(itemCost('smokePot', 5)).toBeGreaterThan(itemCost('scoutBees', 5));
-    expect(itemCost('royalJelly', 5)).toBeGreaterThan(itemCost('smokePot', 5));
-  });
-
-  it('makes each reroll cost more than the last', () => {
-    // The escape hatch stays open; fishing the pool for one item does not.
-    const costs = [0, 1, 2, 3].map((n) => rerollCost(6, n));
-    for (let i = 1; i < costs.length; i += 1) {
-      expect(costs[i]).toBeGreaterThan(costs[i - 1] ?? 0);
-    }
+describe('stars tilt the draft', () => {
+  it('offers more rare and epic cards after a three-star day', () => {
+    const rareShare = (stars: number): number => {
+      let rare = 0;
+      let total = 0;
+      for (let trial = 0; trial < 3000; trial += 1) {
+        for (const id of rollOffer(5, featuresForDay(5), Math.random, stars)) {
+          total += 1;
+          if (ITEMS[id].rarity !== 'common') rare += 1;
+        }
+      }
+      return rare / total;
+    };
+    expect(rareShare(3)).toBeGreaterThan(rareShare(1));
   });
 });
 
 describe('items stack for the run', () => {
   it('adds the effect again for a second copy', () => {
-    const one = modifiersFor(['waxedTrails']);
-    const two = modifiersFor(['waxedTrails', 'waxedTrails']);
-    expect(two.extraHoldSeconds).toBe(one.extraHoldSeconds * 2);
+    const one = modifiersFor(['earlyRise']);
+    const two = modifiersFor(['earlyRise', 'earlyRise']);
+    expect(two.extraDaySeconds).toBe(one.extraDaySeconds * 2);
   });
 
   it('does not sell the same knowledge twice', () => {
@@ -129,17 +120,20 @@ describe('the save carries a run inventory', () => {
     const save = newSave();
     expect(save.items).toEqual([]);
     expect(save.offer).toEqual([]);
-    expect(save.rerolls).toBe(0);
   });
 
   it('drops unknown ids rather than crashing on them', () => {
-    const save = coerceSave({ items: ['guardBees', 'ghostItem', 7], offer: 'nope' });
+    const save = coerceSave({
+      version: 2,
+      items: ['guardBees', 'ghostItem', 7],
+      offer: 'nope',
+    });
     expect(save.items).toEqual(['guardBees']);
     expect(save.offer).toEqual([]);
   });
 
   it('caps a corrupt inventory instead of trusting its length', () => {
-    const save = coerceSave({ items: new Array(5000).fill('combFrames') });
+    const save = coerceSave({ version: 2, items: new Array(5000).fill('combFrames') });
     expect(save.items.length).toBeLessThanOrEqual(200);
   });
 });

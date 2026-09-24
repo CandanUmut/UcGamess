@@ -9,6 +9,10 @@ export type SfxKey =
   | 'dayEnd'
   | 'upgrade'
   | 'wasp'
+  | 'swat'
+  | 'pop'
+  | 'sparkle'
+  | 'fanfare'
   | 'hum';
 
 const SAMPLE_RATE = 22_050;
@@ -87,6 +91,10 @@ export class Sfx {
       this.addBuffer(ctx, 'dayEnd', 0.75, dayEndChime);
       this.addBuffer(ctx, 'upgrade', 0.42, upgradeArpeggio);
       this.addBuffer(ctx, 'wasp', 0.35, waspBuzz);
+      this.addBuffer(ctx, 'swat', 0.22, swatThwack);
+      this.addBuffer(ctx, 'pop', 0.16, linePop);
+      this.addBuffer(ctx, 'sparkle', 0.7, goldenSparkle);
+      this.addBuffer(ctx, 'fanfare', 1.1, clearFanfare);
       this.addBuffer(ctx, 'hum', 2.0, hiveHum);
       return true;
     } catch (error) {
@@ -376,4 +384,50 @@ function hiveHum(t: number, duration: number): number {
   // Slow breathing, also loop-aligned.
   const breath = 1 + 0.12 * Math.sin((2 * Math.PI * t) / duration);
   return sample * 0.16 * breath;
+}
+
+function swatThwack(t: number): number {
+  // A rolled-up newspaper: a burst of noise with a thump under it whose pitch
+  // drops fast. The noise is the slap, the falling tone is the weight behind
+  // it — without the tone it reads as a hiss, without the noise as a drum.
+  const noise = (Math.random() * 2 - 1) * decay(t, 38);
+  const thump = Math.sin(2 * Math.PI * (180 - 420 * t) * t) * decay(t, 14);
+  return (noise * 0.55 + thump * 0.7) * attack(t, 0.002) * 0.6;
+}
+
+function linePop(t: number): number {
+  // A line landing: a short bubbly rise, soft enough to hear every time.
+  const f = 520 + 900 * Math.min(1, t / 0.05);
+  return Math.sin(2 * Math.PI * f * t) * decay(t, 30) * attack(t, 0.004) * 0.4;
+}
+
+function goldenSparkle(t: number): number {
+  // Five bright pentatonic notes tumbling down over each other — a golden
+  // bloom is the one sound that should cut through the hum and the swarm.
+  const notes = [1568, 1318.5, 1174.7, 987.8, 783.99];
+  let out = 0;
+  notes.forEach((f, i) => {
+    const start = i * 0.07;
+    if (t < start) return;
+    const local = t - start;
+    out += Math.sin(2 * Math.PI * f * local) * decay(local, 9) * attack(local, 0.003);
+  });
+  return out * 0.16;
+}
+
+function clearFanfare(t: number): number {
+  // Meadow cleared: a rising major arpeggio that lands on a held chord.
+  const notes = [523.25, 659.25, 783.99, 1046.5];
+  let out = 0;
+  notes.forEach((f, i) => {
+    const start = i * 0.1;
+    if (t < start) return;
+    const local = t - start;
+    const held = i === notes.length - 1 ? 2.2 : 5;
+    out +=
+      (Math.sin(2 * Math.PI * f * local) + 0.3 * Math.sin(2 * Math.PI * f * 2 * local)) *
+      decay(local, held) *
+      attack(local, 0.006);
+  });
+  return out * 0.18;
 }

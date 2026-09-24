@@ -6,23 +6,18 @@ import {
   evaluateDay,
   featuresForDay,
   patchesForDay,
+  starsFor,
+  sunsetBonus,
 } from './DayCycle.ts';
-import {
-  deriveStats,
-  emptyLevels,
-  upgradeCost,
-  maxLevel,
-  UPGRADE_ORDER,
-} from './Upgrades.ts';
+import { deriveStats } from './Upgrades.ts';
+import { modifiersFor } from './Items.ts';
 import { coerceSave, newSave } from './SaveState.ts';
-import { computeOffline } from './Offline.ts';
 
 describe('day pacing', () => {
   it('grows day length then flattens at the cap', () => {
-    expect(dayLength(1)).toBe(45);
-    expect(dayLength(2)).toBe(50);
-    expect(dayLength(10)).toBe(90);
-    expect(dayLength(99)).toBe(90);
+    expect(dayLength(1)).toBe(TUNING.day.baseSeconds);
+    expect(dayLength(2)).toBe(TUNING.day.baseSeconds + TUNING.day.secondsPerDay);
+    expect(dayLength(99)).toBe(TUNING.day.maxSeconds);
   });
 
   it('reaches three minutes of play within three days', () => {
@@ -30,7 +25,7 @@ describe('day pacing', () => {
     // reaches day three has cleared Poki's three-minute average before the
     // night screens are even counted.
     const playSeconds = dayLength(1) + dayLength(2) + dayLength(3);
-    expect(playSeconds).toBeGreaterThanOrEqual(150);
+    expect(playSeconds).toBeGreaterThanOrEqual(120);
   });
 
   it('keeps day one trivially passable and then tightens', () => {
@@ -59,10 +54,9 @@ describe('escalation schedule', () => {
       richPatches: false,
       nightBloom: false,
     });
-    // Two, not one: now that a drained flower stays dead for the day, the
-    // first one runs dry inside 45s and the lesson only lands if there is
-    // somewhere to move to.
-    expect(patchesForDay(1)).toBe(2);
+    // Three, against three lines: day one is the one board a first-timer
+    // can hold in full, and clearing it early is the first win they get.
+    expect(patchesForDay(1)).toBe(3);
   });
 
   it('never introduces two new elements on the same day', () => {
@@ -109,147 +103,68 @@ describe('evaluateDay', () => {
     expect(result.nearMiss).toBe(false);
   });
 
-  it('reports a new best only when it beats the record', () => {
-    expect(evaluateDay(1, 100, 90).isBest).toBe(true);
-    expect(evaluateDay(1, 90, 90).isBest).toBe(false);
+  it('gives stars for beating the quota well, and none for missing it', () => {
+    const quota = dayQuota(4);
+    expect(starsFor(quota - 1, quota)).toBe(0);
+    expect(starsFor(quota, quota)).toBe(1);
+    expect(starsFor(quota * TUNING.score.twoStars, quota)).toBe(2);
+    expect(starsFor(quota * TUNING.score.threeStars, quota)).toBe(3);
+    expect(evaluateDay(4, quota * 2, 0).stars).toBe(3);
+  });
+
+  it('pays a sunset bonus for clearing early, scaled to the day', () => {
+    expect(sunsetBonus(3, 0)).toBe(0);
+    expect(sunsetBonus(3, 10)).toBeGreaterThan(0);
+    // Worth the same share of the quota whatever the day.
+    const early = sunsetBonus(2, 10) / dayQuota(2);
+    const late = sunsetBonus(12, 10) / dayQuota(12);
+    expect(Math.abs(early - late)).toBeLessThan(0.02);
   });
 });
 
-describe('upgrades', () => {
-  it('prices each level by the growth curve and caps out', () => {
-    for (const id of UPGRADE_ORDER) {
-      const tuning = TUNING.upgrades[id];
-      expect(upgradeCost(id, 0)).toBe(tuning.base);
-      expect(upgradeCost(id, 1)).toBe(Math.round(tuning.base * tuning.growth));
-      // Beyond the last level there is nothing left to buy.
-      expect(upgradeCost(id, maxLevel(id))).toBeNull();
-    }
+describe('draft picks', () => {
+  it("feed the day's stats", () => {
+    const base = deriveStats();
+    const picked = deriveStats(modifiersFor(['moreLines', 'moreLines', 'wildflowers']));
+    expect(picked.routeSlots).toBe(base.routeSlots + 2);
+    expect(picked.extraPatches).toBe(1);
   });
 
-  it('gets strictly more expensive every level', () => {
-    for (const id of UPGRADE_ORDER) {
-      for (let level = 1; level < maxLevel(id); level += 1) {
-        expect(upgradeCost(id, level)!).toBeGreaterThan(upgradeCost(id, level - 1)!);
-      }
-    }
-  });
-
-  it('feeds purchased levels into the simulation stats', () => {
-    const base = deriveStats(emptyLevels());
-    expect(base.beeCount).toBe(TUNING.bee.baseCount);
-    expect(base.routeSlots).toBe(TUNING.route.maxCount);
-
-    const upgraded = deriveStats({ ...emptyLevels(), swarmSize: 2, routeSlots: 3 });
-    expect(upgraded.beeCount).toBe(
-      TUNING.bee.baseCount + 2 * TUNING.upgrades.swarmSize.perLevel,
-    );
-    expect(upgraded.routeSlots).toBe(
-      TUNING.route.maxCount + 3 * TUNING.upgrades.routeSlots.perLevel,
-    );
-  });
-
-  it('makes lines the flagship — maxing it more than doubles your reach', () => {
-    // A line is how much of the board you can hold at once, and the board
-    // always blooms faster than the lines you own. If the flagship did not
-    // change that materially it would not be the flagship.
-    const maxed = deriveStats({
-      ...emptyLevels(),
-      routeSlots: maxLevel('routeSlots'),
-    });
-    expect(maxed.routeSlots).toBeGreaterThanOrEqual(TUNING.route.maxCount * 2);
+  it('stack', () => {
+    expect(modifiersFor(['broodChamber', 'broodChamber']).extraBees).toBe(8);
+    expect(modifiersFor(['wideLanes']).extraCrew).toBe(2);
   });
 });
 
 describe('save coercion', () => {
   it('round-trips a valid save', () => {
-    const original = newSave();
-    original.money = 1234;
-    original.day = 7;
-    original.levels.swarmSize = 3;
-    expect(coerceSave(JSON.parse(JSON.stringify(original)))).toMatchObject({
-      money: 1234,
-      day: 7,
-      levels: expect.objectContaining({ swarmSize: 3 }),
-    });
+    const save = newSave();
+    save.day = 4;
+    save.runScore = 812;
+    save.items = ['moreLines', 'swiftWings'];
+    save.bestScore = 2000;
+    expect(coerceSave(JSON.parse(JSON.stringify(save)))).toEqual(save);
   });
 
   it('survives garbage instead of crashing on boot', () => {
-    // Save data outlives the code that wrote it. Anything unreadable must give
-    // a playable game, because a crash here is unrecoverable for the player.
-    for (const junk of [null, undefined, 42, 'nonsense', [], { day: 'seven' }]) {
+    for (const junk of [null, undefined, 42, 'x', [], { day: 'lots', items: 7 }]) {
       const save = coerceSave(junk);
       expect(save.day).toBeGreaterThanOrEqual(1);
-      expect(save.money).toBeGreaterThanOrEqual(0);
-      expect(Number.isFinite(save.money)).toBe(true);
+      expect(Array.isArray(save.items)).toBe(true);
     }
   });
 
-  it('clamps an upgrade level above the cap', () => {
-    // A level past the table would index off the end of the cost curve and
-    // price the next purchase as NaN.
-    const save = coerceSave({ levels: { swarmSize: 9999 } });
-    expect(save.levels.swarmSize).toBe(maxLevel('swarmSize'));
-    expect(upgradeCost('swarmSize', save.levels.swarmSize)).toBeNull();
+  it("keeps a v1 player's record but not a run balanced for another game", () => {
+    const v1 = { version: 1, day: 9, money: 5000, bestRunDay: 11, tutorialDone: true };
+    const save = coerceSave(v1);
+    expect(save.day).toBe(1);
+    expect(save.bestRunDay).toBe(11);
+    expect(save.tutorialDone).toBe(true);
   });
 
-  it('rejects negative and non-finite honey', () => {
-    expect(coerceSave({ money: -500 }).money).toBe(0);
-    expect(coerceSave({ money: Number.NaN }).money).toBe(0);
-    expect(coerceSave({ money: Number.POSITIVE_INFINITY }).money).toBeLessThan(Infinity);
-  });
-});
-
-describe('offline accrual', () => {
-  const stats = deriveStats(emptyLevels());
-  const HOUR = 3_600_000;
-
-  it('pays for time away, capped by the Honey Store', () => {
-    const now = Date.now();
-    const short = computeOffline(now - HOUR, now, stats);
-    expect(short.money).toBeGreaterThan(0);
-    expect(short.money).toBeLessThanOrEqual(stats.offlineCapMoney);
-
-    const long = computeOffline(now - 500 * HOUR, now, stats);
-    expect(long.money).toBe(stats.offlineCapMoney);
-    expect(long.capped).toBe(true);
-  });
-
-  it('lets the cap bind before the window, so the upgrade actually matters', () => {
-    // Guards a real tuning bug: a short window at a low rate meant the cap was
-    // never reached, and buying Honey Store raised a ceiling nothing hit.
-    const maxEarnableInWindow = stats.offlineWindowHours * TUNING.offline.honeyPerHour;
-    expect(maxEarnableInWindow).toBeGreaterThan(stats.offlineCapMoney);
-
-    const maxed = deriveStats({ ...emptyLevels(), honeyStore: maxLevel('honeyStore') });
-    expect(maxed.offlineWindowHours * TUNING.offline.honeyPerHour).toBeGreaterThan(
-      maxed.offlineCapMoney,
-    );
-  });
-
-  it('ignores a clock that jumped backwards', () => {
-    const now = Date.now();
-    expect(computeOffline(now + 100 * HOUR, now, stats).money).toBe(0);
-  });
-
-  it('never pays out more for a longer absence than the window allows', () => {
-    const now = Date.now();
-    const a = computeOffline(now - 10_000 * HOUR, now, stats).money;
-    const b = computeOffline(now - 100_000 * HOUR, now, stats).money;
-    // A device clock set years forward must not hand over years of honey.
-    expect(a).toBe(b);
-    expect(a).toBeLessThanOrEqual(stats.offlineCapMoney);
-  });
-
-  it('does not bother the player with a trivial amount', () => {
-    const now = Date.now();
-    expect(computeOffline(now - 1000, now, stats).money).toBe(0);
-  });
-
-  it('pays more once the Honey Store is upgraded', () => {
-    const now = Date.now();
-    const upgraded = deriveStats({ ...emptyLevels(), honeyStore: 3 });
-    const base = computeOffline(now - 200 * HOUR, now, stats).money;
-    const better = computeOffline(now - 200 * HOUR, now, upgraded).money;
-    expect(better).toBeGreaterThan(base);
+  it('drops item ids that no longer exist', () => {
+    const save = newSave();
+    const raw = { ...save, items: ['moreLines', 'waxedTrails', 'nonsense'] };
+    expect(coerceSave(raw).items).toEqual(['moreLines']);
   });
 });

@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 
 // Nunito first, system stack behind it. The fallback is load-bearing twice
 // over: the face may not have arrived (see main.ts), and the subset is
-// deliberately small, so a glyph it lacks — the play triangle and the arrow
-// in the night screen — is drawn by the next family along.
+// deliberately small, so a glyph it lacks — the play triangle — is drawn by
+// the next family along.
 const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /**
@@ -14,7 +14,9 @@ const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
  * ~145 design units wide and ~50 tall. Anything smaller is reliably missed with
  * a thumb, which reads as an unresponsive game rather than a near miss.
  */
-const MIN_HEIGHT = 52;
+const MIN_HEIGHT = 58;
+/** How far the face sits above its shadow; it drops this far when pressed. */
+const LIFT = 6;
 
 export interface ButtonOptions {
   x: number;
@@ -25,128 +27,166 @@ export interface ButtonOptions {
   tint: number;
   onClick: () => void;
   enabled?: boolean;
-  /**
-   * Texture key for an icon drawn at the left of the card.
-   *
-   * Optional because most buttons in the game are words — "Next day", "Reroll"
-   * — and an icon on those would be noise. It exists for the shop, where four
-   * cards have to be told apart faster than four names can be read.
-   */
   icon?: string;
+  /** Larger type, for the one button a screen is about. */
+  big?: boolean;
 }
 
 /**
- * A rectangular button with a thumb-sized hit area.
+ * A chunky, solid, pressable button.
  *
- * The interactive object is the background Rectangle, not a Container.
- * Container hit areas were tried first and silently never fired — DOM pointer
- * events reached the canvas but Phaser's hit test never matched. A Rectangle
- * carries its own hit area and needs no special handling, so it is both simpler
- * and the thing that actually works.
+ * The old one was a pale outline at 14% fill: on a light meadow it read as a
+ * label, not a control, and "looks like a prototype" is the most common
+ * CrazyGames rejection. This one has a face, a darker lip under it, drops on
+ * press and pops on release — feedback inside one frame, which the design
+ * rules require of every input.
  */
 export class Button {
-  private readonly bg: Phaser.GameObjects.Rectangle;
+  private readonly scene: Phaser.Scene;
+  private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly hitZone: Phaser.GameObjects.Zone;
   private readonly labelText: Phaser.GameObjects.Text;
   private readonly iconImage: Phaser.GameObjects.Image | undefined;
   private readonly subText: Phaser.GameObjects.Text | undefined;
+  private readonly x: number;
+  private readonly y: number;
+  private readonly width: number;
+  private readonly height: number;
+  private readonly textShift: number;
   private tint: number;
   private readonly onClick: () => void;
   private enabled: boolean;
+  private pressed = false;
+  private hovered = false;
 
   constructor(scene: Phaser.Scene, options: ButtonOptions) {
+    this.scene = scene;
     this.tint = options.tint;
     this.enabled = options.enabled ?? true;
     this.onClick = options.onClick;
+    this.x = options.x;
+    this.y = options.y;
+    this.width = options.width;
+    this.height =
+      (options.sublabel ? MIN_HEIGHT + 20 : MIN_HEIGHT) + (options.big ? 12 : 0);
+    this.textShift = options.icon ? 22 : 0;
 
-    const height = options.sublabel ? MIN_HEIGHT + 22 : MIN_HEIGHT;
-    // Text shifts right to make room, so an icon never overlaps a long name.
-    const textShift = options.icon ? 22 : 0;
+    this.gfx = scene.add.graphics();
 
-    this.bg = scene.add
-      .rectangle(options.x, options.y, options.width, height, options.tint, 0.14)
-      .setStrokeStyle(2, options.tint, 0.8);
-
-    // A Zone carries the input, not the Rectangle. Both a Container hit area
-    // and `Rectangle.setInteractive()` were tried first: the scene received
-    // POINTER_DOWN and POINTER_UP but GAMEOBJECT_UP never fired, so the hit
-    // test simply was not matching the shape. A Zone exists specifically to be
-    // an input region and works without any of that ambiguity.
     this.hitZone = scene.add
-      .zone(options.x, options.y, options.width, height)
+      .zone(options.x, options.y, options.width, this.height + LIFT)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
-
-    // Exposed so the automated harness can click buttons where they actually
-    // are rather than guessing coordinates that shift with layout.
     this.hitZone.setName(options.label);
 
     if (options.icon && scene.textures.exists(options.icon)) {
       this.iconImage = scene.add
-        .image(options.x - options.width / 2 + 30, options.y, options.icon)
+        .image(options.x - options.width / 2 + 34, options.y, options.icon)
         .setOrigin(0.5)
-        .setDisplaySize(34, 34);
+        .setDisplaySize(38, 38);
     }
 
     this.labelText = scene.add
-      .text(
-        options.x + textShift,
-        options.y + (options.sublabel ? -11 : 0),
-        options.label,
-        {
-          fontFamily: FONT,
-          fontSize: '24px',
-          color: '#3c3524',
-        },
-      )
+      .text(options.x + this.textShift, options.y, options.label, {
+        fontFamily: FONT,
+        fontSize: options.big ? '32px' : '23px',
+        fontStyle: 'bold',
+        color: '#ffffff',
+        stroke: '#00000055',
+        strokeThickness: 4,
+      })
       .setOrigin(0.5);
 
     if (options.sublabel) {
       this.subText = scene.add
-        .text(options.x + textShift, options.y + 15, options.sublabel, {
+        .text(options.x + this.textShift, options.y, options.sublabel, {
           fontFamily: FONT,
-          fontSize: '17px',
-          color: '#7b7358',
+          fontSize: '16px',
+          color: '#ffffffdd',
         })
         .setOrigin(0.5);
     }
 
     this.hitZone.on(Phaser.Input.Events.POINTER_OVER, () => {
-      if (this.enabled) this.bg.setFillStyle(this.tint, 0.28);
+      this.hovered = true;
+      this.redraw();
     });
     this.hitZone.on(Phaser.Input.Events.POINTER_OUT, () => {
-      this.bg.setFillStyle(this.tint, this.enabled ? 0.14 : 0.05);
+      this.hovered = false;
+      this.pressed = false;
+      this.redraw();
     });
-    // POINTER_UP rather than DOWN: a press the player drags off should not
-    // fire. That is the standard touch contract and it prevents mis-taps.
+    this.hitZone.on(Phaser.Input.Events.POINTER_DOWN, () => {
+      if (!this.enabled) return;
+      this.pressed = true;
+      this.redraw();
+    });
     this.hitZone.on(Phaser.Input.Events.POINTER_UP, () => {
-      if (this.enabled) this.onClick();
+      const wasPressed = this.pressed;
+      this.pressed = false;
+      this.redraw();
+      if (this.enabled && wasPressed) this.onClick();
     });
 
     this.setEnabled(this.enabled);
   }
 
+  private redraw(): void {
+    const g = this.gfx;
+    g.clear();
+    const w = this.width;
+    const h = this.height;
+    const left = this.x - w / 2;
+    const top = this.y - h / 2 - LIFT / 2;
+    const drop = this.pressed ? LIFT : 0;
+    const face = this.enabled ? this.tint : 0x9a927e;
+    const lip = darken(face, 0.55);
+    const r = Math.min(20, h / 2);
+
+    g.fillStyle(0x000000, 0.18);
+    g.fillRoundedRect(left + 3, top + LIFT + 5, w, h, r);
+    g.fillStyle(lip, 1);
+    g.fillRoundedRect(left, top + LIFT, w, h, r);
+    g.fillStyle(this.hovered && this.enabled ? lighten(face, 0.12) : face, 1);
+    g.fillRoundedRect(left, top + drop, w, h, r);
+    // A soft highlight across the top half, which is most of what makes a flat
+    // shape read as something you can press.
+    g.fillStyle(0xffffff, 0.16);
+    g.fillRoundedRect(left + 6, top + drop + 4, w - 12, h * 0.42, {
+      tl: r - 4,
+      tr: r - 4,
+      bl: 6,
+      br: 6,
+    });
+    g.lineStyle(3, lip, 1);
+    g.strokeRoundedRect(left, top + drop, w, h, r);
+
+    const cy = this.y - LIFT / 2 + drop;
+    this.labelText.setY(this.subText ? cy - 11 : cy);
+    this.subText?.setY(cy + 15);
+    this.iconImage?.setY(cy);
+  }
+
   setDepth(depth: number): this {
-    this.bg.setDepth(depth);
+    this.gfx.setDepth(depth);
+    this.iconImage?.setDepth(depth + 1);
     this.labelText.setDepth(depth + 1);
     this.subText?.setDepth(depth + 1);
     this.hitZone.setDepth(depth + 2);
     return this;
   }
 
-  /** Recolours in place, for a button whose meaning changed rather than its text. */
   setTint(tint: number): void {
     this.tint = tint;
-    this.setEnabled(this.enabled);
+    this.redraw();
   }
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    this.bg.setFillStyle(this.tint, enabled ? 0.14 : 0.05);
-    this.bg.setStrokeStyle(2, this.tint, enabled ? 0.8 : 0.25);
-    this.labelText.setColor(enabled ? '#3c3524' : '#a49a80');
-    this.subText?.setColor(enabled ? '#7b7358' : '#b0a893');
-    this.iconImage?.setAlpha(enabled ? 1 : 0.35);
+    this.labelText.setAlpha(enabled ? 1 : 0.7);
+    this.subText?.setAlpha(enabled ? 1 : 0.7);
+    this.iconImage?.setAlpha(enabled ? 1 : 0.4);
+    this.redraw();
   }
 
   setLabel(label: string, sublabel?: string): void {
@@ -154,11 +194,40 @@ export class Button {
     if (sublabel !== undefined) this.subText?.setText(sublabel);
   }
 
+  /** A gentle breathing scale, for the one button the screen wants pressed. */
+  pulse(): this {
+    this.scene.tweens.add({
+      targets: [this.labelText],
+      scale: 1.06,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+    return this;
+  }
+
   destroy(): void {
     this.hitZone.destroy();
-    this.bg.destroy();
+    this.gfx.destroy();
     this.labelText.destroy();
     this.subText?.destroy();
     this.iconImage?.destroy();
   }
+}
+
+function darken(colour: number, k: number): number {
+  const r = ((colour >> 16) & 0xff) * k;
+  const g = ((colour >> 8) & 0xff) * k;
+  const b = (colour & 0xff) * k;
+  return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+}
+
+function lighten(colour: number, k: number): number {
+  const up = (c: number): number => Math.round(c + (255 - c) * k);
+  return (
+    (up((colour >> 16) & 0xff) << 16) |
+    (up((colour >> 8) & 0xff) << 8) |
+    up(colour & 0xff)
+  );
 }

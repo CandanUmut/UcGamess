@@ -7,7 +7,6 @@ import {
   type SamplePoint,
 } from './polyline.ts';
 import type { Patch } from './Patch.ts';
-import type { Buyer } from './Buyer.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -42,15 +41,13 @@ export class Route {
   /** The patch this route was aimed at, if any. */
   target: Patch | null = null;
   /**
-   * The buyer this line sells to, if it is a sell line.
+   * Whether this line has ever reached a flower.
    *
-   * A route now has exactly one job: gather from a flower, hold a corridor
-   * against wasps, or carry honey to a buyer. Keeping them exclusive is what
-   * makes the five route slots the real budget of the game — every line spent
-   * on selling is a line not gathering, and a hive that is filling up while you
-   * decide is the clock on that choice.
+   * Decides how a line with no flower is retired: one whose flower ran dry is
+   * finished and goes at once, one that never found anything was a scouting
+   * run and gets time for its bees to fly it first.
    */
-  targetBuyer: Buyer | null = null;
+  hadTarget = false;
   /** Bees currently assigned. Maintained by Field. */
   beeCount = 0;
   /**
@@ -146,23 +143,6 @@ export class Route {
     }
 
     this.updateTip();
-  }
-
-  /**
-   * Whether the live tip still reaches `targetBuyer`, so bees can trade.
-   *
-   * Measured from the **tip**, not from the bee. A bee eases toward its sample
-   * point rather than snapping to it, so it is always a little behind the line
-   * it is flying; testing the bee's own position meant a sell line that plainly
-   * touched the buyer paid nothing, which is the most confusing failure this
-   * game has available to it.
-   */
-  reachesBuyer(): boolean {
-    const buyer = this.targetBuyer;
-    if (!buyer) return false;
-    return (
-      Math.hypot(buyer.x - this.tipX, buyer.y - this.tipY) <= TUNING.honey.reachRadius
-    );
   }
 
   /** Whether the live tip still reaches `target`, so bees can collect. */

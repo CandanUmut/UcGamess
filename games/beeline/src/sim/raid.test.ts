@@ -231,54 +231,35 @@ describe('hive defences fight without the player', () => {
   });
 });
 
-describe('throwing at a wasp', () => {
-  it('hits it, hurts it, and lays no line', () => {
-    // Drawing a supply line at a raider never made sense: a line is
-    // infrastructure and a wasp will be gone in seconds. Same dial, same two
-    // taps, but the shot hits and vanishes — no road, no slot spent.
+describe('swatting a wasp', () => {
+  it('hits it with a tap, and lays no line', () => {
     const field = openBoard();
     const wasp = new Wasp(field.hiveX + 240, field.hiveY);
     field.wasps.push(wasp);
     const health = wasp.health;
 
-    field.tap(field.hiveX, field.hiveY);
-    field.aim.angle = 0;
-    field.tap(0, 0);
-    advance(field, 4);
-
+    expect(field.swatAt(wasp.x + 10, wasp.y - 10)).toBe(true);
     expect(wasp.health).toBeLessThan(health);
     expect(field.routes.length).toBe(0);
-    expect(field.aim.mode).toBe('idle');
   });
 
-  it('brings one down in a handful of throws', () => {
-    // Every throw is a deliberate aimed act, so a wasp that took seven of them
-    // would be a chore rather than a fight.
+  it('misses a tap that is nowhere near', () => {
     const field = openBoard();
     const wasp = new Wasp(field.hiveX + 240, field.hiveY);
     field.wasps.push(wasp);
-
-    for (let i = 0; i < 6 && wasp.alive && wasp.state !== 'fleeing'; i += 1) {
-      field.tap(field.hiveX, field.hiveY);
-      // Re-aimed each time: the wasp is crossing the board, so a throw at
-      // where it *was* is exactly the miss a player would make.
-      field.aim.angle = Math.atan2(wasp.y - field.hiveY, wasp.x - field.hiveX);
-      field.tap(0, 0);
-      advance(field, 4);
-    }
-    expect(wasp.health).toBe(0);
+    expect(field.swatAt(wasp.x + 300, wasp.y)).toBe(false);
+    expect(wasp.health).toBe(wasp.tuning.health);
   });
 
-  it('still lays a line when the shot lands on a flower instead', () => {
+  it('pays a bounty for bringing one down', () => {
     const field = openBoard();
-    const patch = field.patches.find((p) => p.alive && p.discovered);
-    if (!patch) return;
-
-    field.tap(field.hiveX, field.hiveY);
-    field.aim.angle = Math.atan2(patch.y - field.hiveY, patch.x - field.hiveX);
-    field.tap(0, 0);
-    advance(field, 6);
-
-    expect(field.routes.length).toBe(1);
+    const wasp = new Wasp(field.hiveX + 240, field.hiveY);
+    field.wasps.push(wasp);
+    const before = field.honey;
+    for (let i = 0; i < 6 && wasp.state !== 'fleeing'; i += 1)
+      field.swatAt(wasp.x, wasp.y);
+    expect(wasp.state).toBe('fleeing');
+    expect(field.honey).toBeGreaterThan(before);
+    expect(field.drainEvents().waspDown).toHaveLength(1);
   });
 });

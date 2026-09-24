@@ -33,29 +33,14 @@ export const TEX = {
   wall: 'wall',
   /** A pollen grain, for the moment a bee picks one up. */
   pollen: 'pollen',
-  /**
-   * The two shops, keyed by buyer id.
-   *
-   * `SHOP_TEX` below is the lookup the renderer uses; these exist so the keys
-   * are declared in one place with everything else. A missing file falls back
-   * to the drawn depot, so a failed fetch costs the picture and not the loop.
-   */
-  shopMarket: 'shop-market',
-  shopApothecary: 'shop-apothecary',
+  beeFlap: 'bee-flap',
+  swatBurst: 'swat-burst',
+  flowerGolden: 'flower-golden',
+  honeyDrop: 'honey-drop',
+  waspFlap: 'wasp-flap',
 } as const;
 
 /** Shop art by buyer id, in the same order the buyers are built. */
-export const SHOP_TEX: Record<'market' | 'apothecary', string> = {
-  market: TEX.shopMarket,
-  apothecary: TEX.shopApothecary,
-};
-
-/**
- * One flower sprite per species, in the same order as `COLORS.species`.
- *
- * The order is the contract: `Patch.species` indexes both, so a flower's colour
- * on the board and the sprite drawn for it cannot disagree.
- */
 export const FLOWER_TEX = [
   'flower-pink',
   'flower-violet',
@@ -73,10 +58,10 @@ export const TEX_FILES: ReadonlyArray<readonly [key: string, path: string]> = [
   [TEX.wasp, 'sprites/wasp.png'],
   [TEX.wall, 'sprites/wall.png'],
   [TEX.pollen, 'sprites/pollen.png'],
-  [TEX.shopMarket, 'sprites/shop-market.png'],
-  [TEX.shopApothecary, 'sprites/shop-apothecary.png'],
   [TEX.sparkle, 'particles/sparkle.png'],
   [TEX.glint, 'particles/glint.png'],
+  [TEX.flowerGolden, 'sprites/flower-golden.png'],
+  [TEX.honeyDrop, 'sprites/honey-drop.png'],
   ...FLOWER_TEX.map((key) => [key, `sprites/${key}.png`] as const),
 ];
 
@@ -185,3 +170,36 @@ export function createGeneratedTextures(scene: Phaser.Scene): void {
     [1, 'rgba(255,255,255,0)'],
   ]);
 }
+
+/**
+ * Queues every shipped image the scene does not already have.
+ *
+ * Both the title screen and the game call this: the title screen so it can
+ * show the hive and the swarm, the game so it still works if it is ever
+ * started directly. Keys already in the texture manager are skipped, which is
+ * what keeps the second call free.
+ */
+export function loadShippedTextures(scene: Phaser.Scene): void {
+  for (const [key, path] of TEX_FILES) {
+    if (!scene.textures.exists(key)) scene.load.image(key, path);
+  }
+  // The wing beats: four frames each, cut from the studio's own bee and wasp
+  // drawings (wings squashed toward their roots), so the swarm is alive rather
+  // than a crowd of stickers. The still drawings stay as the fallback.
+  for (const [key, path, w, h] of FLAP_SHEETS) {
+    if (!scene.textures.exists(key)) {
+      scene.load.spritesheet(key, path, { frameWidth: w, frameHeight: h });
+    }
+  }
+}
+
+/** Frames in a wing-beat sheet. */
+export const FLAP_FRAMES = 4;
+/** Frames in the swat burst. */
+export const BURST_FRAMES = 6;
+
+const FLAP_SHEETS: ReadonlyArray<readonly [string, string, number, number]> = [
+  [TEX.beeFlap, 'sprites/bee-flap.png', 96, 83],
+  [TEX.waspFlap, 'sprites/wasp-flap.png', 72, 43],
+  [TEX.swatBurst, 'sprites/swat-burst.png', 128, 128],
+];

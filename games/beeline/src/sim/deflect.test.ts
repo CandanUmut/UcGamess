@@ -4,7 +4,6 @@ import { slideAlongWalls } from './deflect.ts';
 import { buildPolyline } from './polyline.ts';
 import { Field } from './Field.ts';
 import { featuresForDay, patchesForDay } from '../game/DayCycle.ts';
-import { commitDrag, resolveDragStart } from '../game/RouteIntent.ts';
 
 /** An 8x4 board of 100x100 cells with every interior wall removed. */
 function openField(): Maze {
@@ -217,12 +216,10 @@ describe('drawing into a maze wall', () => {
       if (!Number.isFinite(cutAt)) continue; // this seed had a clear shot
       blockedBoards += 1;
 
-      const intent = resolveDragStart(field, field.hiveX, field.hiveY);
-      const result = commitDrag(field, intent, coords);
+      const slid = field.slidePath(coords);
+      expect(slid.contact, `trial ${trial}`).not.toBeNull();
 
-      expect(result.deflectedAt, `trial ${trial}`).not.toBeNull();
-
-      const route = field.routeById(result.routeId);
+      const route = field.createRoute(slid.coords);
       if (!route) {
         // Only acceptable when the drag jammed immediately against a wall in
         // the hive's own cell, which leaves nothing to build a route from.
@@ -264,8 +261,9 @@ describe('drawing into a maze wall', () => {
       const patch = field.patches.find((candidate) => candidate.alive);
       if (!patch) continue;
 
-      const intent = resolveDragStart(field, field.hiveX, field.hiveY);
-      commitDrag(field, intent, line(field.hiveX, field.hiveY, patch.x, patch.y, 8));
+      field.commitLine(
+        field.planLine({ x: field.hiveX, y: field.hiveY, route: null }, patch.x, patch.y),
+      );
 
       for (let step = 0; step < 120; step += 1) field.step(1 / 60);
 

@@ -220,13 +220,12 @@ function blend(from: number, to: number, t: number): number {
 /**
  * A line's colour says where it goes.
  *
- * A shop's own colour for a sell line, the flower's own colour for a gathering
- * one. Five identical amber lines was the single biggest reason a busy board
+ * The flower's own colour, and golden for a golden bloom. Five identical amber lines was the single biggest reason a busy board
  * was hard to read at a glance — and reading the board at a glance is most of
  * what playing well is.
  */
 function routeTint(route: Route): number {
-  if (route.targetBuyer) return route.targetBuyer.tuning.tint;
+  if (route.target?.kind === 'night') return 0xffc21a;
   if (route.target) return COLORS.species[route.target.species] ?? COLORS.route;
   return COLORS.route;
 }

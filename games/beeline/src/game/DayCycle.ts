@@ -57,23 +57,15 @@ export function dayQuota(day: number): number {
  * impression entirely.
  */
 export function patchesForDay(day: number): number {
-  if (day <= 1) return 2;
-  if (day <= 3) return 3;
-  if (day <= 6) return 4;
-  if (day <= 9) return 5;
-  // More flowers, each holding less.
-  //
-  // The two go together. Shrinking the pool is what forces a player to move on
-  // when a flower runs dry — the loop the game is built on — but on its own it
-  // just makes the day poorer, because the swarm spends it hunting. Adding
-  // flowers puts the next target within reach of the one that just died, so
-  // the retargeting is a decision rather than a walk.
-  //
-  // Five route slots against seven flowers is also the first point in the run
-  // where the board offers more than the player can hold at once, which is
-  // where choosing *which* flowers starts to matter.
-  if (day <= 12) return 6;
-  return 7;
+  // Many small flowers rather than a few big ones. A flower that runs dry in
+  // ten seconds is a decision every ten seconds; one that lasts a minute is a
+  // screensaver with a line on it.
+  if (day <= 1) return 3;
+  if (day <= 2) return 4;
+  if (day <= 4) return 5;
+  if (day <= 7) return 6;
+  if (day <= 11) return 7;
+  return 8;
 }
 
 /**
@@ -171,11 +163,11 @@ export function featuresForDay(day: number): DayFeatures {
 export function dayIntroduction(day: number): string | null {
   switch (day) {
     case 2:
-      return 'A second patch. Your swarm splits between routes.';
+      return 'Golden blooms open for a few seconds. Be quick!';
     case TUNING.maze.startDay:
-      return 'Brambles close in. Your lines cannot cross them — find a way round.';
+      return 'Brambles! Drag from the end of a line to steer round them.';
     case TUNING.wasp.startDay:
-      return 'Wasps raid in waves. Draw a line across their path to hold them.';
+      return 'Wasps! Tap them to swat them before they reach the hive.';
     case RICH_PATCH_DAY:
       return 'Rich patches bloom far away. Worth the distance?';
     case SECOND_WASP_DAY:
@@ -185,7 +177,7 @@ export function dayIntroduction(day: number): string | null {
     case TUNING.raid.hornetFromDay:
       return 'Hornets. Slow, tough, and costly to ignore.';
     case NIGHT_BLOOM_DAY:
-      return 'Night bloom. Brief, and worth a lot.';
+      return 'The meadow runs wild. More flowers, further out.';
     default:
       return null;
   }
@@ -256,28 +248,54 @@ export type DayOutcome = 'met' | 'missed';
 
 export interface DayResult {
   day: number;
-  /** Money banked. What a day is judged on now that honey is stock, not score. */
-  money: number;
+  /** Honey banked today, sunset bonus included. */
+  score: number;
+  /** The part of `score` that was the sunset bonus. */
+  bonus: number;
   quota: number;
   outcome: DayOutcome;
+  /** 0 on a missed day, 1-3 otherwise. */
+  stars: number;
   /** True when the miss was close enough to be worth offering extra time. */
   nearMiss: boolean;
-  isBest: boolean;
 }
 
-export function evaluateDay(day: number, money: number, bestSoFar: number): DayResult {
+/**
+ * Honey paid for clearing the meadow with daylight to spare.
+ *
+ * Without it, clearing early would *cost* the player: the day would end with
+ * the clock still running and nothing to show for the speed. Paid per second
+ * and scaled to the day's quota, so it is worth the same effort on day two and
+ * on day twelve.
+ */
+export function sunsetBonus(day: number, secondsLeft: number): number {
+  return Math.round(
+    Math.max(0, secondsLeft) * dayQuota(day) * TUNING.score.sunsetBonusPerSecond,
+  );
+}
+
+/** One star for the quota, two and three for beating it well. */
+export function starsFor(score: number, quota: number): number {
+  if (score < quota) return 0;
+  if (score >= quota * TUNING.score.threeStars) return 3;
+  if (score >= quota * TUNING.score.twoStars) return 2;
+  return 1;
+}
+
+export function evaluateDay(day: number, score: number, bonus = 0): DayResult {
   const quota = dayQuota(day);
-  const met = money >= quota;
-  const shortfall = (quota - money) / quota;
+  const met = score >= quota;
+  const shortfall = (quota - score) / quota;
 
   return {
     day,
-    money,
+    score,
+    bonus,
     quota,
     outcome: met ? 'met' : 'missed',
+    stars: starsFor(score, quota),
     // Only offer more time when the player was genuinely close. Offering it on
     // a hopeless day reads as the game selling a rescue it knows will not work.
     nearMiss: !met && shortfall <= TUNING.ads.extendOfferMissThreshold,
-    isBest: money > bestSoFar,
   };
 }

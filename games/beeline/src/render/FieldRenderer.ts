@@ -1,6 +1,4 @@
-// A value import, not a type-only one: `TintModes.FILL` is needed at runtime
-// for the hive's honey fill. Phaser is already in the bundle as a value.
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 import { COLORS, TUNING } from '../config/tuning.ts';
 import type { Field } from '../sim/Field.ts';
 import type { Patch } from '../sim/Patch.ts';
@@ -8,12 +6,7 @@ import {
   WORLD_HEIGHT as PLAYFIELD_HEIGHT,
   WORLD_WIDTH as PLAYFIELD_WIDTH,
 } from '../sim/Field.ts';
-import { FLOWER_TEX, SHOP_TEX, TEX } from './textures.ts';
-
-// Nunito first, system stack behind it — the same fallback chain the rest of
-// the game uses, because the subset is small and a missing glyph (the trend
-// arrows here) has to be drawn by the next family along.
-const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+import { BURST_FRAMES, FLAP_FRAMES, FLOWER_TEX, TEX } from './textures.ts';
 
 /**
  * Overrides for the two flowers that are not ordinary.
@@ -36,7 +29,6 @@ const WALL_ART_OFFSET = 6.5 / 87;
 
 /** How the hive is drawn, and therefore how tall the honey inside it looks. */
 const HIVE_SCALE = 0.86;
-const HIVE_ORIGIN_Y = 0.62;
 
 /**
  * The skep's half-width as a fraction of the drawing's, at the honey line.
@@ -65,62 +57,10 @@ const PLATE_PAD_X = 8;
 const PLATE_PAD_Y = 3;
 const PLATE_RADIUS = 7;
 
-/**
- * How wide a shop is drawn, in design units.
- *
- * The art is a tall honey pot, so the height follows from its aspect ratio
- * rather than being set here. Wide enough to read as a building at phone scale,
- * narrow enough that two of them and the hive fit across the yard without
- * touching.
- */
-const SHOP_WIDTH = 58;
-/**
- * Where the pot's base sits in its own image.
- *
- * Anchored at the base rather than the middle, which is what makes the shop
- * stand *on* its reach ring instead of floating inside it — the ring is ground,
- * and a building has to meet it.
- */
-const SHOP_ORIGIN_Y = 0.94;
-
-/**
- * The price tag, sitting **on** the shop rather than floating over it.
- *
- * The first version put it on a post well above the pot, and it read as a flag
- * planted next to a building rather than as that building's price — two things
- * on the board instead of one. Turmoil, which is where the idea came from, puts
- * the number *on* the derrick.
- *
- * `TAG_ON_SHOP` is how far down the pot the tag's middle sits, as a fraction of
- * the drawn height: high enough to lie across the lid rather than across the
- * hand-lettered label, low enough to be plainly part of the drawing.
- */
-const TAG_FILL = 0x171208;
-const TAG_ALPHA = 0.9;
-const TAG_PAD_X = 5;
-const TAG_PAD_Y = 3;
-const TAG_RADIUS = 4;
-const TAG_ON_SHOP = 0.2;
-
-const SKEP_WIDTH_AT_BASE = 0.92;
-const SKEP_WIDTH_AT_BRIM = 0.37;
-
-/**
- * Honey, and honey going over the brim.
- *
- * Brighter and more saturated than `COLORS.hive`, which is the skep's own
- * brown. The point of the fill is contrast against the building it is inside,
- * so it cannot be drawn in the building's colour.
- */
-const HONEY_TINT = 0xffb61f;
-const HONEY_SURFACE = 0xfff0b0;
-const SPILL_TINT = 0xff6a2f;
-const SPILL_SURFACE = 0xffc0a0;
-
 const KIND_TINT: Record<string, number> = {
   normal: COLORS.patch,
   rich: 0xffb454,
-  night: 0xb98cff,
+  night: 0xffc21a,
 };
 
 /** Draws the hive, the flower patches and the wasps. */
@@ -195,35 +135,22 @@ export class FieldRenderer {
   private readonly ground: Phaser.GameObjects.TileSprite | null;
   /** The hive itself, drawn over its glow. Null if the file never arrived. */
   private readonly hiveSprite: Phaser.GameObjects.Image | null;
-  /**
-   * A gold copy of the hive, cropped to the honey line.
-   *
-   * The vessel the whole selling loop is a race against, drawn *as* the vessel.
-   * The first version of this was a bar in the corner of the HUD, which is the
-   * standard answer and the wrong one here: the hive is already on screen, it
-   * is already the thing filling up, and a separate gauge asks the player to
-   * watch two objects and mentally join them. Filling the building itself means
-   * the pressure and the picture are the same object.
-   */
-  private readonly hiveFill: Phaser.GameObjects.Image | null;
-  /** `honey/cap`, under the skep. The number the gauge used to carry. */
-  private readonly hiveLabel: Phaser.GameObjects.Text;
-  /** The honey line, over the skep and under everything else. */
+  /** Swat splats, above the mist like the wasps they land on. */
   private readonly hiveGfx: Phaser.GameObjects.Graphics;
-  /** Eased honey level, 0..1. Never snapped — see `drawHiveHoney`. */
-  private fillShown = 0;
-  private spillPhase = 0;
+  /** A squash that decays, punched every time honey lands. */
+  private hiveBump = 0;
+  /** A ring that pulses out from the hive when a tap missed everything. */
+  private hivePing = 0;
+  /** Splats where a swat landed, fading. */
+  private splats: Array<{ x: number; y: number; life: number }> = [];
+  /** The pow bursts, one image each, pooled. */
+  private bursts: Array<{ sprite: Phaser.GameObjects.Image; life: number }> = [];
   /** Field time at the last frame, for a delta the draw call is not given. */
   private lastFieldTime = 0;
   /** One per wasp, reused. There are never more than a couple. */
   private wasps: Phaser.GameObjects.Image[] = [];
-  private buyerLabels: Phaser.GameObjects.Text[] = [];
   /** Eased pollen fractions, per patch, so the ring falls smoothly. */
   private readonly pollenShown = new Map<number, number>();
-  /** One per buyer. A null entry is a shop whose art never arrived. */
-  private shops: Array<Phaser.GameObjects.Image | null> = [];
-  /** The price tags' boards and posts, redrawn per frame. */
-  private readonly tagGfx: Phaser.GameObjects.Graphics;
   private warningPhase = 0;
   /**
    * One per visible wall bar, reused.
@@ -241,7 +168,6 @@ export class FieldRenderer {
     this.labelDepth = labelDepth;
     this.gfx = scene.add.graphics().setDepth(depth);
     this.plateGfx = scene.add.graphics().setDepth(labelDepth);
-    this.tagGfx = scene.add.graphics().setDepth(labelDepth);
     this.hiveGlow = scene.add
       .image(field.hiveX, field.hiveY, TEX.glow)
       .setDepth(depth + 1)
@@ -259,35 +185,10 @@ export class FieldRenderer {
           .setOrigin(0.5, 0.62)
           .setDepth(depth + 2)
       : null;
-    // Same texture, same origin, same scale as the skep, drawn a hair above it
-    // so the crop lines up with the drawing pixel for pixel.
-    this.hiveFill = scene.textures.exists(TEX.hive)
-      ? scene.add
-          .image(field.hiveX, field.hiveY, TEX.hive)
-          .setOrigin(0.5, HIVE_ORIGIN_Y)
-          .setDepth(depth + 2.5)
-          .setTint(HONEY_TINT)
-          .setTintMode(Phaser.TintModes.FILL)
-          .setAlpha(0)
-      : null;
-    this.hiveLabel = scene.add
-      .text(field.hiveX, field.hiveY - 78, '', {
-        fontFamily: FONT,
-        fontSize: '15px',
-        fontStyle: 'bold',
-        color: '#ffffff',
-        stroke: '#171208',
-        strokeThickness: 4,
-      })
-      // Above the skep, not below it. A shop now stands directly under the hive,
-      // and the readout was landing on its lid.
-      .setOrigin(0.5, 1)
-      .setDepth(labelDepth + 1);
-    // Its own layer, between the gold fill and the wasps. The honey line has to
-    // sit *over* the skep, and the field's main graphics layer is underneath
-    // it — drawing the meniscus there would have hidden it inside the building.
-    this.hiveGfx = scene.add.graphics().setDepth(depth + 2.6);
-    this.waspGfx = scene.add.graphics().setDepth(depth + 3);
+    this.hiveGfx = scene.add.graphics().setDepth(labelDepth - 0.5);
+    // Wasps fly above the mist. A raid you cannot see coming is not a threat
+    // to answer, it is a tax — and "tap to swat" needs a target to tap.
+    this.waspGfx = scene.add.graphics().setDepth(labelDepth - 2);
     this.wallGfx = scene.add.graphics().setDepth(depth + 4);
     this.surroundGfx = scene.add.graphics().setDepth(depth + 60);
   }
@@ -334,7 +235,6 @@ export class FieldRenderer {
     const g = this.gfx;
     g.clear();
     this.plateGfx.clear();
-    this.tagGfx.clear();
 
     for (const patch of field.patches) {
       if (!patch.discovered) continue;
@@ -344,214 +244,101 @@ export class FieldRenderer {
     this.drawLabels(field);
     this.drawWalls(field);
 
-    // The area a new route can start from. Brightening it while the player is
-    // mid-drag is the only chrome the playfield has.
-    g.lineStyle(2, COLORS.hive, drawingFromHive ? 0.5 : 0.16);
-    g.strokeCircle(field.hiveX, field.hiveY, TUNING.hive.drawRadius);
+    // Where a line can start from. Brightened while dragging, and pulsed
+    // outward when a tap landed somewhere that does nothing — the answer to
+    // "how do I play?" is always "from here".
+    g.lineStyle(3, COLORS.hive, drawingFromHive ? 0.6 : 0.22);
+    g.strokeCircle(field.hiveX, field.hiveY, TUNING.line.startRadius);
+    if (this.hivePing > 0) {
+      const r = TUNING.line.startRadius * (1.4 - this.hivePing * 0.4);
+      g.lineStyle(5, 0xffe38a, this.hivePing);
+      g.strokeCircle(field.hiveX, field.hiveY, r);
+    }
+
+    const dt = Math.max(0, Math.min(0.25, field.time - this.lastFieldTime));
+    this.lastFieldTime = field.time;
+    this.hiveBump = Math.max(0, this.hiveBump - dt * 6);
+    this.hivePing = Math.max(0, this.hivePing - dt * 1.4);
 
     const pulse = 1 + Math.sin(field.time * 2) * 0.04;
-    this.hiveGlow.setScale(1.6 * pulse);
-    // The skep breathes with the same pulse as its glow, but far less of it —
-    // a building that visibly inflates reads as a balloon.
-    this.hiveSprite?.setScale(0.86 + (pulse - 1) * 0.35);
+    this.hiveGlow.setScale(1.6 * pulse + this.hiveBump * 0.3);
+    // A delivery squashes the skep a little: wider, shorter, then back.
+    const bump = this.hiveBump * 0.08;
+    this.hiveSprite?.setScale(HIVE_SCALE * (1 + bump), HIVE_SCALE * (1 - bump * 0.7));
 
-    this.drawHiveHoney(field);
-    this.drawBuyers(field);
+    this.drawSplats(dt);
     this.drawWasps(field, alpha);
   }
 
-  /**
-   * Honey rising inside the skep, and the line it has reached.
-   *
-   * `setTintFill` rather than `setTint`: a multiply tint over a drawing that is
-   * already brown gives a slightly warmer brown, which is not a signal. Fill
-   * replaces the colour outright and keeps only the alpha, so what is drawn is
-   * the hive's *silhouette* in gold — held at partial alpha so the linework
-   * still reads through it. That is the contrast the multiply could not give.
-   *
-   * The crop takes the bottom `fullness` of the source image, so the gold
-   * climbs the building from its floor. A bright meniscus across the top of it
-   * is what makes the exact level readable at a glance rather than "somewhere
-   * around half"; without it a soft gold wash is surprisingly hard to measure.
-   */
-  private drawHiveHoney(field: Field): void {
-    this.hiveGfx.clear();
-    // The draw call is not handed a delta, and easing on a fixed per-frame
-    // constant would run at 2.4x on a 144Hz monitor — the same bug the fixed
-    // timestep exists to prevent, in its cosmetic form. Field time is the
-    // simulation's own clock, so this is correct at any refresh rate.
-    const dt = Math.max(0, Math.min(0.25, field.time - this.lastFieldTime));
-    this.lastFieldTime = field.time;
-
-    // Eased rather than snapped. Fast enough to feel responsive, slow enough
-    // that the last delivery before the brim reads as a rise, not a jump.
-    this.fillShown += (field.honeyFullness - this.fillShown) * Math.min(1, dt * 7);
-    const level = Math.max(0, Math.min(1, this.fillShown));
-
-    const spilling = field.isSpilling;
-    if (spilling) this.spillPhase += dt * 7;
-    else this.spillPhase = 0;
-
-    this.hiveLabel
-      .setText(
-        spilling
-          ? 'SPILLING'
-          : `${Math.round(field.honey)}/${Math.round(field.honeyCap)}`,
-      )
-      .setColor(spilling ? '#ff8a70' : '#ffffff');
-    this.shade(this.hiveLabel);
-
-    const fill = this.hiveFill;
-    if (!fill) return;
-
-    if (level <= 0.001) {
-      fill.setAlpha(0);
-      return;
-    }
-
-    // Off the frame rather than off measured constants, so a redrawn hive of a
-    // different size cannot silently put the honey line in the wrong place.
-    // Crop coordinates are texture-space and Phaser scales them itself.
-    const texW = fill.frame.width;
-    const texH = fill.frame.height;
-    const cropH = texH * level;
-    fill.setCrop(0, texH - cropH, texW, cropH);
-    fill.setScale(this.hiveSprite?.scaleX ?? HIVE_SCALE);
-
-    if (spilling) {
-      // A brimming hive is an emergency, and it says so in the one colour the
-      // rest of the game reserves for losing something.
-      fill.setTint(SPILL_TINT);
-      fill.setAlpha(0.5 + 0.25 * Math.abs(Math.sin(this.spillPhase)));
-    } else {
-      fill.setTint(HONEY_TINT);
-      fill.setAlpha(0.62);
-    }
-
-    // The meniscus: one line across the surface of the honey. It is what makes
-    // the exact level readable — a soft gold wash on its own turns out to be
-    // surprisingly hard to measure at a glance.
-    const drawnH = texH * (this.hiveSprite?.scaleY ?? HIVE_SCALE);
-    const top = field.hiveY - drawnH * HIVE_ORIGIN_Y;
-    const surfaceY = top + drawnH * (1 - level);
-    // Narrows as the honey rises, because the skep does.
-    const width = SKEP_WIDTH_AT_BASE + (SKEP_WIDTH_AT_BRIM - SKEP_WIDTH_AT_BASE) * level;
-    const halfWidth = texW * (this.hiveSprite?.scaleX ?? HIVE_SCALE) * 0.5 * width;
-
-    const g = this.hiveGfx;
-    g.lineStyle(3, spilling ? SPILL_SURFACE : HONEY_SURFACE, 0.9);
-    g.beginPath();
-    g.moveTo(field.hiveX - halfWidth, surfaceY);
-    g.lineTo(field.hiveX + halfWidth, surfaceY);
-    g.strokePath();
+  /** Honey landed: squash the skep. */
+  bumpHive(): void {
+    this.hiveBump = 1;
   }
 
-  /**
-   * The two buyers, as coloured depots with their price over the door.
-   *
-   * Drawn on the board rather than only in the HUD because the choice between
-   * them is half geography and half arithmetic — how far the line has to run
-   * matters as much as what the number says, and the two only compare properly
-   * when they are in the same place on screen.
-   *
-   * Never hidden by fog: they are landmarks, not discoveries. A player who
-   * cannot see where to sell cannot play the loop at all.
-   */
-  private drawBuyers(field: Field): void {
-    const g = this.gfx;
+  /** A tap that did nothing: show where lines start. */
+  pingHive(): void {
+    this.hivePing = 1;
+  }
 
-    let best = field.buyers[0];
-    for (const buyer of field.buyers) if (best && buyer.price > best.price) best = buyer;
-
-    while (this.shops.length < field.buyers.length) {
-      const shopFor = field.buyers[this.shops.length];
-      const key = shopFor ? SHOP_TEX[shopFor.id] : undefined;
-      this.shops.push(
-        key && this.scene.textures.exists(key)
-          ? this.scene.add
-              .image(shopFor?.x ?? 0, shopFor?.y ?? 0, key)
-              .setOrigin(0.5, SHOP_ORIGIN_Y)
-              // Above the wall bars. No hedge is ever drawn inside the yard,
-              // but a bar on the row above must not clip a roof.
-              .setDepth(this.depth + 5)
-          : null,
-      );
-    }
-
-    while (this.buyerLabels.length < field.buyers.length) {
-      this.buyerLabels.push(
-        this.scene.add
-          .text(0, 0, '', {
-            fontFamily: FONT,
-            // Smaller than the flower counts, because it has to fit across a
-            // pot rather than stand alone on grass, and its tag carries the
-            // contrast that a stroke would otherwise have to.
-            fontSize: '15px',
-            fontStyle: 'bold',
-            color: '#ffffff',
-            stroke: '#171208',
-            strokeThickness: 3,
-          })
-          .setOrigin(0.5)
-          .setDepth(this.labelDepth + 1),
-      );
-    }
-
-    field.buyers.forEach((buyer, index) => {
-      const tint = buyer.tuning.tint;
-      const isBest = buyer === best;
-
-      // A ring the size of the reach, so "how close does my line have to get"
-      // is a thing you can see rather than a number you have to know.
-      //
-      // Ring, not disc. While the depots sat on the far edge of the board a
-      // filled circle was free decoration; standing among the corridors it
-      // shaded most of a cell, and two of them read as craters in the field
-      // rather than as buildings on it. The fill is now a faint wash under the
-      // building alone, and the reach is carried by the outline.
-      const reach = TUNING.honey.reachRadius;
-      g.fillStyle(tint, 0.07);
-      g.fillCircle(buyer.x, buyer.y, reach);
-      g.lineStyle(isBest ? 3 : 2, tint, isBest ? 0.85 : 0.4);
-      g.strokeCircle(buyer.x, buyer.y, reach);
-
-      // The shop itself: the studio's own drawing, standing on the ring.
-      const shop = this.shops[index] ?? null;
-      let top = buyer.y - 34;
-      let drawnHeight = 44;
-      if (shop) {
-        shop.setVisible(true);
-        // The better price stands a touch taller. A building that is slightly
-        // larger reads before any number does, which is most of the reason the
-        // shops are on the board as well as in the HUD.
-        const scale = (SHOP_WIDTH / shop.width) * (isBest ? 1.06 : 1);
-        shop.setScale(scale);
-        drawnHeight = shop.height * scale;
-        top = buyer.y - drawnHeight * SHOP_ORIGIN_Y;
-      } else {
-        // No art: the old drawn depot, so a failed fetch costs the picture
-        // rather than the landmark.
-        g.fillStyle(tint, 0.92);
-        g.fillRect(buyer.x - 19, buyer.y - 8, 38, 25);
-        g.fillStyle(tint, 0.62);
-        g.beginPath();
-        g.moveTo(buyer.x - 25, buyer.y - 8);
-        g.lineTo(buyer.x, buyer.y - 26);
-        g.lineTo(buyer.x + 25, buyer.y - 8);
-        g.closePath();
-        g.fillPath();
+  /** A swat landed here. */
+  splat(x: number, y: number): void {
+    if (this.scene.textures.exists(TEX.swatBurst)) {
+      let slot = this.bursts.find((b) => b.life <= 0);
+      if (!slot) {
+        slot = {
+          sprite: this.scene.add
+            .image(0, 0, TEX.swatBurst, 0)
+            .setDepth(this.labelDepth - 0.4),
+          life: 0,
+        };
+        this.bursts.push(slot);
       }
+      slot.life = 1;
+      slot.sprite
+        .setPosition(x, y)
+        .setVisible(true)
+        .setRotation(Math.random() * Math.PI * 2)
+        .setScale(0.9 + Math.random() * 0.3);
+      return;
+    }
+    this.splats.push({ x, y, life: 1 });
+  }
 
-      const label = this.buyerLabels[index];
-      const arrow = buyer.trend > 0 ? '▲' : buyer.trend < 0 ? '▼' : '·';
-      if (!label) return;
-      label
-        .setText(`${buyer.price.toFixed(2)} ${arrow}`)
-        .setPosition(buyer.x, top + drawnHeight * TAG_ON_SHOP)
-        .setColor(buyer.trend > 0 ? '#8ce6a0' : buyer.trend < 0 ? '#ff9b85' : '#ffffff')
-        .setVisible(true);
-      this.priceTag(label, tint, isBest);
-    });
+  private drawSplats(dt: number): void {
+    // The pow burst plays through its frames in about a third of a second.
+    for (const burst of this.bursts) {
+      if (burst.life <= 0) continue;
+      burst.life -= dt * 3;
+      if (burst.life <= 0) {
+        burst.sprite.setVisible(false);
+        continue;
+      }
+      const frame = Math.min(
+        BURST_FRAMES - 1,
+        Math.floor((1 - burst.life) * BURST_FRAMES),
+      );
+      burst.sprite.setFrame(frame);
+    }
+
+    const g = this.hiveGfx;
+    g.clear();
+    for (const s of this.splats) {
+      s.life -= dt * 2.2;
+      if (s.life <= 0) continue;
+      const r = 30 + (1 - s.life) * 34;
+      g.lineStyle(6 * s.life, 0xfff4d6, s.life);
+      g.strokeCircle(s.x, s.y, r);
+      for (let i = 0; i < 6; i += 1) {
+        const a = (i / 6) * Math.PI * 2 + s.x;
+        g.fillStyle(0xffe38a, s.life);
+        g.fillCircle(
+          s.x + Math.cos(a) * r * 1.1,
+          s.y + Math.sin(a) * r * 1.1,
+          5 * s.life,
+        );
+      }
+    }
+    this.splats = this.splats.filter((s) => s.life > 0);
   }
 
   private drawPatch(g: Phaser.GameObjects.Graphics, patch: Patch, time: number): void {
@@ -562,7 +349,7 @@ export class FieldRenderer {
     const halo = patch.alive ? this.haloTint(patch) : COLORS.patchDry;
     // Richer flowers are physically bigger, so "worth the distance" is legible
     // from across the board before the number is read.
-    const radius = 26 * scale * (0.85 + 0.2 * patch.yieldPerTrip);
+    const radius = 26 * scale * flowerSize(patch);
 
     // The ring marks where a route has to reach. It is the target the player
     // aims at, so it stays visible rather than being decorative.
@@ -575,6 +362,25 @@ export class FieldRenderer {
     // The flower head itself is a sprite, placed in drawFlowers(). Only the
     // rings and washes are drawn here — they change every frame with bloom and
     // pool, where the sprite only moves and scales.
+
+    if (patch.kind === 'night' && patch.alive) {
+      // Golden: a warm glow that breathes, so it is the first thing the eye
+      // lands on when it opens.
+      g.fillStyle(0xffd23f, 0.22 + 0.12 * Math.sin(time * 6));
+      g.fillCircle(patch.x, patch.y, radius * 2.1);
+      // Slowly turning rays, the way a coin glints in a cartoon.
+      const rays = 12;
+      for (let i = 0; i < rays; i += 1) {
+        const a = time * 0.6 + (i / rays) * Math.PI * 2;
+        const inner = radius * 1.35;
+        const outer = radius * (2.3 + 0.25 * Math.sin(time * 5 + i));
+        g.lineStyle(i % 2 ? 3 : 5, 0xffe38a, 0.55);
+        g.beginPath();
+        g.moveTo(patch.x + Math.cos(a) * inner, patch.y + Math.sin(a) * inner);
+        g.lineTo(patch.x + Math.cos(a) * outer, patch.y + Math.sin(a) * outer);
+        g.strokePath();
+      }
+    }
 
     if (patch.kind === 'rich' && patch.alive) {
       // A second ring, so "worth the distance" is visible at a glance.
@@ -704,12 +510,15 @@ export class FieldRenderer {
         continue;
       }
 
-      const key = FLOWER_TEX[patch.species % FLOWER_TEX.length] ?? FLOWER_TEX[0];
+      const key =
+        patch.kind === 'night' && this.scene.textures.exists(TEX.flowerGolden)
+          ? TEX.flowerGolden
+          : (FLOWER_TEX[patch.species % FLOWER_TEX.length] ?? FLOWER_TEX[0]);
       if (key && flower.texture.key !== key && this.scene.textures.exists(key)) {
         flower.setTexture(key);
       }
 
-      const radius = 26 * patch.bloomT * (0.85 + 0.2 * patch.yieldPerTrip);
+      const radius = 26 * patch.bloomT * flowerSize(patch);
       const head = radius * (0.55 + 0.45 * patch.fullness);
 
       // A slow sway on two sines of different periods, so no two flowers are
@@ -782,34 +591,6 @@ export class FieldRenderer {
    * and a price with an arrow on it each get a plate that fits. Called after
    * the text and the position are set, since both change the size.
    */
-  /**
-   * The price tag, painted across the shop's own shoulder.
-   *
-   * A tag rather than the plain shade the other numbers get, because this is
-   * the one figure on the board meant to be *compared* rather than just read.
-   * The border is the shop's own colour, so the building, its tag and its HUD
-   * row are obviously one thing, and the better offer gets a brighter, thicker
-   * one — the comparison lands before the digits are read.
-   *
-   * It sits on the drawing rather than above it. Floating it on a post read as
-   * a flag planted beside a building rather than as that building's price, and
-   * the two shops became four objects on the board. Ownership is unambiguous
-   * when the number is painted on the thing it belongs to, and it costs no
-   * vertical space in a corner that has none to spare.
-   */
-  private priceTag(label: Phaser.GameObjects.Text, tint: number, isBest: boolean): void {
-    const width = label.displayWidth + TAG_PAD_X * 2;
-    const height = label.displayHeight + TAG_PAD_Y * 2;
-    const left = label.x - width / 2;
-    const top = label.y - height / 2;
-
-    const g = this.tagGfx;
-    g.fillStyle(TAG_FILL, TAG_ALPHA);
-    g.fillRoundedRect(left, top, width, height, TAG_RADIUS);
-    g.lineStyle(isBest ? 2.5 : 1.5, tint, isBest ? 1 : 0.75);
-    g.strokeRoundedRect(left, top, width, height, TAG_RADIUS);
-  }
-
   private shade(label: Phaser.GameObjects.Text): void {
     const width = label.displayWidth + PLATE_PAD_X * 2;
     const height = label.displayHeight + PLATE_PAD_Y * 2;
@@ -968,10 +749,15 @@ export class FieldRenderer {
     this.drawRaidWarning(field, g);
 
     while (this.wasps.length < field.wasps.length) {
+      const key = this.scene.textures.exists(TEX.waspFlap)
+        ? TEX.waspFlap
+        : this.scene.textures.exists(TEX.wasp)
+          ? TEX.wasp
+          : TEX.glow;
       const sprite = this.scene.add
-        .image(0, 0, this.scene.textures.exists(TEX.wasp) ? TEX.wasp : TEX.glow)
+        .image(0, 0, key)
         .setOrigin(0.5)
-        .setDepth(this.depth + 3);
+        .setDepth(this.labelDepth - 1);
       this.wasps.push(sprite);
     }
     for (let i = field.wasps.length; i < this.wasps.length; i += 1) {
@@ -986,40 +772,31 @@ export class FieldRenderer {
       const x = wasp.prevX + (wasp.x - wasp.prevX) * alpha;
       const y = wasp.prevY + (wasp.y - wasp.prevY) * alpha;
 
-      // Threat radius drawn faintly — the player needs to judge whether a route
-      // passes through danger, and guessing at an invisible radius is unfair.
-      // Only while it is crossing the field: at the hive it is a target, not a
-      // no-go zone, and the ring would sit over the thing you must drag onto.
+      // Threat radius drawn faintly — where it scatters bees off a line.
       if (wasp.state === 'approaching') {
-        g.fillStyle(0xd23b2a, 0.09);
+        g.fillStyle(0xd23b2a, 0.1);
         g.fillCircle(x, y, TUNING.wasp.interceptRadius * 1.6);
       }
 
-      // The ring that says "draw at me": where a route's tip has to land for
-      // its bees to reach, and how much fight is left in the wasp. Damage is
-      // shown as an arc of the same ring rather than a bar, so it reads at a
-      // glance without adding a second piece of furniture to the board.
+      // The tap target: a ring that says "hit me", at the size a swat
+      // actually counts, with one pip per hit it has left.
       if (wasp.state !== 'fleeing') {
-        g.lineStyle(2, 0xffd25e, 0.28);
-        g.strokeCircle(x, y, TUNING.wasp.reachRadius);
-
-        const spent = 1 - wasp.vitality;
-        if (spent > 0) {
-          g.lineStyle(4, 0xffd25e, 0.85);
-          g.beginPath();
-          g.arc(
-            x,
-            y,
-            TUNING.wasp.reachRadius,
-            -Math.PI / 2,
-            -Math.PI / 2 + Math.PI * 2 * spent,
-          );
-          g.strokePath();
+        const beat = 0.5 + 0.5 * Math.sin(field.time * 9 + i);
+        g.lineStyle(3, 0xfff4d6, 0.45 + 0.35 * beat);
+        g.strokeCircle(x, y, TUNING.swat.radius * (0.82 + 0.06 * beat));
+        const hp = Math.max(0, Math.ceil(wasp.health));
+        for (let k = 0; k < hp; k += 1) {
+          const px = x + (k - (hp - 1) / 2) * 12;
+          g.fillStyle(0xff7043, 1);
+          g.fillCircle(px, y - 34 * wasp.tuning.scale - 8, 4.5);
         }
       }
 
       sprite.setVisible(true);
       sprite.setPosition(x, y);
+      if (sprite.texture.key === TEX.waspFlap) {
+        sprite.setFrame(Math.floor(field.time * 30 + i * 1.3) % FLAP_FRAMES);
+      }
       // Size and tint per kind, so a wave can be read at a glance: a hornet is
       // plainly the big orange one worth avoiding and a drone is the small pale
       // one that will be at the door first.
@@ -1085,20 +862,27 @@ export class FieldRenderer {
     this.flowers = [];
     this.ground?.destroy();
     this.hiveSprite?.destroy();
-    this.hiveFill?.destroy();
-    this.hiveLabel.destroy();
     this.hiveGfx.destroy();
     this.plateGfx.destroy();
+    for (const burst of this.bursts) burst.sprite.destroy();
+    this.bursts = [];
     for (const wasp of this.wasps) wasp.destroy();
     this.wasps = [];
-    for (const label of this.buyerLabels) label.destroy();
-    this.buyerLabels = [];
-    for (const shop of this.shops) shop?.destroy();
-    this.shops = [];
-    this.tagGfx.destroy();
     for (const bar of this.wallBars) bar.destroy();
     this.wallBars = [];
   }
+}
+
+/**
+ * How big a flower is drawn, relative to an ordinary near one.
+ *
+ * Richer flowers are bigger, so "worth the distance" reads from across the
+ * board — but capped. A golden bloom pays four times over and was drawn four
+ * times over, which put a flower the size of the hive over the HUD.
+ */
+function flowerSize(patch: Patch): number {
+  if (patch.kind === 'night') return 1.45;
+  return Math.min(1.5, 0.85 + 0.2 * patch.yieldPerTrip);
 }
 
 /** Linear blend between two packed RGB colours. */
