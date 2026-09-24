@@ -46,3 +46,7 @@ desktop.ini
 # stays on local disk only. See docs/reference/README.md.
 UcGames_document.md
 /preview-site/
+
+# Generated store images and videos (tools/store.mjs); attached to releases.
+/games/beeline/store/out/
+/release/

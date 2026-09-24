@@ -2271,6 +2271,38 @@ steer for the corner only when the preview will not connect).
 
 A campaign gate in `engagement.test.ts` holds the shape in CI.
 
+## 35. Shipping it
+
+What changed to make the game submittable, rather than playable:
+
+- **In gameplay within one click.** A brand-new save skips the menu and opens
+  level 1-1, whose tutorial is the onboarding. A returning player's menu leads
+  with one button: e.g. _Play 1-4 Far Petals_, the next unstarred level.
+- **Pause.** The HUD's top-right button, or `P`, opens a card with Resume,
+  Retry (campaign), Map/Menu and Sound on/off. `Esc` is left alone:
+  CrazyGames reserves it for leaving fullscreen. Losing window focus opens the
+  same card, so a player who clicked outside the portal frame comes back to
+  "Paused" rather than to a day that ran on without them.
+- **A core bug found on the way.** `BaseGameplayScene` stopped gameplay on
+  window blur and never restarted it on focus — the board froze until the next
+  day began. Focus now restarts play that blur stopped, unless the game paused
+  the scene itself in between.
+- **Mute persists** (`audio.muted`, restored at boot). There was no way to mute
+  at all before.
+- **`happyTime()`** — CrazyGames' celebration cue, a no-op elsewhere — fires on
+  a new star, a finished world, and an endless run that beats its best day.
+  Not on every pass: a cue that fires constantly means nothing.
+- **Debug handles** (`window.__game`, `window.__beeline`) exist only in dev and
+  `local` builds; portal builds carry neither.
+- **A `web` adapter** (packages/portal) for itch.io and plain hosting: no SDK,
+  no ads, rewarded offers hidden.
+- **Store assets are generated, not drawn**: `tools/store.mjs` plays a level in
+  headless Chromium and captures covers, screenshots and 18 s silent previews.
+  They are honest but plain; hand-made key art would outperform them. The title
+  on all of them comes from `src/config/title.ts`.
+
+Release mechanics are in `docs/publishing.md`.
+
 ## 25. Success criteria
 
 Not submission-ready until all of these hold:
