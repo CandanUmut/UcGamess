@@ -1,5 +1,5 @@
 import type { WaspKind } from '../sim/Wasp.ts';
-import type { DayFeatures } from './DayCycle.ts';
+import type { DayFeatures, FlowerGroup, FlowerTier } from './DayCycle.ts';
 import { noModifiers, type RunModifiers } from './Items.ts';
 import { TUNING } from '../config/tuning.ts';
 
@@ -63,17 +63,22 @@ export interface LevelDef {
   seed: number;
   /** Seconds of daylight. */
   seconds: number;
-  flowers: number;
-  lines: number;
   bees: number;
-  /** Which day of the endless run this board's flowers and walls are sized like. */
+  /**
+   * Wax, as a multiple of the cheapest network reaching this board's valuable
+   * (tier 2+) flowers — see `Field.networkCost`. Near 1 it takes a good
+   * trunk-and-branches plan to reach them all.
+   */
+  wax: number;
+  /** The flowers, as clusters. */
+  groups: readonly FlowerGroup[];
+  /** Flowers on the board, summed over `groups`. */
+  flowers: number;
+  /** Which endless day the board's hazards are sized like. */
   difficulty: number;
   /** 1 is an open field, lower is a tighter maze. */
   mazeOpenness: number;
-  /** Mist over what the hive cannot see. */
-  fog: boolean;
   golden: boolean;
-  rich: boolean;
   wave: WaspKind[];
   /** One line said as the level opens, if it introduces something. */
   intro?: string;
@@ -84,14 +89,11 @@ export interface LevelDef {
 interface Spec {
   name: string;
   seconds: number;
-  flowers: number;
-  lines: number;
   bees: number;
-  difficulty: number;
+  wax: number;
+  groups: FlowerGroup[];
   maze?: number;
-  fog?: boolean;
   golden?: boolean;
-  rich?: boolean;
   wave?: WaspKind[];
   intro?: string;
 }
@@ -100,354 +102,304 @@ const R: WaspKind = 'raider';
 const D: WaspKind = 'drone';
 const H: WaspKind = 'hornet';
 
+/** Distance bands from the hive, in design px along the maze. */
+const NEAR = [150, 470] as const;
+const MID = [440, 820] as const;
+const FAR = [760, 1250] as const;
+
+/** A cluster: `count` flowers of `tier` in a band, within `spread` cells of each other. */
+function g(
+  tier: FlowerTier,
+  count: number,
+  band: readonly [number, number],
+  spread = 1,
+): FlowerGroup {
+  return { tier, count, near: band[0], far: band[1], spread };
+}
+
+/**
+ * The thirty boards.
+ *
+ * Every level is built around one question about the network. World one
+ * teaches the three ideas in turn — lines cost wax, a branch only pays for
+ * what it adds, and rich flowers are worth going far for — and then mixes
+ * them. World two puts hedges between the hive and the good flowers, so a
+ * trunk has to be routed before it can be shared. World three sends wasps at
+ * whatever you built.
+ */
 const SPECS: readonly Spec[] = [
-  // ---- Spring Meadow: the verb, the crew, the multiplier, the mist
+  // ---- Spring Meadow: wax, branches, value
   {
     name: 'First Blooms',
-    seconds: 40,
-    flowers: 3,
-    lines: 3,
-    bees: 24,
-    difficulty: 1,
+    seconds: 45,
+    bees: 16,
+    wax: 1.2,
+    groups: [g(1, 3, NEAR, 2)],
     intro: 'Drag from the hive to a flower',
   },
   {
-    name: 'Two Crews',
-    seconds: 40,
-    flowers: 4,
-    lines: 2,
+    name: 'Branch Out',
+    seconds: 50,
     bees: 16,
-    difficulty: 1,
-    intro: 'A line carries 8 bees — re-lay it when a flower runs dry',
+    wax: 1.2,
+    groups: [g(1, 1, NEAR), g(2, 3, MID)],
+    intro: 'Lines cost wax. Drag from a line to branch — you only pay for the new part',
   },
   {
-    name: 'Busy Hive',
-    seconds: 45,
-    flowers: 5,
-    lines: 3,
+    name: 'Worth the Trip',
+    seconds: 55,
     bees: 24,
-    difficulty: 2,
-    intro: 'Keep every bee flying and the multiplier climbs',
+    wax: 1.2,
+    groups: [g(1, 3, NEAR, 2), g(3, 2, FAR)],
+    intro: 'Blue and violet flowers pay three times as much',
+  },
+  {
+    name: 'Dry Spells',
+    seconds: 55,
+    bees: 24,
+    wax: 1.2,
+    groups: [g(1, 4, NEAR, 2), g(2, 3, MID)],
+    intro: 'A dry line stays yours — drag on from its end to reuse it',
   },
   {
     name: 'Golden Hour',
-    seconds: 45,
-    flowers: 5,
-    lines: 3,
+    seconds: 60,
     bees: 24,
-    difficulty: 2,
+    wax: 1.2,
     golden: true,
-    intro: 'Golden blooms are brief — be quick',
+    groups: [g(1, 3, NEAR, 2), g(2, 3, MID)],
+    intro: 'Golden blooms are brief and pay six — branch to them fast',
   },
   {
-    name: 'Wide Field',
-    seconds: 50,
-    flowers: 6,
-    lines: 3,
+    name: 'Two Meadows',
+    seconds: 60,
     bees: 24,
-    difficulty: 3,
-    golden: true,
+    wax: 1.2,
+    groups: [g(1, 2, NEAR, 2), g(2, 3, MID), g(3, 3, FAR)],
   },
   {
-    name: 'Morning Mist',
-    seconds: 50,
-    flowers: 6,
-    lines: 3,
+    name: 'Thrift',
+    seconds: 60,
     bees: 24,
-    difficulty: 3,
-    fog: true,
-    intro: 'Lines into the mist find hidden flowers',
+    wax: 1.2,
+    groups: [g(1, 3, NEAR, 2), g(3, 3, FAR)],
+    intro: 'Short on wax. Hold a line to take it back for half',
   },
   {
     name: 'Far Petals',
-    seconds: 55,
-    flowers: 6,
-    lines: 3,
-    bees: 24,
-    difficulty: 4,
-    fog: true,
+    seconds: 65,
+    bees: 32,
+    wax: 1.2,
     golden: true,
-    rich: true,
+    groups: [g(1, 4, NEAR, 2), g(3, 4, FAR)],
   },
   {
-    name: 'Four Lines',
-    seconds: 55,
-    flowers: 7,
-    lines: 4,
+    name: 'Three Roads',
+    seconds: 65,
     bees: 32,
-    difficulty: 4,
-    fog: true,
-    golden: true,
-  },
-  {
-    name: 'Sweet Spot',
-    seconds: 55,
-    flowers: 7,
-    lines: 4,
-    bees: 32,
-    difficulty: 5,
-    fog: true,
-    golden: true,
-    rich: true,
+    wax: 1.2,
+    groups: [g(2, 3, MID), g(3, 3, FAR), g(2, 2, MID)],
   },
   {
     name: 'Full Bloom',
-    seconds: 60,
-    flowers: 8,
-    lines: 4,
+    seconds: 70,
     bees: 32,
-    difficulty: 6,
-    fog: true,
+    wax: 1.2,
     golden: true,
-    rich: true,
+    groups: [g(1, 3, NEAR, 2), g(2, 3, MID), g(3, 3, FAR)],
   },
 
-  // ---- Bramble Maze: routing in legs
+  // ---- Bramble Maze: route the trunk, then share it
   {
     name: 'First Hedges',
     seconds: 55,
-    flowers: 5,
-    lines: 3,
     bees: 24,
-    difficulty: 4,
+    wax: 1.2,
     maze: 0.85,
-    fog: true,
-    intro: 'Drag from the end of a line to steer round hedges',
+    groups: [g(1, 2, NEAR, 2), g(2, 3, MID)],
+    intro: 'Hedges! Drag to a gap, then on from the end of the line',
   },
   {
     name: 'Corners',
-    seconds: 55,
-    flowers: 6,
-    lines: 3,
+    seconds: 60,
     bees: 24,
-    difficulty: 5,
+    wax: 1.2,
     maze: 0.75,
-    fog: true,
     golden: true,
+    groups: [g(2, 3, MID), g(3, 2, FAR)],
   },
   {
     name: 'Narrow Rows',
     seconds: 60,
-    flowers: 6,
-    lines: 3,
     bees: 24,
-    difficulty: 5,
+    wax: 1.2,
     maze: 0.65,
-    fog: true,
-    golden: true,
+    groups: [g(1, 3, NEAR, 2), g(3, 3, FAR)],
   },
   {
     name: 'Thorn Garden',
     seconds: 60,
-    flowers: 7,
-    lines: 4,
     bees: 32,
-    difficulty: 6,
+    wax: 1.2,
     maze: 0.6,
-    fog: true,
     golden: true,
-    rich: true,
+    groups: [g(2, 3, MID), g(2, 2, MID), g(3, 2, FAR)],
   },
   {
     name: 'Lost Clover',
-    seconds: 60,
-    flowers: 7,
-    lines: 3,
-    bees: 24,
-    difficulty: 6,
+    seconds: 65,
+    bees: 32,
+    wax: 1.2,
     maze: 0.55,
-    fog: true,
-    golden: true,
+    groups: [g(1, 2, NEAR, 2), g(2, 4, MID), g(3, 2, FAR)],
   },
   {
     name: 'Hedge Loop',
     seconds: 65,
-    flowers: 7,
-    lines: 4,
     bees: 32,
-    difficulty: 7,
+    wax: 1.2,
     maze: 0.5,
-    fog: true,
     golden: true,
-    rich: true,
+    groups: [g(2, 3, MID), g(3, 3, FAR)],
   },
   {
     name: 'The Long Way',
-    seconds: 65,
-    flowers: 8,
-    lines: 4,
+    seconds: 70,
     bees: 32,
-    difficulty: 8,
+    wax: 1.2,
     maze: 0.45,
-    fog: true,
-    golden: true,
-    rich: true,
+    groups: [g(1, 3, NEAR, 2), g(3, 4, FAR)],
   },
   {
     name: 'Bramble Heart',
     seconds: 70,
-    flowers: 8,
-    lines: 4,
     bees: 32,
-    difficulty: 8,
+    wax: 1.2,
     maze: 0.4,
-    fog: true,
     golden: true,
-    rich: true,
+    groups: [g(2, 3, MID), g(3, 3, FAR), g(1, 2, NEAR, 2)],
   },
   {
     name: 'Five Roads',
     seconds: 70,
-    flowers: 8,
-    lines: 5,
     bees: 40,
-    difficulty: 9,
+    wax: 1.2,
     maze: 0.35,
-    fog: true,
     golden: true,
-    rich: true,
+    groups: [g(2, 3, MID), g(2, 2, MID), g(3, 3, FAR), g(3, 2, FAR)],
   },
   {
     name: 'The Labyrinth',
     seconds: 75,
-    flowers: 9,
-    lines: 5,
     bees: 40,
-    difficulty: 10,
+    wax: 1.2,
     maze: 0.3,
-    fog: true,
     golden: true,
-    rich: true,
+    groups: [g(1, 2, NEAR, 2), g(2, 3, MID), g(3, 4, FAR)],
   },
 
-  // ---- Wasp Summer: everything, plus raids
+  // ---- Wasp Summer: defend what you built
   {
     name: 'First Raid',
     seconds: 55,
-    flowers: 6,
-    lines: 3,
     bees: 24,
-    difficulty: 5,
+    wax: 1.2,
     maze: 0.9,
-    fog: true,
     wave: [R],
+    groups: [g(1, 2, NEAR, 2), g(2, 3, MID)],
     intro: 'Wasps! Tap them to swat them',
   },
   {
     name: 'Pair of Pests',
     seconds: 60,
-    flowers: 6,
-    lines: 3,
     bees: 24,
-    difficulty: 6,
+    wax: 1.2,
     maze: 0.8,
-    fog: true,
     golden: true,
     wave: [R, R],
+    groups: [g(2, 3, MID), g(3, 2, FAR)],
   },
   {
     name: 'Stingers',
     seconds: 60,
-    flowers: 7,
-    lines: 4,
     bees: 32,
-    difficulty: 6,
+    wax: 1.2,
     maze: 0.7,
-    fog: true,
     golden: true,
     wave: [R, R, R],
+    groups: [g(1, 3, NEAR, 2), g(3, 3, FAR)],
   },
   {
     name: 'Swarm Season',
     seconds: 65,
-    flowers: 7,
-    lines: 4,
     bees: 32,
-    difficulty: 7,
+    wax: 1.2,
     maze: 0.6,
-    fog: true,
     golden: true,
-    rich: true,
     wave: [R, R, R],
+    groups: [g(2, 3, MID), g(2, 2, MID), g(3, 2, FAR)],
   },
   {
     name: 'Drone Rush',
     seconds: 65,
-    flowers: 7,
-    lines: 4,
     bees: 32,
-    difficulty: 8,
+    wax: 1.2,
     maze: 0.6,
-    fog: true,
     golden: true,
     wave: [D, D, R, R],
+    groups: [g(1, 2, NEAR, 2), g(2, 3, MID), g(3, 2, FAR)],
     intro: 'Drones are fast — swat them early',
   },
   {
     name: 'Hot Wind',
     seconds: 65,
-    flowers: 8,
-    lines: 4,
     bees: 32,
-    difficulty: 8,
+    wax: 1.2,
     maze: 0.5,
-    fog: true,
     golden: true,
-    rich: true,
     wave: [D, D, R, R],
+    groups: [g(2, 3, MID), g(3, 3, FAR)],
   },
   {
     name: 'Guarded Grove',
     seconds: 70,
-    flowers: 8,
-    lines: 5,
     bees: 40,
-    difficulty: 9,
+    wax: 1.2,
     maze: 0.45,
-    fog: true,
     golden: true,
-    rich: true,
     wave: [D, R, R, R, R],
+    groups: [g(1, 3, NEAR, 2), g(3, 4, FAR)],
   },
   {
     name: 'Hornet Nest',
     seconds: 70,
-    flowers: 8,
-    lines: 5,
     bees: 40,
-    difficulty: 10,
+    wax: 1.2,
     maze: 0.45,
-    fog: true,
     golden: true,
-    rich: true,
     wave: [H, R, R, D],
+    groups: [g(2, 3, MID), g(3, 3, FAR), g(1, 2, NEAR, 2)],
     intro: 'Hornets take four swats',
   },
   {
     name: 'Siege',
     seconds: 75,
-    flowers: 9,
-    lines: 5,
     bees: 40,
-    difficulty: 11,
+    wax: 1.2,
     maze: 0.4,
-    fog: true,
     golden: true,
-    rich: true,
     wave: [H, D, D, R, R, R],
+    groups: [g(2, 3, MID), g(2, 2, MID), g(3, 3, FAR)],
   },
   {
     name: 'Queen of Summer',
     seconds: 80,
-    flowers: 9,
-    lines: 5,
     bees: 40,
-    difficulty: 12,
+    wax: 1.2,
     maze: 0.35,
-    fog: true,
     golden: true,
-    rich: true,
     wave: [H, H, D, D, R, R, R],
+    groups: [g(1, 2, NEAR, 2), g(2, 3, MID), g(3, 4, FAR)],
   },
 ];
 
@@ -458,53 +410,105 @@ const SPECS: readonly Spec[] = [
  * level above or anything that moves honey, and paste its output here.
  */
 export const LEVEL_STARS: ReadonlyArray<readonly [number, number, number]> = [
-  [190, 210, 230],
-  [310, 360, 400],
-  [410, 540, 590],
-  [480, 860, 950],
-  [1025, 1300, 1425],
-  [880, 1200, 1325],
-  [820, 1275, 1400],
-  [800, 1250, 1375],
-  [860, 1425, 1675],
-  [1025, 1350, 1475],
-  [900, 1000, 1100],
-  [1325, 1475, 1625],
-  [1325, 1550, 1700],
-  [910, 1275, 1400],
-  [1550, 1875, 2075],
-  [1350, 1700, 1875],
-  [2225, 2625, 2900],
-  [2350, 2700, 2975],
-  [2075, 2325, 2850],
-  [2600, 3550, 4350],
-  [810, 1275, 1475],
-  [1100, 1375, 1575],
-  [780, 970, 1175],
-  [610, 720, 880],
-  [1200, 1475, 1675],
-  [1475, 2000, 2925],
-  [930, 1225, 2150],
-  [1425, 1925, 2200],
-  [1150, 1300, 1500],
-  [2125, 2525, 3075],
+  [145, 210, 260],
+  [100, 710, 800],
+  [190, 900, 1175],
+  [220, 980, 1100],
+  [220, 1075, 1200],
+  [440, 2350, 2625],
+  [230, 1625, 1825],
+  [380, 2675, 3000],
+  [540, 3225, 3600],
+  [510, 2800, 3125],
+  [260, 1000, 1125],
+  [270, 1125, 2125],
+  [640, 3350, 3750],
+  [470, 1350, 1900],
+  [330, 1875, 2100],
+  [420, 1400, 3300],
+  [740, 3575, 4000],
+  [390, 2625, 3075],
+  [550, 2925, 3775],
+  [490, 2825, 3875],
+  [260, 1225, 1375],
+  [220, 1075, 1600],
+  [270, 1200, 1725],
+  [360, 1900, 2275],
+  [320, 1700, 1950],
+  [310, 1975, 2225],
+  [550, 3400, 4375],
+  [350, 2300, 2750],
+  [640, 3575, 4000],
+  [660, 3375, 5200],
 ];
+
+/**
+ * Each level's layout seed and wax, chosen by `src/playtest/search-levels.ts`.
+ *
+ * The groups above say *what* a board holds; the seed decides where it all
+ * lands, and some landings make a far better question than others. The search
+ * plays candidate boards with a planner, a regular player and a player with no
+ * plan, and keeps the one where planning is worth the most while a regular
+ * player still gets most of the way. Re-run it after changing the groups.
+ */
+export const LEVEL_LAYOUTS: ReadonlyArray<readonly [seed: number, wax: number]> = [
+  [62056100, 3],
+  [185950923, 1.15],
+  [154987116, 1.35],
+  [31108131, 1.35],
+  [232432269, 1.35],
+  [152243, 1.15],
+  [139532929, 1.35],
+  [15653944, 1.35],
+  [46633589, 1.15],
+  [93099097, 1.35],
+  [216993920, 1.35],
+  [31171483, 1.35],
+  [155066306, 1.35],
+  [186045951, 1.15],
+  [108624555, 1],
+  [31203159, 1.15],
+  [170583845, 1],
+  [186077627, 1.35],
+  [31226916, 1.15],
+  [46720698, 1.35],
+  [77700343, 1.15],
+  [108679988, 1.35],
+  [62230318, 1.35],
+  [108695826, 1.15],
+  [139675471, 1.35],
+  [15796486, 1.35],
+  [15804405, 1],
+  [62269913, 1.35],
+  [155193010, 1],
+  [342299, 1.35],
+];
+
+/** A level's layout seed and wax factor: the searched value, or a default. */
+export function layoutFor(
+  index: number,
+  spec: { wax: number },
+): readonly [number, number] {
+  return LEVEL_LAYOUTS[index] ?? [7919 * (index + 1) + 104_729, spec.wax];
+}
+
+/** The raw specs, for the layout search. */
+export const LEVEL_SPECS = SPECS;
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   id: index + 1,
   world: Math.floor(index / LEVELS_PER_WORLD),
   name: spec.name,
-  // Fixed, and spread out so neighbouring levels do not share a layout.
-  seed: 7919 * (index + 1) + 104_729,
+  seed: layoutFor(index, spec)[0],
   seconds: spec.seconds,
-  flowers: spec.flowers,
-  lines: spec.lines,
   bees: spec.bees,
-  difficulty: spec.difficulty,
+  wax: layoutFor(index, spec)[1],
+  groups: spec.groups,
+  flowers: spec.groups.reduce((sum, group) => sum + group.count, 0),
+  difficulty:
+    1 + Math.floor(index / LEVELS_PER_WORLD) * 4 + (index % LEVELS_PER_WORLD) / 3,
   mazeOpenness: spec.maze ?? 1,
-  fog: spec.fog ?? false,
   golden: spec.golden ?? false,
-  rich: spec.rich ?? false,
   wave: spec.wave ?? [],
   ...(spec.intro ? { intro: spec.intro } : {}),
   stars: LEVEL_STARS[index] ?? [60, 110, 160],
@@ -520,23 +524,23 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     raidSize: level.wave.length,
     wave: level.wave,
     mazeOpenness: level.mazeOpenness,
-    richPatches: level.rich,
+    richPatches: false,
     nightBloom: level.golden,
+    flowers: [...level.groups],
+    waxFactor: level.wax,
   };
 }
 
 /**
  * The hive a level plays with, as run modifiers on top of the base stats.
  *
- * Expressed as the same modifiers a draft pick would add, so the simulation
- * has exactly one way of being told "more lines" or "more bees".
+ * Every campaign board is fully lit: a network game is a planning game, and a
+ * plan needs the whole board in view.
  */
 export function levelModifiers(level: LevelDef): RunModifiers {
   const m = noModifiers();
-  m.extraLines = level.lines - TUNING.route.maxCount;
   m.extraBees = level.bees - TUNING.bee.baseCount;
-  // No mist: light the whole board at dawn.
-  if (!level.fog) m.scoutRadius = 2000;
+  m.scoutRadius = 2000;
   return m;
 }
 

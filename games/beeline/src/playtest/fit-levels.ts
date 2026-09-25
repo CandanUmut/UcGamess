@@ -6,17 +6,19 @@
  * Each level is played `runs` times (default 6) by each simulated player, and
  * the thresholds are placed against what they actually score:
  *
- *  - **one star**: a first-timer on world one, a regular after that. Passing a
- *    level should be something most players do on the first or second try.
+ *  - **one star**: a first-timer with no plan passes about half their tries.
+ *    Nobody is walled out of the campaign for not having found branching
+ *    yet; the stars above are where planning shows.
  *  - **two stars**: a regular player's ordinary score.
- *  - **three stars**: what a practised player gets — which in practice means
- *    keeping the Busy Hive multiplier high most of the level.
+ *  - **three stars**: what a practised planner gets, and always clear of what
+ *    expert hands earn with no plan at all (`THOUGHTLESS`, straight lines to
+ *    the nearest flower). Three stars has to mean the network was good.
  *
  * Prints the table to paste into `LEVEL_STARS` in `game/Levels.ts`, and then
  * how often each player earns each star count under it.
  */
 import { LEVELS, type LevelDef } from '../game/Levels.ts';
-import { CASUAL, EXPERT, NOVICE, type Persona } from './personas.ts';
+import { CASUAL, EXPERT, NOVICE, THOUGHTLESS, type Persona } from './personas.ts';
 import { playLevel } from './session.ts';
 
 const runs = Number(process.argv[2] ?? 6);
@@ -50,14 +52,25 @@ for (const level of LEVELS) {
   const novice = scores(NOVICE, level);
   const casual = scores(CASUAL, level);
   const expert = scores(EXPERT, level);
+  const thoughtless = scores(THOUGHTLESS, level);
 
-  const firstWorld = level.world === 0;
-  // One star: the lower quartile of the player it is meant for, so most of
-  // their attempts pass.
-  const oneBase = firstWorld ? quantile(novice, 0.35) : quantile(casual, 0.25);
-  const one = nice(oneBase * 0.95);
-  const two = nice(Math.max(one * 1.12, quantile(casual, 0.6)));
-  const three = nice(Math.max(two * 1.1, quantile(expert, 0.5) * 0.97));
+  let one = nice(Math.max(quantile(novice, 0.5) * 0.95, quantile(expert, 0.5) * 0.12));
+  let three = nice(
+    Math.max(one * 1.5, quantile(expert, 0.35) * 0.95, quantile(thoughtless, 1) * 1.2),
+  );
+  // Two stars: a regular's ordinary game, kept clearly below three even on
+  // the early boards where a regular already plays almost like a planner.
+  let two = nice(
+    Math.max(one * 1.25, Math.min(quantile(casual, 0.4) * 0.95, three / 1.12)),
+  );
+  if (level.id === 1) {
+    // The first board teaches the drag, and nothing else: everyone who plays
+    // it through gets there, and three stars is just playing it well.
+    const med = quantile(novice, 0.5);
+    one = nice(med * 0.6);
+    two = nice(med * 0.85);
+    three = nice(quantile(expert, 0.5) * 0.97);
+  }
   table.push([one, two, three]);
 
   const starsOf = (sorted: number[]): string => {
@@ -71,7 +84,9 @@ for (const level of LEVELS) {
   report.push(
     `${String(level.id).padStart(2)} ${level.name.padEnd(16)} ${[one, two, three].join('/').padEnd(16)} ` +
       `novice ${starsOf(novice)}  casual ${starsOf(casual)}  expert ${starsOf(expert)}  ` +
-      `(med ${quantile(novice, 0.5)}/${quantile(casual, 0.5)}/${quantile(expert, 0.5)})`,
+      `thoughtless ${starsOf(thoughtless)}  ` +
+      `(med ${quantile(novice, 0.5)}/${quantile(casual, 0.5)}/${quantile(expert, 0.5)}/${quantile(thoughtless, 0.5)}` +
+      ` gap ${(quantile(expert, 0.5) / Math.max(1, quantile(thoughtless, 0.5))).toFixed(2)})`,
   );
 }
 

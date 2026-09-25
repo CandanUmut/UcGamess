@@ -7,11 +7,14 @@ const PLATE = 0x2a2114;
 const PLATE_ALPHA = 0.72;
 const HONEY = 0xffb61f;
 const GOOD = 0x6fcf7f;
+/** Beeswax: the network budget. */
+const WAX = 0xf3dfa0;
+const BAD = 0xe0573f;
 const STAR_ON = 0xffd84a;
 const STAR_OFF = 0x6b5a3a;
 
 /**
- * Honey against the quota, the daylight left, and the lines in hand.
+ * Honey against the quota, the daylight left, and the wax in hand.
  *
  * Everything sits on dark plates. The board is a bright meadow now, and the
  * old HUD — thin dark text straight on the grass — was legible against the
@@ -44,7 +47,10 @@ export class Hud {
   private quota = 1;
   private dayFraction = 1;
   private secondsLeft = 0;
-  private lines = { used: 0, owned: 3 };
+  /** Wax left, the day's budget, and what the line being dragged would spend. */
+  private wax = { left: 0, budget: 1, pending: 0, short: false };
+  /** Wax just refunded, flashed on the meter. */
+  private waxFlash = 0;
   private idleBees = 0;
   private alertPhase = 0;
   private starsLit = 0;
@@ -201,20 +207,40 @@ export class Hud {
       this.starPops[i] = Math.max(0, (this.starPops[i] ?? 0) - deltaSeconds * 2.5);
     }
     this.comboPulse = Math.max(0, this.comboPulse - deltaSeconds * 2);
+    this.waxFlash = Math.max(0, this.waxFlash - deltaSeconds * 1.5);
 
     this.draw();
   }
 
-  setLines(used: number, owned: number): void {
-    this.lines = { used, owned };
-    this.linesText.setText('Lines');
+  /**
+   * The wax meter. `pending` is the price of the line being dragged, shown as
+   * the part of the bar it would use up; `short` turns it red when the drag
+   * costs more than there is.
+   */
+  setWax(left: number, budget: number, pending = 0, short = false): void {
+    this.wax = { left, budget: Math.max(1, budget), pending, short };
+    this.linesText.setText(`Wax ${Math.round(left / 10)}`);
   }
 
-  /** Bees with nothing to fly. The nudge to lay another line. */
-  setIdle(idle: number, canLay: boolean): void {
+  /** A recall paid wax back: pulse the meter. */
+  flashWax(): void {
+    this.waxFlash = 1;
+  }
+
+  /**
+   * Bees with nothing to fly, and what to do about it: lay a line if there is
+   * wax for one, or take back a dry line if there is not.
+   */
+  setIdle(idle: number, hint: 'lay' | 'recall' | null): void {
     this.idleBees = idle;
-    const show = idle >= 3 && canLay;
-    this.idleText.setText(show ? `${idle} bees waiting — lay a line!` : '');
+    const show = idle >= 3 && hint !== null;
+    this.idleText.setText(
+      !show
+        ? ''
+        : hint === 'lay'
+          ? `${idle} bees waiting — lay a line!`
+          : `Out of wax — hold a dry line to take it back`,
+    );
     this.idleText.setAlpha(show ? 0.75 + 0.25 * Math.sin(this.scene.time.now / 160) : 0);
   }
 
@@ -226,16 +252,29 @@ export class Hud {
 
     // Day (or level) plate, sized to what it says.
     plate(g, x + 14, top - 24, Math.max(150, this.dayText.displayWidth + 34), 48);
-    // Lines plate: one pip per line owned, filled for each in use.
-    plate(g, x + 14, top + 30, 96 + this.lines.owned * 24, 40);
-    for (let i = 0; i < this.lines.owned; i += 1) {
-      const cx = x + 100 + i * 24;
-      const cy = top + 50;
-      const used = i < this.lines.used;
-      g.fillStyle(used ? HONEY : 0x000000, used ? 1 : 0.35);
-      g.fillCircle(cx, cy, 8);
-      g.lineStyle(2, HONEY, 0.9);
-      g.strokeCircle(cx, cy, 8);
+    // Wax plate: the budget as a bar, what is left filled, and the price of
+    // the line under the finger cut out of it before it is spent.
+    const waxW = 250;
+    plate(g, x + 14, top + 30, waxW, 40);
+    const wbX = x + 122;
+    const wbW = waxW - 124;
+    const wbY = top + 50;
+    g.fillStyle(0x000000, 0.4);
+    g.fillRoundedRect(wbX, wbY - 7, wbW, 14, 7);
+    const leftFrac = Math.max(0, Math.min(1, this.wax.left / this.wax.budget));
+    const afterFrac = Math.max(0, (this.wax.left - this.wax.pending) / this.wax.budget);
+    if (leftFrac > 0) {
+      g.fillStyle(this.wax.short ? BAD : WAX, 1);
+      g.fillRoundedRect(wbX, wbY - 7, Math.max(10, wbW * leftFrac), 14, 7);
+      if (this.wax.pending > 0 && !this.wax.short) {
+        // The part this drag would spend, dimmed.
+        g.fillStyle(0x1d160c, 0.55);
+        g.fillRect(wbX + wbW * afterFrac, wbY - 5, wbW * (leftFrac - afterFrac), 10);
+      }
+    }
+    if (this.waxFlash > 0) {
+      g.lineStyle(3, GOOD, this.waxFlash);
+      g.strokeRoundedRect(x + 14, top + 30, waxW, 40, 12);
     }
 
     // Honey plate and bar.

@@ -27,6 +27,13 @@ export interface Persona {
   sloppiness: number;
   /** Seconds sat on each between-day screen. */
   nightSeconds: number;
+  /**
+   * How the player chooses what to do, separate from how well their hands do
+   * it. 'nearest' is the player who connects whatever is closest; 'value' weighs
+   * what a flower is worth against what it costs to reach. Defaults to 'value'
+   * (with `sloppiness` sometimes forcing 'nearest').
+   */
+  strategy?: 'nearest' | 'value';
 }
 
 export const NOVICE: Persona = {
@@ -37,6 +44,8 @@ export const NOVICE: Persona = {
   thinkRate: 0.6,
   sloppiness: 0.5,
   nightSeconds: 16,
+  // A first-timer has not yet seen that branching is cheaper.
+  strategy: 'nearest',
 };
 
 export const CASUAL: Persona = {
@@ -60,6 +69,17 @@ export const EXPERT: Persona = {
 };
 
 export const PERSONAS: readonly Persona[] = [NOVICE, CASUAL, EXPERT];
+
+/**
+ * Expert hands with a first-timer's plan: every line straight from the hive to
+ * the closest flower. Not a player type so much as a control — the gap between
+ * this and EXPERT on the same level is what thinking is worth there.
+ */
+export const THOUGHTLESS: Persona = {
+  ...EXPERT,
+  name: 'thoughtless',
+  strategy: 'nearest',
+};
 
 /** A normally distributed sample, from the (seeded) Math.random. */
 export function gaussian(mean: number, sd: number): number {

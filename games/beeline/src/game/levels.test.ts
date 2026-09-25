@@ -70,10 +70,47 @@ describe('the campaign', () => {
     expect(layout()).toBe(layout());
   });
 
-  it('gives each level the hive it asks for', () => {
+  it('gives each level the swarm it asks for, and the whole board in view', () => {
     for (const level of LEVELS) {
-      const stats = deriveStats(levelModifiers(level));
-      expect(stats.routeSlots).toBe(level.lines);
+      const field = new Field();
+      const modifiers = levelModifiers(level);
+      field.setStats(deriveStats(modifiers));
+      withSeed(level.seed, () =>
+        field.beginDay(
+          level.difficulty,
+          levelFeatures(level),
+          level.flowers,
+          1,
+          modifiers,
+        ),
+      );
+      expect(field.bees.length).toBe(level.bees);
+      expect(field.patches.length).toBe(level.flowers);
+      expect(field.patches.every((p) => p.discovered)).toBe(true);
+    }
+  });
+
+  it('prices every board so a good network reaches the rich flowers and cannot reach everything', () => {
+    for (const level of LEVELS.slice(1)) {
+      const field = new Field();
+      const modifiers = levelModifiers(level);
+      field.setStats(deriveStats(modifiers));
+      withSeed(level.seed, () =>
+        field.beginDay(
+          level.difficulty,
+          levelFeatures(level),
+          level.flowers,
+          1,
+          modifiers,
+        ),
+      );
+      // Enough for the cheapest tree to the valuable flowers...
+      expect(field.waxBudget).toBeGreaterThanOrEqual(field.networkCost(2) * 0.99);
+      // ...but well short of separate lines from the hive to all of them.
+      const star = field.patches
+        .filter((p) => p.tier >= 2)
+        .reduce((sum, p) => sum + field.pathDistanceTo(p.x, p.y), 0);
+      expect(field.waxBudget).toBeLessThan(star);
     }
   });
 });

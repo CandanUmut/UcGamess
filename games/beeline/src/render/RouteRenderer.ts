@@ -107,6 +107,9 @@ export class RouteRenderer {
     // answering it by colour costs no screen furniture at all.
     const base = routeTint(route);
     const colour = strength > 0.02 ? blend(base, 0xfff3c4, strength) : base;
+    // A line whose flower is dry is kept — it is wax, and a trunk to build on —
+    // but it is not doing anything, and it should look that way.
+    const idleFade = route.target ? 1 : 0.8;
 
     // A soft underlay beneath a mature road, so it reads as packed ground
     // rather than as a slightly fatter scribble.
@@ -133,7 +136,7 @@ export class RouteRenderer {
 
       // Brightest at the hive, faintest at the dissolving tip.
       const t = band / (BANDS - 1);
-      const alpha = 0.92 - t * 0.5 + alphaGain;
+      const alpha = (0.92 - t * 0.5 + alphaGain) * idleFade;
       const width = (7 - t * 3.4) * widthGain;
 
       g.lineStyle(width, colour, alpha);
@@ -225,6 +228,8 @@ function blend(from: number, to: number, t: number): number {
  * what playing well is.
  */
 function routeTint(route: Route): number {
+  // A dry line is pale wax: still there, still yours, doing nothing.
+  if (!route.target && route.hadTarget) return 0xe9dcb4;
   if (route.target?.kind === 'night') return 0xffc21a;
   if (route.target) return COLORS.species[route.target.species] ?? COLORS.route;
   return COLORS.route;
@@ -249,7 +254,9 @@ function wiggle(
   time: number,
   seed: number,
 ): void {
-  const phase = s * WIGGLE_FREQUENCY - time * WIGGLE_SPEED + seed;
+  // No per-line phase: a branch repeats its trunk's path exactly, and the two
+  // copies only overlap into one road if they wiggle in step.
+  const phase = s * WIGGLE_FREQUENCY - time * WIGGLE_SPEED + seed * 0;
   const offset = Math.sin(phase) * WIGGLE_AMPLITUDE;
   point.x -= point.ty * offset;
   point.y += point.tx * offset;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CASUAL, EXPERT, NOVICE, type Persona } from './personas.ts';
+import { CASUAL, EXPERT, NOVICE, THOUGHTLESS, type Persona } from './personas.ts';
 import { playLevel, playRun } from './session.ts';
 import { LEVELS, levelStarsFor } from '../game/Levels.ts';
 import { summarise, type PersonaSummary } from './metrics.ts';
@@ -56,36 +56,56 @@ describe('engagement gate', () => {
 
 describe('campaign gate', () => {
   /**
-   * The fitted star thresholds, checked against the players they were fitted
+   * The fitted boards and stars, checked against the players they were fitted
    * for. Samples three levels per world with two runs each, so it stays fast;
    * `fit-levels.ts` is the full version.
+   *
+   * The first test is the one the redesign exists for. Before it, a player
+   * with expert hands and no plan at all — straight lines to the nearest
+   * flower — earned 89% of what a planner did. Thinking was worth 12%, so
+   * the stars measured reflexes and a player could not say why they got one.
    */
   const sample = [1, 4, 8, 11, 15, 19, 21, 25, 29];
-  const starsFor = (persona: Persona): number[] =>
+  const play = (persona: Persona): number[] =>
     sample.flatMap((id) => {
       const level = LEVELS[id - 1];
       if (!level) return [];
-      return [0, 1].map((run) =>
-        levelStarsFor(level, playLevel(persona, level, 9000 + run * 31).honey),
-      );
+      return [0, 1].map((run) => playLevel(persona, level, 9000 + run * 31).honey);
     });
-  const casual = starsFor(CASUAL);
-  const expert = starsFor(EXPERT);
-  const novice = starsFor(NOVICE);
+  const starsOf = (honey: number[]): number[] =>
+    honey.map((h, i) => {
+      const level = LEVELS[(sample[Math.floor(i / 2)] ?? 1) - 1];
+      return level ? levelStarsFor(level, h) : 0;
+    });
+  const expertHoney = play(EXPERT);
+  const thoughtlessHoney = play(THOUGHTLESS);
+  const casual = starsOf(play(CASUAL));
+  const expert = starsOf(expertHoney);
+  const novice = starsOf(play(NOVICE));
+  const thoughtless = starsOf(thoughtlessHoney);
   const share = (stars: number[], min: number): number =>
     stars.filter((s) => s >= min).length / Math.max(1, stars.length);
+  const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 
-  it('lets a regular player pass most levels', () => {
-    expect(share(casual, 1)).toBeGreaterThan(0.7);
+  it('pays for planning: a plan earns at least 2.5x what no plan does', () => {
+    expect(sum(expertHoney) / Math.max(1, sum(thoughtlessHoney))).toBeGreaterThan(2.5);
   });
 
-  it('keeps three stars for players who play well', () => {
-    expect(share(expert, 3)).toBeGreaterThan(share(casual, 3));
-    expect(share(casual, 3)).toBeLessThan(0.6);
+  it('never gives three stars without a plan (after the tutorial board)', () => {
+    // Level 1 teaches the drag and nothing else; anyone who plays it through
+    // earns its stars. Every board after it has to be planned for three.
+    expect(share(thoughtless.slice(2), 3)).toBe(0);
   });
 
-  it('lets a first-timer through the first world', () => {
-    const firstWorld = novice.slice(0, 6);
-    expect(share(firstWorld, 1)).toBeGreaterThan(0.6);
+  it('lets a first-timer pass most levels, so nobody is walled out', () => {
+    expect(share(novice, 1)).toBeGreaterThan(0.6);
+  });
+
+  it('lets a regular player reach two stars on most levels', () => {
+    expect(share(casual, 2)).toBeGreaterThan(0.6);
+  });
+
+  it('keeps three stars within reach of a good planner', () => {
+    expect(share(expert, 3)).toBeGreaterThan(0.3);
   });
 }, 180_000);
