@@ -33,30 +33,25 @@ describe('lines are the budget', () => {
     expect(withOne.routeSlots).toBe(base.routeSlots + 1);
   });
 
-  it('drops the least-worked line rather than refusing the drag', () => {
-    // A gesture that does nothing on a touchscreen is indistinguishable from a
-    // broken game, so the drag always lands. Strength is traffic the road has
-    // actually carried, so the line the swarm used least is the one to go.
+  it('refuses a line past the cap rather than tearing up one already laid', () => {
+    // Evicting a line the player paid wax for would be the game spending their
+    // budget for them; the preview says "too many lines" instead.
     const field = newDay(1);
-    const slots = field.stats.routeSlots;
-
-    const routes = [];
-    for (let i = 0; i < slots; i += 1) {
-      const r = field.createRoute(
-        lineTo(field, field.hiveX + 200 + i * 30, field.hiveY - 120),
-      );
-      expect(r).not.toBeNull();
-      routes.push(r!);
+    field.wax = field.waxBudget = 100_000;
+    for (let i = 0; i < TUNING.wax.maxLines; i += 1) {
+      expect(
+        field.createRoute(
+          lineTo(field, field.hiveX + 150 + (i % 4) * 30, field.hiveY - 60 - i * 10),
+        ),
+      ).not.toBeNull();
     }
-    // Give every line but the first some traffic.
-    for (let i = 1; i < routes.length; i += 1) {
-      for (let n = 0; n < 60; n += 1) routes[i]!.reinforce();
-    }
-
-    const idle = routes[0]!;
-    field.createRoute(lineTo(field, field.hiveX + 40, field.hiveY - 260));
-
-    expect(field.routes.length).toBeLessThanOrEqual(slots);
-    expect(field.routes).not.toContain(idle);
+    const plan = field.planLine(
+      { x: field.hiveX, y: field.hiveY, route: null, mode: 'hive', at: 0 },
+      field.hiveX + 200,
+      field.hiveY + 40,
+    );
+    expect(plan.valid).toBe(false);
+    expect(plan.reason).toBe('lines');
+    expect(field.routes).toHaveLength(TUNING.wax.maxLines);
   });
 });

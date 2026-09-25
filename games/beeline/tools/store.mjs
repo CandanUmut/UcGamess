@@ -51,15 +51,16 @@ if (!TITLE) throw new Error('Could not read GAME_TITLE from src/config/title.ts'
 
 /** A mid-campaign save: the map has progress on it and no tutorial shows. */
 const SAVE = {
-  version: 3,
+  version: 4,
   day: 1,
   tutorialDone: true,
+  // Starred through the lessons, so no tutorial text lands on a capture.
   levelStars: [3, 3, 2, 3, 2, 3, 3, 2, 3, 3, 2, 3, 1, 0],
   levelBest: [],
   worldsCelebrated: [0],
 };
-/** "Full Bloom" (1-10): eight flowers, four lines — the busiest clean board. */
-const LEVEL = 10;
+/** "Far Petals" (1-8): a far rich cluster — the network the game is about. */
+const LEVEL = 8;
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
@@ -138,28 +139,31 @@ async function play(page, ms, { reveal = false } = {}) {
       await page.waitForTimeout(200);
       continue;
     }
-    // Every free line goes out in one pass, nearest flowers first.
+    // Build the way the game rewards: a line to the nearest rich flower,
+    // then each next flower branched from whichever line ends closest to it.
+    // Richest first; one line per think, like a person.
     const served = st.r.map((r) => [r.tipX, r.tipY]);
     const open = st.pt
-      .filter((p) => p.alive && p.discovered)
+      .filter((p) => p.alive && p.discovered && p.honeyLeft > 0)
       .filter((p) => !served.some(([x, y]) => Math.hypot(x - p.x, y - p.y) < 90))
-      .sort(
+      .sort((a, b) => b.honeyLeft - a.honeyLeft);
+    const target = open[0];
+    if (target) {
+      const starts = [st.hive, ...st.r.map((r) => ({ x: r.tipX, y: r.tipY }))];
+      const from = starts.sort(
         (a, b) =>
-          Math.hypot(a.x - st.hive.x, a.y - st.hive.y) -
-          Math.hypot(b.x - st.hive.x, b.y - st.hive.y),
-      )
-      .slice(0, Math.max(0, 4 - st.r.length));
-    const a = await screen(st.hive.x, st.hive.y);
-    for (const target of open) {
-      const b = await screen(target.x + 10, target.y - 8);
+          Math.hypot(a.x - target.x, a.y - target.y) -
+          Math.hypot(b.x - target.x, b.y - target.y),
+      )[0];
+      const a = await screen(from.x, from.y);
+      const b = await screen(target.x + 6, target.y - 6);
       await page.mouse.move(a.x, a.y);
       await page.mouse.down();
-      for (let i = 1; i <= 10; i += 1) {
-        await page.mouse.move(a.x + ((b.x - a.x) * i) / 10, a.y + ((b.y - a.y) * i) / 10);
+      for (let i = 1; i <= 12; i += 1) {
+        await page.mouse.move(a.x + ((b.x - a.x) * i) / 12, a.y + ((b.y - a.y) * i) / 12);
         await page.waitForTimeout(16);
       }
       await page.mouse.up();
-      await page.waitForTimeout(250);
     }
     await page.waitForTimeout(250);
   }

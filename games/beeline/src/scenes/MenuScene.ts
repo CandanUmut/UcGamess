@@ -211,7 +211,7 @@ export class MenuScene extends BaseScene {
     });
 
     this.add
-      .text(cx, 214, 'Drag lines from the hive. Feed the swarm.', {
+      .text(cx, 214, 'Branch out from the hive. Stretch the wax. Feed the swarm.', {
         fontFamily: FONT,
         fontSize: '24px',
         fontStyle: 'bold',

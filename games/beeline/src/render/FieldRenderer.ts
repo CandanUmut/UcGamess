@@ -478,7 +478,7 @@ export class FieldRenderer {
    */
   private haloTint(patch: Patch): number {
     if (patch.kind !== 'normal') return this.patchTint(patch);
-    const t = Math.min(1, Math.max(0, (patch.distanceMultiplier - 1) / 2));
+    const t = (patch.tier - 1) / 2;
     return blend(this.patchTint(patch), COLORS.halo, t);
   }
 
@@ -581,6 +581,18 @@ export class FieldRenderer {
       // surprise.
       label.setColor(patch.fullness < 0.25 ? '#ff8a65' : '#f4f4f8');
       this.shade(label);
+      // What a trip pays, as pips under the number: one, two or three. The
+      // number says how much is left; the pips say how good it is.
+      if (patch.kind === 'normal') {
+        const py = label.y + label.displayHeight / 2 + PLATE_PAD_Y + 7;
+        for (let k = 0; k < patch.tier; k += 1) {
+          const px = label.x + (k - (patch.tier - 1) / 2) * 13;
+          this.plateGfx.fillStyle(0x1d160c, 0.85);
+          this.plateGfx.fillCircle(px, py, 6);
+          this.plateGfx.fillStyle(0xffc93c, 1);
+          this.plateGfx.fillCircle(px, py, 4);
+        }
+      }
     }
   }
 

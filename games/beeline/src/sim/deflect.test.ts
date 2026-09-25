@@ -207,7 +207,14 @@ describe('drawing into a maze wall', () => {
 
     for (let trial = 0; trial < 60; trial += 1) {
       const field = newDay(8);
-      const patch = field.patches.find((candidate) => candidate.alive);
+      // The farthest flower: the one most likely to sit behind a hedge.
+      const patch = [...field.patches]
+        .filter((candidate) => candidate.alive)
+        .sort(
+          (a, b) =>
+            Math.hypot(b.x - field.hiveX, b.y - field.hiveY) -
+            Math.hypot(a.x - field.hiveX, a.y - field.hiveY),
+        )[0];
       if (!patch) continue;
 
       const coords = line(field.hiveX, field.hiveY, patch.x, patch.y, 8);
@@ -262,7 +269,11 @@ describe('drawing into a maze wall', () => {
       if (!patch) continue;
 
       field.commitLine(
-        field.planLine({ x: field.hiveX, y: field.hiveY, route: null }, patch.x, patch.y),
+        field.planLine(
+          { x: field.hiveX, y: field.hiveY, route: null, mode: 'hive', at: 0 },
+          patch.x,
+          patch.y,
+        ),
       );
 
       for (let step = 0; step < 120; step += 1) field.step(1 / 60);

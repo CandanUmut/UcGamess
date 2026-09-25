@@ -16,7 +16,14 @@ export const SAVE_KEYS = [SAVE_KEY] as const;
  * reached and whether the tutorial has been seen. Anything else would be a
  * number the player can no longer spend.
  */
-const CURRENT_VERSION = 3;
+const CURRENT_VERSION = 4;
+/**
+ * Version 4 is the wax-and-branches campaign: every board, budget and star
+ * threshold changed, so stars earned on the old boards describe levels that
+ * no longer exist. They are cleared (the endless run is kept) — which also
+ * means a returning player gets the new lessons on the levels that teach them.
+ */
+const FIRST_CURRENT_CAMPAIGN = 4;
 /** Saves from before this version played a different game; see below. */
 const FIRST_COMPATIBLE_VERSION = 2;
 
@@ -75,6 +82,7 @@ export function coerceSave(raw: unknown): BeelineSave {
   const data = raw as Partial<Record<keyof BeelineSave, unknown>>;
   const version = typeof data.version === 'number' ? data.version : 0;
   const legacy = version < FIRST_COMPATIBLE_VERSION;
+  const oldCampaign = version < FIRST_CURRENT_CAMPAIGN;
 
   return {
     version: CURRENT_VERSION,
@@ -86,9 +94,11 @@ export function coerceSave(raw: unknown): BeelineSave {
     bestRunDay: clampInt(data.bestRunDay, 0, 9999),
     bestScore: clampNumber(data.bestScore, 0, Number.MAX_SAFE_INTEGER, 0),
     tutorialDone: data.tutorialDone === true,
-    levelStars: coerceNumbers(data.levelStars, 0, 3),
-    levelBest: coerceNumbers(data.levelBest, 0, Number.MAX_SAFE_INTEGER),
-    worldsCelebrated: coerceNumbers(data.worldsCelebrated, 0, 9),
+    levelStars: oldCampaign ? [] : coerceNumbers(data.levelStars, 0, 3),
+    levelBest: oldCampaign
+      ? []
+      : coerceNumbers(data.levelBest, 0, Number.MAX_SAFE_INTEGER),
+    worldsCelebrated: oldCampaign ? [] : coerceNumbers(data.worldsCelebrated, 0, 9),
   };
 }
 
