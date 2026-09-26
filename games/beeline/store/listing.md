@@ -12,28 +12,30 @@ Beeline
 
 ## Short description (one line, ≤ 120 characters)
 
-Drag flight paths from the hive, send your swarm to the flowers, and fill the
-honeycomb with honey before sunset.
+Send your swarm into the mist to find hidden flowers and treasure, bank the
+honey, and grow a stronger hive.
 
 ## Description
 
 Every bee in the hive is waiting for you to point the way.
 
-Drag a line from the hive to a flower and a crew of bees flies it, gathers
-pollen and brings honey home. Lines are limited, flowers run dry, and the sun
-is setting — so where you send the swarm matters.
+Drag a line from the hive and a crew of bees flies it. Most of the meadow is
+hidden in mist — push lines into the dark to find flowers, honey pots, lost
+swarms and the rare Royal Bloom. Every find pays on the spot.
 
-- **30 hand-tuned levels in three worlds.** Spring Meadow teaches the swarm,
-  Bramble Maze makes you steer around hedges leg by leg, and Wasp Summer sends
-  raiders after your honey.
-- **Earn up to three stars on every level** and fill the honeycomb map cell by
-  cell. New worlds open as your stars add up.
-- **Keep the hive busy.** Keep every line working and the multiplier climbs to
-  ×5. Let the bees sit idle and it slips away.
-- **Golden blooms** open for a few seconds. Worth a detour if you are quick.
-- **Swat the wasps** before they reach your lines.
-- **Endless mode** is for when the campaign is done: how many days can your
-  hive last?
+All the honey you bring home goes into the hive's bank. Spend it on skills —
+a bigger swarm, swifter wings, keener eyes for the mist — and come back to
+beat the levels that beat you.
+
+- **30 levels in three worlds.** Spring Meadow, Bramble Maze with hedges to
+  steer around, and Wasp Summer with raiders after your honey.
+- **Explore.** Only what your bees have seen is on the map. Glints in the
+  mist show where treasure still hides.
+- **Grow your hive.** Seven skills, bought with honey, unlocked further with
+  stars.
+- **Stars and awards.** Up to three stars a level, and 17 awards to chase.
+- **Keep the hive busy** and the multiplier climbs to ×5.
+- **Endless mode**: how many days can your hive last?
 
 No sign-up, no downloads. Progress saves automatically.
 

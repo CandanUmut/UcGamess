@@ -2303,6 +2303,70 @@ What changed to make the game submittable, rather than playable:
 
 Release mechanics are in `docs/publishing.md`.
 
+## 36. Worth finding, worth earning
+
+### The report
+
+"There are always enough flowers around us — we click on them and the line is
+drawn, and once they are finished the other flowers show up without us doing
+anything. What is the purpose of 3 stars or the most honey in a run? Honey
+should mean something; finding flowers should be worth something; skills
+should be something we buy."
+
+(An intermediate attempt, #30, replaced the mist and the hedges with a
+wax-budget network puzzle. It was rejected in playtest as far less fun than
+#29 and closed unmerged. This section builds on #29 instead.)
+
+### Finding flowers is worth something
+
+- **Nothing reveals itself.** `revealLastFlowers` — which lit every hidden
+  flower the moment the known ones ran dry — is gone. The hive's own light
+  shrank from 600 to 380 px, so only the nearest flower or two are known at
+  dawn (the nearest is always shown, so a day never opens on nothing to do).
+  The mist now starts on level 3, not level 6.
+- **A find pays on the spot**: 15% of the flower's honey, 25% for a Royal
+  Bloom, shown as "found! +28" where it was found.
+- **The mist hides treasure**: honey pots (instant honey), lost swarms (+6
+  bees for the rest of the level) and, from level 6, a **Royal Bloom** — a
+  violet flower worth four a trip, always in the furthest dark. A faint glint
+  shows through the mist wherever something still hides: never _where_, only
+  that it is worth a line.
+- **No tap-to-connect.** Lines are drawn.
+
+### Honey means something
+
+Every drop a level or an endless day brings in goes into the **bank**, and the
+bank buys **hive skills** (the Hive screen, from the menu, the map and every
+level card): Bigger Swarm, Swift Wings, Keen Eyes (see further into the mist),
+Sweet Nectar, Wide Lanes, Sharp Stingers, Extra Line. Each has several levels
+that cost more each time; the higher levels also need stars, so the top of the
+tree is earned by playing well and not only by playing long. A level that was
+out of reach for three stars becomes reachable after a few purchases — the
+reason to replay it.
+
+### Goals
+
+- **Stars** stay honey targets per level, now refitted for boards where the
+  flowers must be found.
+- **Treasures n/m** on every level card, and a level whose mist gives up
+  everything counts toward the Cartographer awards.
+- **17 awards** (Awards screen, toasts when earned): find a Royal Bloom, ten
+  honey pots, swat 150 wasps, reach ×5, bank 100,000 honey, max a skill,
+  every star, day 10 in endless…
+
+### Numbers
+
+Simulated players scout: a first-timer only once nothing known is left, a
+regular when running low, a practised player keeps a line in the mist and
+heads for glints. Endless quotas were eased for days 2–12 (exploring costs
+time) and day one's to 120. The engagement report reads 92/100: casual first
+runs of about 6 minutes, 8% ending by day 4, and a practised player reaching
+day 7 against a first-timer's day 5. Stars for all 30 levels were refitted.
+
+What the bots cannot tell us: whether a person _enjoys_ the mist. That is the
+first thing to watch in a real playtest — do players push lines into the dark
+because the glints make them curious, or only when they run out?
+
 ## 25. Success criteria
 
 Not submission-ready until all of these hold:
