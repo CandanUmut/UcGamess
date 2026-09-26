@@ -61,6 +61,7 @@ const KIND_TINT: Record<string, number> = {
   normal: COLORS.patch,
   rich: 0xffb454,
   night: 0xffc21a,
+  royal: 0xb57cff,
 };
 
 /** Draws the hive, the flower patches and the wasps. */
@@ -242,6 +243,7 @@ export class FieldRenderer {
     }
     this.drawFlowers(field, field.time);
     this.drawLabels(field);
+    this.drawGlints(field);
     this.drawWalls(field);
 
     // Where a line can start from. Brightened while dragging, and pulsed
@@ -363,6 +365,18 @@ export class FieldRenderer {
     // rings and washes are drawn here — they change every frame with bloom and
     // pool, where the sprite only moves and scales.
 
+    if (patch.kind === 'royal' && patch.alive) {
+      // Royal: a violet crown of light, the prize for pushing into the mist.
+      g.fillStyle(0xb57cff, 0.2 + 0.1 * Math.sin(time * 3));
+      g.fillCircle(patch.x, patch.y, radius * 2.2);
+      for (let i = 0; i < 8; i += 1) {
+        const a = -time * 0.5 + (i / 8) * Math.PI * 2;
+        const r = radius * (1.9 + 0.15 * Math.sin(time * 4 + i));
+        g.fillStyle(0xf1e3ff, 0.8);
+        g.fillCircle(patch.x + Math.cos(a) * r, patch.y + Math.sin(a) * r, 3.5);
+      }
+    }
+
     if (patch.kind === 'night' && patch.alive) {
       // Golden: a warm glow that breathes, so it is the first thing the eye
       // lands on when it opens.
@@ -480,6 +494,42 @@ export class FieldRenderer {
     if (patch.kind !== 'normal') return this.patchTint(patch);
     const t = Math.min(1, Math.max(0, (patch.distanceMultiplier - 1) / 2));
     return blend(this.patchTint(patch), COLORS.halo, t);
+  }
+
+  /**
+   * A glint in the mist wherever treasure still hides — never where, only
+   * that something is out there. A twinkle every few seconds each, drawn over
+   * the fog so it reads as light coming through it.
+   */
+  private drawGlints(field: Field): void {
+    const g = this.plateGfx;
+    const time = field.time;
+    const spots: Array<{ x: number; y: number; seed: number; royal: boolean }> = [];
+    field.treasures.forEach((t, i) => {
+      if (!t.found) spots.push({ x: t.x, y: t.y, seed: i * 1.7, royal: false });
+    });
+    field.patches.forEach((p) => {
+      if (p.kind === 'royal' && !p.discovered && p.alive)
+        spots.push({ x: p.x, y: p.y, seed: p.id * 0.9, royal: true });
+    });
+    for (const spot of spots) {
+      const phase = ((time + spot.seed) % 3.2) / 3.2;
+      if (phase > 0.28) continue;
+      const k = Math.sin((phase / 0.28) * Math.PI);
+      const r = (spot.royal ? 16 : 11) * k;
+      // Offset a little so the glint says "around here", not "exactly here".
+      const x = spot.x + Math.sin(spot.seed * 3.1) * 28;
+      const y = spot.y + Math.cos(spot.seed * 2.3) * 22;
+      g.lineStyle(3, spot.royal ? 0xe6c8ff : 0xfff1b0, 0.7 * k);
+      g.beginPath();
+      g.moveTo(x - r, y);
+      g.lineTo(x + r, y);
+      g.moveTo(x, y - r);
+      g.lineTo(x, y + r);
+      g.strokePath();
+      g.fillStyle(0xffffff, 0.6 * k);
+      g.fillCircle(x, y, 2.5);
+    }
   }
 
   /**
@@ -882,6 +932,7 @@ export class FieldRenderer {
  */
 function flowerSize(patch: Patch): number {
   if (patch.kind === 'night') return 1.45;
+  if (patch.kind === 'royal') return 1.7;
   return Math.min(1.5, 0.85 + 0.2 * patch.yieldPerTrip);
 }
 

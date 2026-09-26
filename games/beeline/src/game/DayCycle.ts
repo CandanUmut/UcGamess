@@ -103,6 +103,18 @@ export interface DayFeatures {
   mazeOpenness: number;
   richPatches: boolean;
   nightBloom: boolean;
+  /**
+   * What the mist hides today, beyond flowers: honey pots, lost bees, and a
+   * Royal Bloom. Only placed where the hive cannot see at dawn — they exist
+   * to make exploring pay.
+   */
+  treasures?: TreasurePlan;
+}
+
+export interface TreasurePlan {
+  honeyPots: number;
+  lostBees: number;
+  royalBloom: boolean;
 }
 
 /**
@@ -158,6 +170,11 @@ export function featuresForDay(day: number): DayFeatures {
     richPatches: day >= RICH_PATCH_DAY,
     // Golden blooms, from the day the tuning says.
     nightBloom: day >= TUNING.golden.startDay,
+    treasures: {
+      honeyPots: day >= 6 ? 2 : day >= 2 ? 1 : 0,
+      lostBees: day >= 3 ? 1 : 0,
+      royalBloom: day >= 4,
+    },
   };
 }
 

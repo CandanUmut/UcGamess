@@ -155,7 +155,9 @@ describe('pollen is finite for the day', () => {
     // mind. The only arrivals are golden blooms: marked as special, brief,
     // and one at a time.
     const field = newDay(6);
-    expect(field.patches.filter((p) => p.alive).length).toBe(patchesForDay(6));
+    expect(field.patches.filter((p) => p.alive && p.kind !== 'royal').length).toBe(
+      patchesForDay(6),
+    );
 
     for (let t = 0; t < 60 * 60; t += 1) {
       field.step(1 / 60);
@@ -163,7 +165,9 @@ describe('pollen is finite for the day', () => {
       const golden = field.patches.filter((p) => p.kind === 'night' && p.alive);
       expect(golden.length).toBeLessThanOrEqual(1);
     }
-    const ordinary = field.patches.filter((p) => p.kind !== 'night');
+    const ordinary = field.patches.filter(
+      (p) => p.kind !== 'night' && p.kind !== 'royal',
+    );
     expect(ordinary.length).toBe(patchesForDay(6));
   });
 

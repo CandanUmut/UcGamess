@@ -37,6 +37,8 @@ import {
 } from '../game/DayCycle.ts';
 import { deriveStats } from '../game/Upgrades.ts';
 import { modifiersFor, rollOffer } from '../game/Items.ts';
+import { applyUpgrades } from '../game/HiveUpgrades.ts';
+import { unlockAchievements, type AchievementDef } from '../game/Achievements.ts';
 import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
@@ -168,6 +170,10 @@ export class GameScene extends BaseGameplayScene {
   private tutorial = new Tutorial(false);
   private tutorialText!: Phaser.GameObjects.Text;
   private routesDrawn = 0;
+  /** Achievements the last endless day unlocked, for the night screen. */
+  private nightAchievements: AchievementDef[] = [];
+  /** Today's finds, for the bank's tally and the level card. */
+  private finds = { flowers: 0, pots: 0, royals: 0, bees: 0 };
 
   constructor() {
     super({ key: 'Game' });
@@ -326,8 +332,9 @@ export class GameScene extends BaseGameplayScene {
     this.phase = 'playing';
     this.day = this.save.day;
     this.scheduleBuzz();
+    this.resetFinds();
 
-    const modifiers = modifiersFor(this.save.items);
+    const modifiers = applyUpgrades(modifiersFor(this.save.items), this.save.upgrades);
     const stats = deriveStats(modifiers);
     this.field.setStats(stats);
     this.field.beginDay(
@@ -367,11 +374,12 @@ export class GameScene extends BaseGameplayScene {
    * and wasps still keep a player honest.
    */
   private beginLevel(level: LevelDef): void {
+    this.resetFinds();
     this.phase = 'playing';
     this.day = level.difficulty;
     this.scheduleBuzz();
 
-    const modifiers = levelModifiers(level);
+    const modifiers = applyUpgrades(levelModifiers(level), this.save.upgrades);
     this.field.setStats(deriveStats(modifiers));
     withSeed(level.seed, () =>
       this.field.beginDay(
@@ -440,6 +448,37 @@ export class GameScene extends BaseGameplayScene {
    * A campaign level is over. Stars are kept at their best, the honey at its
    * best, and the result goes to the level card.
    */
+  private resetFinds(): void {
+    this.finds = { flowers: 0, pots: 0, royals: 0, bees: 0 };
+  }
+
+  /** Treasures on today's board, and how many were found. */
+  private treasureCount(): { found: number; total: number } {
+    const royal = this.field.patches.filter((p) => p.kind === 'royal');
+    const total = this.field.treasures.length + royal.length;
+    const found =
+      this.field.treasures.filter((t) => t.found).length +
+      royal.filter((p) => p.discovered).length;
+    return { found, total };
+  }
+
+  /**
+   * Puts the day's honey in the bank and counts what was found and fought
+   * toward the achievements. Returns any achievements this unlocked.
+   */
+  private bankDay(honey: number): AchievementDef[] {
+    const banked = Math.max(0, Math.floor(honey));
+    this.save.honeyBank += banked;
+    this.save.lifetimeHoney += banked;
+    const t = this.save.tally;
+    t.wasps += this.field.waspsDowned;
+    t.pots += this.finds.pots;
+    t.royals += this.finds.royals;
+    t.flowersFound += this.finds.flowers;
+    t.bestCombo = Math.max(t.bestCombo, this.field.bestCombo);
+    return unlockAchievements(this.save);
+  }
+
   private endLevel(level: LevelDef, cleared: boolean): void {
     this.phase = 'ended';
     this.cancelDrag();
@@ -467,6 +506,13 @@ export class GameScene extends BaseGameplayScene {
     const celebrateWorld = worldDone && !this.save.worldsCelebrated.includes(level.world);
     if (celebrateWorld) this.save.worldsCelebrated.push(level.world);
 
+    const treasure = this.treasureCount();
+    if (treasure.total > 0 && treasure.found >= treasure.total) {
+      while (this.save.levelExplored.length <= index) this.save.levelExplored.push(0);
+      this.save.levelExplored[index] = 1;
+    }
+    const unlocked = this.bankDay(honey);
+
     if (this.tutorial.finished || stars > 0) this.save.tutorialDone = true;
     // The portal's own celebration cue, for a star gained or a world finished —
     // not for every pass, or it stops meaning anything.
@@ -485,10 +531,15 @@ export class GameScene extends BaseGameplayScene {
       prevBest,
       bestCombo: this.field.bestCombo,
       worldComplete: celebrateWorld ? level.world : null,
+      treasure,
+      foundHoney: Math.round(this.field.foundHoney),
+      bank: this.save.honeyBank,
+      achievements: unlocked,
       sfx: this.sfx,
       onRetry: () => this.replayLevel(level.id),
       onNext: () => this.replayLevel(level.id + 1),
       onMap: () => this.toMap(),
+      onHive: () => this.toHive(),
     };
     this.scene.launch('LevelDone', data);
     this.scene.pause();
@@ -557,6 +608,14 @@ export class GameScene extends BaseGameplayScene {
     this.scene.start('Menu');
   }
 
+  /** To the hive's skill shop; it returns to the map. */
+  private toHive(): void {
+    this.scene.stop('LevelDone');
+    this.sfx.stopHumOnly();
+    this.stopGameplay();
+    this.scene.start('Hive', { back: 'Map', world: this.level?.world ?? 0 });
+  }
+
   /** Back to the honeycomb. Anything unfinished on this board is dropped. */
   private toMap(): void {
     this.scene.stop('LevelDone');
@@ -587,6 +646,7 @@ export class GameScene extends BaseGameplayScene {
     const result = evaluateDay(this.day, Math.floor(this.field.honey) + bonus, bonus);
 
     this.save.runScore += result.score;
+    this.nightAchievements = this.bankDay(Math.floor(this.field.honey) + bonus);
     // Surviving further than ever before is endless mode's celebration.
     if (result.outcome === 'met' && this.day > this.save.bestRunDay && this.day > 1) {
       this.context.portal.happyTime();
@@ -622,7 +682,9 @@ export class GameScene extends BaseGameplayScene {
       onNextDay: () => this.startNextDay(),
       onRunOver: () => this.closeRun(),
       onChanged: () => this.persist(),
+      achievements: this.nightAchievements,
     };
+    this.nightAchievements = [];
     this.phase = 'ended';
     this.scene.launch('Night', data);
     this.scene.pause();
@@ -747,15 +809,9 @@ export class GameScene extends BaseGameplayScene {
       }
       this.cancelDrag();
 
-      // A tap. On a flower, lay a beeline to it; anywhere else, nothing —
-      // except a gentle reminder of where lines come from.
-      const route = this.field.tapFlower(p.worldX, p.worldY);
-      if (route) {
-        this.routesDrawn += 1;
-        this.sfx.playVaried('draw', 0.3, 120);
-      } else if (moved <= TAP_SLOP) {
-        this.fieldRenderer.pingHive();
-      }
+      // A tap never lays a line: lines are drawn from the hive, by hand.
+      // A tap on the board points back at where they start.
+      if (moved <= TAP_SLOP) this.fieldRenderer.pingHive();
     });
 
     // A pointer leaving the canvas mid-drag should not strand the preview.
@@ -929,9 +985,39 @@ export class GameScene extends BaseGameplayScene {
     }
 
     for (const found of events.found) {
-      for (let i = 0; i < 8; i += 1) this.juice.collect(found.x, found.y, 3);
-      this.sfx.play('upgrade', 0.26);
-      this.floatText(found.x, found.y - 70, 'found!', '#fff4d6', 20);
+      if (found.bonus > 0) this.finds.flowers += 1;
+      if (found.royal) this.finds.royals += 1;
+      for (let i = 0; i < (found.royal ? 24 : 8); i += 1) {
+        this.juice.collect(found.x, found.y, 3);
+      }
+      if (found.royal) {
+        this.sfx.play('fanfare', 0.4);
+        this.cameras.main.flash(220, 200, 160, 255);
+        this.hud.showBanner('You found the Royal Bloom!', '#e6c8ff');
+      } else {
+        this.sfx.play('upgrade', 0.26);
+      }
+      this.floatText(
+        found.x,
+        found.y - 70,
+        found.bonus > 0 ? `found! +${found.bonus}` : 'found!',
+        found.royal ? '#e6c8ff' : '#fff4d6',
+        found.royal ? 30 : 22,
+      );
+    }
+    for (const t of events.treasure) {
+      if (t.kind === 'honey') this.finds.pots += 1;
+      else this.finds.bees += 1;
+      for (let i = 0; i < 16; i += 1) this.juice.collect(t.x, t.y, 3);
+      this.sfx.play('sparkle', 0.4);
+      this.floatText(
+        t.x,
+        t.y - 40,
+        t.kind === 'honey' ? `honey pot! +${t.amount}` : `lost swarm! +${t.amount} bees`,
+        t.kind === 'honey' ? '#ffd466' : '#fff4d6',
+        28,
+      );
+      if (t.kind === 'bees') this.beeRenderer.resize(this.field.bees.length);
     }
 
     if (events.raidWarning) {

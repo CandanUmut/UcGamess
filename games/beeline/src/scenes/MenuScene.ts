@@ -11,6 +11,7 @@ import { COLORS } from '../config/tuning.ts';
 import { GAME_TITLE } from '../config/title.ts';
 import { Button } from '../ui/Button.ts';
 import { LEVELS, isUnlocked, totalStars } from '../game/Levels.ts';
+import { ACHIEVEMENTS } from '../game/Achievements.ts';
 import {
   coerceSave,
   newSave,
@@ -251,6 +252,26 @@ export class MenuScene extends BaseScene {
       label: 'Map',
       tint: 0x8a6a3a,
       onClick: () => this.scene.start('Map'),
+    });
+
+    // Where honey goes: the hive's skills.
+    new Button(this, {
+      x: cx - 345,
+      y: 300,
+      width: 140,
+      label: 'Hive',
+      sublabel: `${Math.floor(this.save.honeyBank).toLocaleString('en-US')} honey`,
+      tint: 0xb07a1e,
+      onClick: () => this.scene.start('Hive', { back: 'Menu' }),
+    });
+    new Button(this, {
+      x: cx + 345,
+      y: 410,
+      width: 140,
+      label: 'Awards',
+      sublabel: `${this.save.achievements.length} / ${ACHIEVEMENTS.length}`,
+      tint: 0x7a5aa8,
+      onClick: () => this.scene.start('Awards'),
     });
 
     const best =

@@ -78,6 +78,10 @@ export interface RunModifiers {
   honeyBonus: number;
   /** Fractional bonus on bee speed. */
   beeSpeedBonus: number;
+  /** Extra radius the hive lights at dawn, in px. */
+  hiveSightBonus: number;
+  /** Fractional bonus on how far each flying bee lights the mist. */
+  beeSightBonus: number;
 }
 
 export function noModifiers(): RunModifiers {
@@ -98,6 +102,8 @@ export function noModifiers(): RunModifiers {
     extraBees: 0,
     honeyBonus: 0,
     beeSpeedBonus: 0,
+    hiveSightBonus: 0,
+    beeSightBonus: 0,
   };
 }
 

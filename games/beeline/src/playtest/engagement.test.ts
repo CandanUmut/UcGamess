@@ -14,8 +14,8 @@ import { summarise, type PersonaSummary } from './metrics.ts';
  * player wait again, a quota table that walls first-timers on day two, skill
  * that stops mattering), not to fail on noise. Run the full report to tune.
  */
-const RUNS = 4;
-const DAYS = 8;
+const RUNS = 6;
+const DAYS = 10;
 
 function measure(persona: Persona): PersonaSummary {
   const logs = [];

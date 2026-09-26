@@ -1,5 +1,5 @@
 import type { WaspKind } from '../sim/Wasp.ts';
-import type { DayFeatures } from './DayCycle.ts';
+import type { DayFeatures, TreasurePlan } from './DayCycle.ts';
 import { noModifiers, type RunModifiers } from './Items.ts';
 import { TUNING } from '../config/tuning.ts';
 
@@ -72,6 +72,8 @@ export interface LevelDef {
   mazeOpenness: number;
   /** Mist over what the hive cannot see. */
   fog: boolean;
+  /** What the mist hides beyond flowers. */
+  treasures: TreasurePlan;
   golden: boolean;
   rich: boolean;
   wave: WaspKind[];
@@ -127,7 +129,7 @@ const SPECS: readonly Spec[] = [
     lines: 3,
     bees: 24,
     difficulty: 2,
-    intro: 'Keep every bee flying and the multiplier climbs',
+    intro: 'Mist! Drag a line into the dark to find hidden flowers',
   },
   {
     name: 'Golden Hour',
@@ -137,7 +139,7 @@ const SPECS: readonly Spec[] = [
     bees: 24,
     difficulty: 2,
     golden: true,
-    intro: 'Golden blooms are brief — be quick',
+    intro: 'Honey pots hide in the mist. Golden blooms are brief — be quick',
   },
   {
     name: 'Wide Field',
@@ -156,7 +158,7 @@ const SPECS: readonly Spec[] = [
     bees: 24,
     difficulty: 3,
     fog: true,
-    intro: 'Lines into the mist find hidden flowers',
+    intro: 'A Royal Bloom hides out there, and a lost swarm. Find them!',
   },
   {
     name: 'Far Petals',
@@ -458,37 +460,48 @@ const SPECS: readonly Spec[] = [
  * level above or anything that moves honey, and paste its output here.
  */
 export const LEVEL_STARS: ReadonlyArray<readonly [number, number, number]> = [
-  [190, 210, 230],
+  [210, 260, 290],
   [310, 360, 400],
-  [410, 540, 590],
-  [480, 860, 950],
-  [1025, 1300, 1425],
-  [880, 1200, 1325],
-  [820, 1275, 1400],
-  [800, 1250, 1375],
-  [860, 1425, 1675],
-  [1025, 1350, 1475],
-  [900, 1000, 1100],
-  [1325, 1475, 1625],
-  [1325, 1550, 1700],
-  [910, 1275, 1400],
-  [1550, 1875, 2075],
-  [1350, 1700, 1875],
-  [2225, 2625, 2900],
-  [2350, 2700, 2975],
-  [2075, 2325, 2850],
-  [2600, 3550, 4350],
-  [810, 1275, 1475],
-  [1100, 1375, 1575],
-  [780, 970, 1175],
-  [610, 720, 880],
-  [1200, 1475, 1675],
-  [1475, 2000, 2925],
-  [930, 1225, 2150],
-  [1425, 1925, 2200],
-  [1150, 1300, 1500],
-  [2125, 2525, 3075],
+  [240, 390, 550],
+  [290, 500, 550],
+  [400, 630, 770],
+  [450, 1225, 1350],
+  [390, 2025, 2225],
+  [370, 1675, 1850],
+  [590, 1775, 1950],
+  [560, 3500, 3850],
+  [1025, 1175, 1300],
+  [1250, 1400, 1550],
+  [970, 1175, 1300],
+  [1125, 1675, 1850],
+  [630, 900, 990],
+  [1900, 2225, 2450],
+  [2075, 2600, 2850],
+  [2250, 2575, 2825],
+  [2775, 3175, 3500],
+  [1775, 2000, 2200],
+  [1350, 1500, 1650],
+  [1325, 1725, 1900],
+  [930, 1050, 1150],
+  [920, 1275, 1400],
+  [1100, 1325, 1450],
+  [700, 810, 890],
+  [990, 1125, 1250],
+  [1150, 1600, 1750],
+  [1175, 1625, 1825],
+  [2675, 3200, 4175],
 ];
+
+/**
+ * Treasure grows with the campaign: a honey pot once the mist arrives, a
+ * lost swarm and a Royal Bloom from the sixth board, and a second pot after.
+ */
+function treasuresFor(index: number): TreasurePlan {
+  const id = index + 1;
+  if (id < 3) return { honeyPots: 0, lostBees: 0, royalBloom: false };
+  if (id < 6) return { honeyPots: 1, lostBees: 0, royalBloom: false };
+  return { honeyPots: id >= 8 ? 2 : 1, lostBees: 1, royalBloom: true };
+}
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   id: index + 1,
@@ -502,7 +515,9 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   bees: spec.bees,
   difficulty: spec.difficulty,
   mazeOpenness: spec.maze ?? 1,
-  fog: spec.fog ?? false,
+  // Mist from the third board on: the first two teach the drag in the open.
+  fog: spec.fog ?? index >= 2,
+  treasures: treasuresFor(index),
   golden: spec.golden ?? false,
   rich: spec.rich ?? false,
   wave: spec.wave ?? [],
@@ -522,6 +537,7 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     mazeOpenness: level.mazeOpenness,
     richPatches: level.rich,
     nightBloom: level.golden,
+    treasures: level.treasures,
   };
 }
 

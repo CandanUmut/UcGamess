@@ -47,7 +47,8 @@ describe('day pacing', () => {
 describe('escalation schedule', () => {
   it('introduces nothing on day one', () => {
     const features = featuresForDay(1);
-    expect(features).toEqual({
+    expect(features.treasures).toEqual({ honeyPots: 0, lostBees: 0, royalBloom: false });
+    expect(features).toMatchObject({
       raidSize: 0,
       wave: [],
       mazeOpenness: 1,

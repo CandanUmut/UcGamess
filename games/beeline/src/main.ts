@@ -5,6 +5,8 @@ import { NightScene } from './scenes/NightScene.ts';
 import { MapScene } from './scenes/MapScene.ts';
 import { LevelDoneScene } from './scenes/LevelDoneScene.ts';
 import { PauseScene } from './scenes/PauseScene.ts';
+import { HiveScene } from './scenes/HiveScene.ts';
+import { AwardsScene } from './scenes/AwardsScene.ts';
 import { GAME_TITLE } from './config/title.ts';
 import { COLORS } from './config/tuning.ts';
 import { SAVE_KEYS } from './game/SaveState.ts';
@@ -84,7 +86,16 @@ async function boot(): Promise<void> {
     parent: 'game',
     backgroundColor: COLORS.background,
     saveKeys: [...SAVE_KEYS, AudioManager.saveKey],
-    scenes: [MenuScene, MapScene, GameScene, NightScene, LevelDoneScene, PauseScene],
+    scenes: [
+      MenuScene,
+      MapScene,
+      GameScene,
+      NightScene,
+      LevelDoneScene,
+      PauseScene,
+      HiveScene,
+      AwardsScene,
+    ],
   });
 
   // Nothing was preloaded, but the portal still has to be told the game is

@@ -13,6 +13,8 @@ import { Button } from '../ui/Button.ts';
 import { star } from '../ui/Hud.ts';
 import { TEX } from '../render/textures.ts';
 import type { Sfx } from '../audio/Sfx.ts';
+import type { AchievementDef } from '../game/Achievements.ts';
+import { showAchievements } from '../ui/Toast.ts';
 
 const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
@@ -29,9 +31,18 @@ export interface LevelDoneData {
   /** A world finished for the first time by this level, or null. */
   worldComplete: number | null;
   sfx: Sfx;
+  /** Treasures on the board (Royal Bloom included), and how many were found. */
+  treasure: { found: number; total: number };
+  /** Honey this level earned by exploring. */
+  foundHoney: number;
+  /** The bank after this level's honey went in. */
+  bank: number;
+  /** Achievements this level unlocked. */
+  achievements: AchievementDef[];
   onRetry: () => void;
   onNext: () => void;
   onMap: () => void;
+  onHive: () => void;
 }
 
 /** Petal colours for the confetti, from the flowers themselves. */
@@ -142,7 +153,38 @@ export class LevelDoneScene extends BaseScene {
 
     if (passed) this.time.delayedCall(450 + stars * 380, () => this.confetti(stars * 30));
 
+    // What the mist gave up, and where the honey went.
+    const { treasure, foundHoney, bank } = this.done;
+    if (treasure.total > 0) {
+      const all = treasure.found >= treasure.total;
+      this.text(
+        `Treasures ${treasure.found}/${treasure.total}` +
+          (foundHoney > 0
+            ? `   ·   +${foundHoney.toLocaleString('en-US')} from exploring`
+            : '') +
+          (all ? '   ·   all found!' : ''),
+        cx,
+        404,
+        18,
+        all ? '#b8f0a0' : '#e6c8ff',
+      );
+    }
+
     this.buildButtons(passed);
+
+    new Button(this, {
+      x: cx,
+      y: 565,
+      width: 380,
+      label: 'Upgrade the hive',
+      sublabel: `${bank.toLocaleString('en-US')} honey in the bank`,
+      tint: 0xb07a1e,
+      onClick: () => void this.leave('hive'),
+    });
+
+    showAchievements(this, this.done.achievements, 2600, () =>
+      this.done.sfx.play('fanfare', 0.35),
+    );
 
     if (this.done.worldComplete !== null) {
       this.time.delayedCall(2000, () => this.worldCard(this.done.worldComplete ?? 0));
@@ -188,12 +230,16 @@ export class LevelDoneScene extends BaseScene {
     }
   }
 
-  private async leave(where: 'retry' | 'next' | 'map'): Promise<void> {
+  private async leave(where: 'retry' | 'next' | 'map' | 'hive'): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     await this.context.save.flush();
     if (where === 'map') {
       this.done.onMap();
+      return;
+    }
+    if (where === 'hive') {
+      this.done.onHive();
       return;
     }
     // The player chose to keep playing: the portal decides whether an ad plays.

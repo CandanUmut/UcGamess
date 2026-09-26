@@ -160,13 +160,26 @@ class DragBot {
     const open = field.knownPatches.filter((p) => !served.has(p));
     const partial = this.partialLine(field);
 
-    if (open.length === 0) {
-      // Nothing known to work: push a line into the mist, if any is left.
-      if (partial) return null;
-      const dark = this.nearestDark(field);
-      if (!dark) return null;
-      return this.line(field, { x: field.hiveX, y: field.hiveY, route: null }, dark);
+    // Scout: push a line into the mist. Everyone does it once nothing known
+    // is left; a player who has learned the game does it early, with a line
+    // to spare, because flowers are found and not handed over.
+    const lineSpare = field.routes.length < field.stats.routeSlots - 1;
+    // How many known flowers a player is happy to have in hand before scouting:
+    // a practised one keeps a line out in the mist, a regular scouts when
+    // running low, a first-timer only once everything known is gone.
+    const reserve =
+      this.persona.sloppiness <= 0.1 ? 2 : this.persona.sloppiness <= 0.4 ? 1 : -1;
+    const scoutEarly = open.length <= reserve && lineSpare;
+    if ((open.length === 0 || scoutEarly) && !partial) {
+      // A glint in the mist is something a person can see; a practised player
+      // scouts toward it, a first-timer just pushes into the nearest dark.
+      const glint = this.persona.sloppiness <= 0.4 ? this.nearestGlint(field) : null;
+      const dark = glint ?? this.nearestDark(field);
+      if (dark) {
+        return this.line(field, { x: field.hiveX, y: field.hiveY, route: null }, dark);
+      }
     }
+    if (open.length === 0) return null;
 
     const target = this.pick(field, open, sloppy);
     if (!target) return null;
@@ -225,6 +238,24 @@ class DragBot {
     });
     scored.sort((a, b) => b.value - a.value);
     return scored[0]?.p ?? null;
+  }
+
+  /** The nearest glint of hidden treasure, as drawn over the mist. */
+  private nearestGlint(field: Field): { x: number; y: number } | null {
+    const spots = [
+      ...field.treasures.filter((t) => !t.found),
+      ...field.patches.filter((p) => p.kind === 'royal' && !p.discovered && p.alive),
+    ];
+    let best: { x: number; y: number } | null = null;
+    let bestDist = Infinity;
+    for (const s of spots) {
+      const d = Math.hypot(s.x - field.hiveX, s.y - field.hiveY);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { x: s.x, y: s.y };
+      }
+    }
+    return best;
   }
 
   /** The nearest unlit ground to the hive, as a person would see the mist. */

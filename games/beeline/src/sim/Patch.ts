@@ -2,7 +2,7 @@ import { TUNING } from '../config/tuning.ts';
 
 let nextPatchId = 1;
 
-export type PatchKind = 'normal' | 'rich' | 'night';
+export type PatchKind = 'normal' | 'rich' | 'night' | 'royal';
 
 /** A flower patch. Drains as bees work it, wilts when empty, reblooms elsewhere. */
 export class Patch {
@@ -87,6 +87,8 @@ export class Patch {
         return TUNING.patch.richYieldMultiplier;
       case 'night':
         return TUNING.patch.nightBloomMultiplier;
+      case 'royal':
+        return TUNING.treasure.royalYieldMultiplier;
       default:
         return 1;
     }

@@ -9,7 +9,7 @@ import { slideAlongWalls, type WallSlide } from './deflect.ts';
 import { Fog } from './Fog.ts';
 import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
 import { deriveStats, type DerivedStats } from '../game/Upgrades.ts';
-import { dayQuota, type DayFeatures } from '../game/DayCycle.ts';
+import { dayQuota, type DayFeatures, type TreasurePlan } from '../game/DayCycle.ts';
 import { noModifiers, type RunModifiers } from '../game/Items.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -71,6 +71,17 @@ function hiveDiscoveryRadius(): number {
   return TUNING.hive.sightRadius * ((1 - discoverAt) / (1 - edgeReveal));
 }
 
+export type TreasureKind = 'honey' | 'bees';
+
+/** Something hidden in the mist, collected the moment a bee's light reaches it. */
+export interface Treasure {
+  x: number;
+  y: number;
+  kind: TreasureKind;
+  amount: number;
+  found: boolean;
+}
+
 export interface FieldStats {
   honey: number;
   bees: number;
@@ -90,7 +101,9 @@ export interface FieldEvents {
   /** Where a new line was pressed into a wall and turned along it. */
   deflected: Array<{ x: number; y: number }>;
   /** Flowers found this step. Discovery is the reward for exploring. */
-  found: Array<{ x: number; y: number; honey: number }>;
+  found: Array<{ x: number; y: number; honey: number; bonus: number; royal: boolean }>;
+  /** Treasure picked up in the mist: a honey pot or a lost swarm. */
+  treasure: Array<{ x: number; y: number; kind: TreasureKind; amount: number }>;
   /** A raid was announced this step, at the edge it will come from. */
   raidWarning: { x: number; y: number; size: number } | null;
   /** A tap landed on a wasp here. */
@@ -130,6 +143,7 @@ function emptyEvents(): FieldEvents {
     scattered: [],
     deflected: [],
     found: [],
+    treasure: [],
     raidWarning: null,
     struck: [],
     waspDown: [],
@@ -225,6 +239,10 @@ export class Field {
    * into day one. Now a bee landing at the hive *is* the reward.
    */
   honey = 0;
+  /** Hidden pickups on today's board. */
+  treasures: Treasure[] = [];
+  /** Honey earned today by exploring: discovery bonuses and honey pots. */
+  foundHoney = 0;
 
   stats: DerivedStats = deriveStats();
   features: DayFeatures = NO_FEATURES;
@@ -344,6 +362,8 @@ export class Field {
 
     this.clearRoutes();
     this.patches = [];
+    this.treasures = [];
+    this.foundHoney = 0;
     this.wasps = [];
     this.beesLost = 0;
     this.waspsDowned = 0;
@@ -385,14 +405,31 @@ export class Field {
     }
 
     this.fog.clear();
-    // The hive lights its own neighbourhood, and Scout Bees light a great deal
-    // more. Day one's flowers spawn inside the hive's light, so the first
-    // thirty seconds are exactly what they were before fog existed.
-    this.fog.reveal(this.hiveX, this.hiveY, TUNING.hive.sightRadius);
+    // The hive lights its own doorstep, and Scout Bees light a great deal
+    // more. Treasures are placed after this, so they only ever sit in the dark.
+    this.fog.reveal(
+      this.hiveX,
+      this.hiveY,
+      TUNING.hive.sightRadius + modifiers.hiveSightBonus,
+    );
     if (modifiers.scoutRadius > 0) {
       this.fog.reveal(this.hiveX, this.hiveY, modifiers.scoutRadius);
     }
-    this.updateDiscoveries();
+    this.placeTreasures(features.treasures);
+    this.updateDiscoveries(false);
+    // The hive always knows where its nearest flower is, so a day never opens
+    // on nothing to do. Everything past that is for the swarm to find.
+    if (!this.patches.some((p) => p.discovered)) {
+      const nearest = [...this.patches].sort(
+        (a, b) =>
+          Math.hypot(a.x - this.hiveX, a.y - this.hiveY) -
+          Math.hypot(b.x - this.hiveX, b.y - this.hiveY),
+      )[0];
+      if (nearest) {
+        this.fog.reveal(nearest.x, nearest.y, TUNING.bee.sightRadius);
+        this.updateDiscoveries(false);
+      }
+    }
 
     this.applyStats();
     for (const bee of this.bees) {
@@ -416,16 +453,40 @@ export class Field {
    * day even if nothing goes near it again — re-finding ground you already paid
    * to explore is busywork wearing a mechanic's clothes.
    */
-  private updateDiscoveries(): void {
+  private updateDiscoveries(pays = true): void {
     for (const patch of this.patches) {
       if (patch.discovered || !patch.alive) continue;
       if (!this.fog.isDiscovered(patch.x, patch.y)) continue;
       patch.discovered = true;
+      // Finding a flower pays on the spot: a share of what it holds. Flowers
+      // seen from the hive at dawn were not found by anyone, so they do not.
+      const royal = patch.kind === 'royal';
+      const share = royal
+        ? TUNING.treasure.royalDiscoveryShare
+        : TUNING.treasure.discoveryShare;
+      const bonus = pays ? Math.round(patch.honeyLeft * share) : 0;
+      if (bonus > 0) {
+        this.honey += bonus;
+        this.foundHoney += bonus;
+      }
       this.events.found.push({
         x: patch.x,
         y: patch.y,
         honey: Math.round(patch.honeyLeft),
+        bonus,
+        royal,
       });
+    }
+    for (const t of this.treasures) {
+      if (t.found || !this.fog.isDiscovered(t.x, t.y)) continue;
+      t.found = true;
+      if (t.kind === 'honey') {
+        this.honey += t.amount;
+        this.foundHoney += t.amount;
+      } else {
+        this.setBeeCount(this.bees.length + t.amount);
+      }
+      this.events.treasure.push({ x: t.x, y: t.y, kind: t.kind, amount: t.amount });
     }
   }
 
@@ -437,7 +498,7 @@ export class Field {
    * fills a second for ground that is permanently lit anyway.
    */
   private revealFromSwarm(): void {
-    const radius = TUNING.bee.sightRadius;
+    const radius = TUNING.bee.sightRadius * (1 + this.modifiers.beeSightBonus);
     for (const bee of this.bees) {
       if (bee.state === 'idle' || bee.state === 'queued') continue;
       this.fog.reveal(bee.x, bee.y, radius);
@@ -566,7 +627,7 @@ export class Field {
       // day one could spawn in the dark. Tightening the board is exactly what
       // opening the yard did, and a test caught it. A guarantee that lapses
       // under pressure is not a guarantee.
-      if (this.day < TUNING.maze.startDay) {
+      if (this.day <= 1) {
         const centre = maze.centreOf(col, row);
         if (Math.hypot(centre.x - this.hiveX, centre.y - this.hiveY) > lightRadius) {
           continue;
@@ -633,6 +694,72 @@ export class Field {
     // out uses a third of the screen and leaves the rest as empty mist; from
     // day two the nearest flowers are two corridors out.
     return { min: this.day >= 2 ? 2 : 1, max: outward + spread + 1 };
+  }
+
+  /**
+   * Hides today's treasures in the mist: cells the hive cannot see at dawn,
+   * preferring the far ones. A Royal Bloom goes to the furthest free cell —
+   * finding it is the reward for pushing all the way out.
+   */
+  private placeTreasures(plan: TreasurePlan | undefined): void {
+    if (!plan) return;
+    const { maze } = this;
+    const dark: Array<{ x: number; y: number; steps: number }> = [];
+    for (let index = 0; index < this.cellSteps.length; index += 1) {
+      const steps = this.cellSteps[index] ?? -1;
+      if (steps < 2) continue;
+      const c = maze.centreOf(index % maze.cols, Math.floor(index / maze.cols));
+      if (c.y < HUD_MARGIN + 40) continue;
+      if (this.fog.isDiscovered(c.x, c.y)) continue;
+      const crowded = this.patches.some((p) => Math.hypot(p.x - c.x, p.y - c.y) < 110);
+      if (crowded) continue;
+      dark.push({ x: c.x, y: c.y, steps });
+    }
+    if (dark.length === 0) return;
+    dark.sort((a, b) => b.steps - a.steps);
+
+    const take = (far: boolean): { x: number; y: number } | null => {
+      if (dark.length === 0) return null;
+      const pool = far ? dark.slice(0, Math.max(1, Math.ceil(dark.length / 3))) : dark;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      if (!pick) return null;
+      dark.splice(dark.indexOf(pick), 1);
+      return pick;
+    };
+
+    if (plan.royalBloom) {
+      const spot = take(true);
+      if (spot) {
+        const patch = new Patch(
+          spot.x,
+          spot.y,
+          Math.round(this.patchPool * TUNING.treasure.royalPoolMultiplier),
+          'royal',
+        );
+        patch.species = 1;
+        this.patches.push(patch);
+      }
+    }
+    for (let i = 0; i < plan.honeyPots; i += 1) {
+      const spot = take(false);
+      if (!spot) break;
+      this.treasures.push({
+        ...spot,
+        kind: 'honey',
+        amount: Math.round(this.patchPool * TUNING.treasure.potHoneyPerPool),
+        found: false,
+      });
+    }
+    for (let i = 0; i < plan.lostBees; i += 1) {
+      const spot = take(false);
+      if (!spot) break;
+      this.treasures.push({
+        ...spot,
+        kind: 'bees',
+        amount: TUNING.treasure.lostBees,
+        found: false,
+      });
+    }
   }
 
   spawnPatch(kind: PatchKind = 'normal'): Patch {
@@ -959,7 +1086,6 @@ export class Field {
 
     this.revealFromSwarm();
     this.updateDiscoveries();
-    this.revealLastFlowers();
 
     if (!this.clearedAnnounced && this.cleared) {
       this.clearedAnnounced = true;
@@ -1059,29 +1185,6 @@ export class Field {
     return (
       this.patches.length > 0 && this.patches.every((p) => p.kind === 'night' || !p.alive)
     );
-  }
-
-  /**
-   * Lights the last flowers once there is nothing known left to work.
-   *
-   * The mist is there to make the *order* a decision — what to scout, what to
-   * take first — not to hide the last flower of the day until the clock runs
-   * out. Once every flower the player has found is dry, the swarm smells the
-   * rest.
-   */
-  private revealLastFlowers(): void {
-    const known = this.patches.some((p) => p.alive && p.discovered && p.kind !== 'night');
-    if (known) return;
-    for (const patch of this.patches) {
-      if (!patch.alive || patch.discovered) continue;
-      this.fog.reveal(patch.x, patch.y, TUNING.bee.sightRadius * 1.2);
-      patch.discovered = true;
-      this.events.found.push({
-        x: patch.x,
-        y: patch.y,
-        honey: Math.round(patch.honeyLeft),
-      });
-    }
   }
 
   /** Opens a golden bloom when its time comes. */
@@ -1202,25 +1305,6 @@ export class Field {
     if (!route) return null;
     this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!route.target });
     return route;
-  }
-
-  /**
-   * A tap on a found flower: a beeline to it from the hive.
-   *
-   * The shortcut for the obvious case, and the thing a first-time player will
-   * try before they discover dragging. A flower behind a hedge still needs a
-   * dragged route round it — the straight line slides and stops short, which
-   * is the maze teaching itself.
-   */
-  tapFlower(x: number, y: number): Route | null {
-    const patch = this.nearestPatchTo(x, y, TUNING.line.tapFlowerRadius, true);
-    if (!patch) return null;
-    const plan = this.planLine(
-      { x: this.hiveX, y: this.hiveY, route: null },
-      patch.x,
-      patch.y,
-    );
-    return this.commitLine(plan);
   }
 
   /**

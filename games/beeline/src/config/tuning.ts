@@ -358,6 +358,20 @@ export interface ScoreTuning {
  * pays for doing it *now*: it climbs while every bee that could be flying is
  * flying, and slips when bees wait at the hive with a line free for them.
  */
+export interface TreasureTuning {
+  /** Honey paid the moment a flower is found mid-day, as a share of what it holds. */
+  discoveryShare: number;
+  /** The same, for finding a Royal Bloom. */
+  royalDiscoveryShare: number;
+  royalYieldMultiplier: number;
+  /** A Royal Bloom's pollen, as a multiple of the day's ordinary pool. */
+  royalPoolMultiplier: number;
+  /** A honey pot's honey, as a multiple of the day's ordinary pool. */
+  potHoneyPerPool: number;
+  /** Bees a lost swarm adds to the hive for the rest of the day. */
+  lostBees: number;
+}
+
 export interface ComboTuning {
   /** Highest multiplier. */
   max: number;
@@ -434,6 +448,7 @@ export interface Tuning {
   golden: GoldenTuning;
   score: ScoreTuning;
   combo: ComboTuning;
+  treasure: TreasureTuning;
   raid: RaidTuning;
   fog: {
     cellSize: number;
@@ -481,7 +496,10 @@ export const TUNING: Tuning = {
     // linearly to `fog.edgeReveal` at the rim, so a flower only counts as found
     // inside about 0.79 of this — at 340 that was 267px, and day one's band
     // reaches 300, so half the time the tutorial had nothing to point at.
-    sightRadius: 600,
+    // The hive sees its own doorstep and no further: what lies beyond is for
+    // the swarm to find. At 600 it lit most of the near board at dawn, and the
+    // first flowers of a day were simply handed over.
+    sightRadius: 380,
   },
 
   bee: {
@@ -521,7 +539,7 @@ export const TUNING: Tuning = {
     // made day one unwinnable — the exact failure mode of taxing the core verb.
     workersPerPixel: 0.03,
     maxWorkerFraction: 0.35,
-    sightRadius: 105,
+    sightRadius: 140,
   },
 
   // Retuned after the first playtest, which reported the original pacing as
@@ -630,7 +648,7 @@ export const TUNING: Tuning = {
     // somebody. Re-run `pnpm --filter @ucgames/game-beeline playtest` after
     // changing anything that moves honey, and refit here if the per-day table
     // drifts.
-    quotas: [150, 340, 520, 700, 980, 1200, 1420, 1700, 1950, 2150, 2350, 2600],
+    quotas: [120, 230, 340, 400, 560, 760, 960, 1160, 1360, 1560, 1760, 2000],
     quotaGrowthAfterTable: 1.1,
   },
 
@@ -916,6 +934,21 @@ export const TUNING: Tuning = {
     sunsetBonusPerSecond: 0.02,
     twoStars: 1.4,
     threeStars: 1.9,
+  },
+
+  /**
+   * What exploring finds. The mist used to hide flowers and nothing else, and
+   * the last hidden ones lit themselves once the known ones ran dry — so there
+   * was no reason to go looking. Now a find pays on the spot, and the mist
+   * holds things worth a detour on their own.
+   */
+  treasure: {
+    discoveryShare: 0.15,
+    royalDiscoveryShare: 0.25,
+    royalYieldMultiplier: 4,
+    royalPoolMultiplier: 2.5,
+    potHoneyPerPool: 3,
+    lostBees: 6,
   },
 
   combo: {
