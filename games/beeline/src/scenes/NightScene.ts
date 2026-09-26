@@ -4,6 +4,8 @@ import { TUNING } from '../config/tuning.ts';
 import { forecastFor, type DayResult } from '../game/DayCycle.ts';
 import { ITEMS, inventoryLines, type ItemId, type Rarity } from '../game/Items.ts';
 import type { BeelineSave } from '../game/SaveState.ts';
+import type { AchievementDef } from '../game/Achievements.ts';
+import { showAchievements } from '../ui/Toast.ts';
 import { Button } from '../ui/Button.ts';
 import { star } from '../ui/Hud.ts';
 import { itemTextureKey } from '../render/itemIcons.ts';
@@ -37,6 +39,8 @@ export interface NightData {
   onRunOver: () => void;
   /** Persists after any change made here. */
   onChanged: () => void;
+  /** Achievements the day just played unlocked. */
+  achievements?: AchievementDef[];
 }
 
 /**
@@ -74,6 +78,7 @@ export class NightScene extends BaseScene {
   }
 
   protected build(): void {
+    showAchievements(this, this.nightData.achievements ?? [], 900);
     const { result, save } = this.nightData;
     centerPlayfield(this);
 

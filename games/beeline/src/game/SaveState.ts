@@ -1,5 +1,6 @@
 import type { SaveManager } from '@ucgames/core';
 import { isItemId, type ItemId } from './Items.ts';
+import { UPGRADES, type UpgradeLevels } from './HiveUpgrades.ts';
 
 export const SAVE_KEY = 'beeline.save';
 export const SAVE_KEYS = [SAVE_KEY] as const;
@@ -17,13 +18,6 @@ export const SAVE_KEYS = [SAVE_KEY] as const;
  * number the player can no longer spend.
  */
 const CURRENT_VERSION = 4;
-/**
- * Version 4 is the wax-and-branches campaign: every board, budget and star
- * threshold changed, so stars earned on the old boards describe levels that
- * no longer exist. They are cleared (the endless run is kept) — which also
- * means a returning player gets the new lessons on the levels that teach them.
- */
-const FIRST_CURRENT_CAMPAIGN = 4;
 /** Saves from before this version played a different game; see below. */
 const FIRST_COMPATIBLE_VERSION = 2;
 
@@ -49,6 +43,31 @@ export interface BeelineSave {
   levelBest: number[];
   /** Worlds whose completion has already been celebrated. */
   worldsCelebrated: number[];
+  /** Honey waiting to be spent on the hive. Every level and day adds to it. */
+  honeyBank: number;
+  /** Every drop ever banked, spent or not. */
+  lifetimeHoney: number;
+  /** Levels of each permanent hive skill bought. */
+  upgrades: UpgradeLevels;
+  /** Achievement ids unlocked. */
+  achievements: string[];
+  /** Running totals the achievements count. */
+  tally: Tally;
+  /** 1 for a level whose mist has given up every treasure. */
+  levelExplored: number[];
+}
+
+/** Lifetime counts, for achievements. */
+export interface Tally {
+  wasps: number;
+  pots: number;
+  royals: number;
+  flowersFound: number;
+  bestCombo: number;
+}
+
+export function emptyTally(): Tally {
+  return { wasps: 0, pots: 0, royals: 0, flowersFound: 0, bestCombo: 1 };
 }
 
 export function newSave(): BeelineSave {
@@ -64,6 +83,12 @@ export function newSave(): BeelineSave {
     levelStars: [],
     levelBest: [],
     worldsCelebrated: [],
+    honeyBank: 0,
+    lifetimeHoney: 0,
+    upgrades: {},
+    achievements: [],
+    tally: emptyTally(),
+    levelExplored: [],
   };
 }
 
@@ -82,7 +107,6 @@ export function coerceSave(raw: unknown): BeelineSave {
   const data = raw as Partial<Record<keyof BeelineSave, unknown>>;
   const version = typeof data.version === 'number' ? data.version : 0;
   const legacy = version < FIRST_COMPATIBLE_VERSION;
-  const oldCampaign = version < FIRST_CURRENT_CAMPAIGN;
 
   return {
     version: CURRENT_VERSION,
@@ -94,12 +118,39 @@ export function coerceSave(raw: unknown): BeelineSave {
     bestRunDay: clampInt(data.bestRunDay, 0, 9999),
     bestScore: clampNumber(data.bestScore, 0, Number.MAX_SAFE_INTEGER, 0),
     tutorialDone: data.tutorialDone === true,
-    levelStars: oldCampaign ? [] : coerceNumbers(data.levelStars, 0, 3),
-    levelBest: oldCampaign
-      ? []
-      : coerceNumbers(data.levelBest, 0, Number.MAX_SAFE_INTEGER),
-    worldsCelebrated: oldCampaign ? [] : coerceNumbers(data.worldsCelebrated, 0, 9),
+    levelStars: coerceNumbers(data.levelStars, 0, 3),
+    levelBest: coerceNumbers(data.levelBest, 0, Number.MAX_SAFE_INTEGER),
+    worldsCelebrated: coerceNumbers(data.worldsCelebrated, 0, 9),
+    honeyBank: clampNumber(data.honeyBank, 0, Number.MAX_SAFE_INTEGER, 0),
+    lifetimeHoney: clampNumber(data.lifetimeHoney, 0, Number.MAX_SAFE_INTEGER, 0),
+    upgrades: coerceUpgrades(data.upgrades),
+    achievements: Array.isArray(data.achievements)
+      ? data.achievements.filter((a): a is string => typeof a === 'string').slice(0, 100)
+      : [],
+    tally: coerceTally(data.tally),
+    levelExplored: coerceNumbers(data.levelExplored, 0, 1),
   };
+}
+
+function coerceUpgrades(value: unknown): UpgradeLevels {
+  const out: UpgradeLevels = {};
+  if (typeof value !== 'object' || value === null) return out;
+  for (const def of UPGRADES) {
+    const n = (value as Record<string, unknown>)[def.id];
+    const level = clampInt(n, 0, def.max);
+    if (level > 0) out[def.id] = level;
+  }
+  return out;
+}
+
+function coerceTally(value: unknown): Tally {
+  const t = emptyTally();
+  if (typeof value !== 'object' || value === null) return t;
+  const v = value as Record<string, unknown>;
+  for (const key of Object.keys(t) as Array<keyof Tally>) {
+    t[key] = clampInt(v[key], key === 'bestCombo' ? 1 : 0, Number.MAX_SAFE_INTEGER);
+  }
+  return t;
 }
 
 function coerceNumbers(value: unknown, min: number, max: number): number[] {

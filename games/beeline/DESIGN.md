@@ -2303,106 +2303,69 @@ What changed to make the game submittable, rather than playable:
 
 Release mechanics are in `docs/publishing.md`.
 
-## 36. Why would anyone want three stars? — wax and branches
+## 36. Worth finding, worth earning
 
 ### The report
 
-After the campaign shipped: "there are always enough flowers around, we can
-just click on top of them and the line is drawn, and when they're finished
-the other flowers show up without us doing anything. What is the purpose of
-getting 3 stars or the most honey — the skills are always going to be the
-same."
+"There are always enough flowers around us — we click on them and the line is
+drawn, and once they are finished the other flowers show up without us doing
+anything. What is the purpose of 3 stars or the most honey in a run? Honey
+should mean something; finding flowers should be worth something; skills
+should be something we buy."
 
-### What was measured
+(An intermediate attempt, #30, replaced the mist and the hedges with a
+wax-budget network puzzle. It was rejected in playtest as far less fun than
+#29 and closed unmerged. This section builds on #29 instead.)
 
-That is a claim about decisions, so it was tested as one: the same expert
-hands (reaction, aim, speed) driven by two different brains, on all 30 levels.
-One always connects the nearest flower. The other weighs what each flower is
-worth against what it costs to reach.
+### Finding flowers is worth something
 
-**Thinking was worth 12%.** The nearest-first player earned 89% of the
-planner's honey, tied or beat it on 12 of 30 levels, and reached three-star
-scores on many. The stars were measuring reflexes. The previous engagement
-score (§33) had rated the game 96/100 because it measured pacing — time to
-first reward, waiting, dead time — and never asked whether a choice mattered.
-That was the wrong instrument, and the report was right.
+- **Nothing reveals itself.** `revealLastFlowers` — which lit every hidden
+  flower the moment the known ones ran dry — is gone. The hive's own light
+  shrank from 600 to 380 px, so only the nearest flower or two are known at
+  dawn (the nearest is always shown, so a day never opens on nothing to do).
+  The mist now starts on level 3, not level 6.
+- **A find pays on the spot**: 15% of the flower's honey, 25% for a Royal
+  Bloom, shown as "found! +28" where it was found.
+- **The mist hides treasure**: honey pots (instant honey), lost swarms (+6
+  bees for the rest of the level) and, from level 6, a **Royal Bloom** — a
+  violet flower worth four a trip, always in the furthest dark. A faint glint
+  shows through the mist wherever something still hides: never _where_, only
+  that it is worth a line.
+- **No tap-to-connect.** Lines are drawn.
 
-The code said why, in so many words:
+### Honey means something
 
-- `Patch.distanceMultiplier` paid a far flower back for its distance, "the
-  same honey per second". Every flower was worth the same, so every choice
-  was worth the same.
-- A tap on a flower laid the line for you.
-- A dry line retired itself and freed its slot; the fog revealed the last
-  flowers once the known ones were dry. The game cleaned up after the player.
+Every drop a level or an endless day brings in goes into the **bank**, and the
+bank buys **hive skills** (the Hive screen, from the menu, the map and every
+level card): Bigger Swarm, Swift Wings, Keen Eyes (see further into the mist),
+Sweet Nectar, Wide Lanes, Sharp Stingers, Extra Line. Each has several levels
+that cost more each time; the higher levels also need stars, so the top of the
+tree is earned by playing well and not only by playing long. A level that was
+out of reach for three stars becomes reachable after a few purchases — the
+reason to replay it.
 
-### The change: a network on a budget
+### Goals
 
-- **Wax.** Every line costs its own length. The level's wax is fixed.
-- **Branches.** A drag can start anywhere on an existing line, not only at the
-  hive. The branch flies the whole path from the hive but pays only for the
-  part it adds. A trunk to a far cluster and three short branches cost a
-  fraction of three lines from the hive.
-- **Flowers have a tier** — one, two or three honey a trip, shown by colour
-  and pips — and distance pays nothing back. Rich flowers are far, in
-  clusters; daisies are near, cheap and shallow.
-- **Dry lines stay.** A line whose flower is dry keeps its wax and its place:
-  carry it on from its tip to the next flower, branch off it, or hold it to
-  take it back. All its wax comes back (it did its job); a working line gives
-  half; a line laid in the last two seconds gives everything (a misdrag is
-  undone, not punished). Taking a line back takes its branches with it, or a
-  trunk could be refunded while its branches kept flying it.
-- **No tap-to-connect**, and **every board is lit** — the network is the
-  puzzle, and a plan needs the board in view.
+- **Stars** stay honey targets per level, now refitted for boards where the
+  flowers must be found.
+- **Treasures n/m** on every level card, and a level whose mist gives up
+  everything counts toward the Cartographer awards.
+- **17 awards** (Awards screen, toasts when earned): find a Royal Bloom, ten
+  honey pots, swat 150 wasps, reach ×5, bank 100,000 honey, max a skill,
+  every star, day 10 in endless…
 
-### Levels are chosen, not rolled
+### Numbers
 
-Each level says what it holds (clusters of a tier in a distance band); a
-search (`src/playtest/search-levels.ts`) tries 16 layout seeds at three wax
-budgets and plays each with the planner, a regular player and a no-plan
-player. It keeps the board where planning pays most, provided the no-plan
-player still scores something and a regular gets at least 55% of the planner.
-Wax is set relative to the board: a multiple of the cheapest network reaching
-its valuable flowers (`Field.networkCost`) — just above it, a trunk-and-branches
-plan reaches them all and separate lines from the hive cannot.
+Simulated players scout: a first-timer only once nothing known is left, a
+regular when running low, a practised player keeps a line in the mist and
+heads for glints. Endless quotas were eased for days 2–12 (exploring costs
+time) and day one's to 120. The engagement report reads 92/100: casual first
+runs of about 6 minutes, 8% ending by day 4, and a practised player reaching
+day 7 against a first-timer's day 5. Stars for all 30 levels were refitted.
 
-Stars are then fitted (`fit-levels.ts`): one star for a first-timer with no
-plan on about half their tries (nobody is walled out for not having found
-branching), two for a regular's ordinary game, three for a planner's —
-always at least 1.2x the best no-plan run.
-
-### Results
-
-|                                    | before   | after                   |
-| ---------------------------------- | -------- | ----------------------- |
-| planner ÷ no-plan honey, campaign  | 1.12x    | ~5x (every level ≥ 2x)  |
-| levels where no-plan ties or wins  | 12 of 30 | 1 (level 1, on purpose) |
-| no-plan player earning three stars | common   | never (a CI gate)       |
-
-The CI gate (`engagement.test.ts`, "campaign gate") now asserts the thing the
-report was about: a plan earns at least 2.5x what no plan does; no plan never
-earns three stars; a first-timer passes most levels; a regular reaches two
-stars on most; a good planner reaches three.
-
-### Lessons, taught in play
-
-Level 1 teaches the drag; level 2 branching (a hint hand drags from the middle
-of your line to the next flower); level 4, carrying on a dry line (shown only
-once a line has actually run dry); level 7, taking wax back. Each completes
-when the player does it, never on a timer, and only on the first play.
-
-### What the numbers do not say
-
-- The planner is a heuristic bot with a cluster bonus, not an optimal solver.
-  Real players who plan well will beat it; three stars may be easier for a
-  thoughtful human than the fit suggests.
-- The simulated first-timer never learns to branch. Real ones will after
-  level 2, so the one-star rates for real newcomers should be higher.
-- One early mistake (wax spent on daisies first) is costly: runs are bimodal.
-  The two-second free undo, full refunds on dry lines and a 55-second level
-  with Retry one tap away are the mitigation. Watch this in real playtests.
-- None of this has been played by a person yet. The first thing to learn
-  from real players is whether branching is discovered from the lesson.
+What the bots cannot tell us: whether a person _enjoys_ the mist. That is the
+first thing to watch in a real playtest — do players push lines into the dark
+because the glints make them curious, or only when they run out?
 
 ## 25. Success criteria
 

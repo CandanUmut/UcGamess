@@ -103,30 +103,18 @@ export interface DayFeatures {
   mazeOpenness: number;
   richPatches: boolean;
   nightBloom: boolean;
-  /** Flowers to place, as clusters. Absent means the old scatter. */
-  flowers?: FlowerGroup[];
-  /** Wax for the day's network, in design px of line. Absent: TUNING.wax.base. */
-  wax?: number;
   /**
-   * Wax as a share of the cheapest network reaching every flower; overrides
-   * `wax` once the flowers are placed. Below 1 means some flowers go unreached.
+   * What the mist hides today, beyond flowers: honey pots, lost bees, and a
+   * Royal Bloom. Only placed where the hive cannot see at dawn — they exist
+   * to make exploring pay.
    */
-  waxFactor?: number;
+  treasures?: TreasurePlan;
 }
 
-export type FlowerTier = 1 | 2 | 3;
-
-/**
- * A cluster of flowers of one tier: `count` of them in neighbouring cells
- * (within `spread` cells of each other), centred somewhere between `near` and
- * `far` px from the hive along the maze.
- */
-export interface FlowerGroup {
-  tier: FlowerTier;
-  count: number;
-  near: number;
-  far: number;
-  spread: number;
+export interface TreasurePlan {
+  honeyPots: number;
+  lostBees: number;
+  royalBloom: boolean;
 }
 
 /**
@@ -182,36 +170,12 @@ export function featuresForDay(day: number): DayFeatures {
     richPatches: day >= RICH_PATCH_DAY,
     // Golden blooms, from the day the tuning says.
     nightBloom: day >= TUNING.golden.startDay,
-    flowers: flowersForDay(day),
-    waxFactor: TUNING.wax.endlessFactor,
-  };
-}
-
-/**
- * An endless day's flowers: daisies by the hive, a warm cluster further out,
- * and from day two a rich cluster far away — more of each as the run goes on.
- */
-export function flowersForDay(day: number): FlowerGroup[] {
-  const groups: FlowerGroup[] = [
-    { tier: 1, count: day < 3 ? 3 : 2, near: 150, far: 470, spread: 2 },
-    {
-      tier: 2,
-      count: Math.min(4, 2 + Math.floor(day / 3)),
-      near: 400,
-      far: 680,
-      spread: 1,
+    treasures: {
+      honeyPots: day >= 6 ? 2 : day >= 2 ? 1 : 0,
+      lostBees: day >= 3 ? 1 : 0,
+      royalBloom: day >= 4,
     },
-  ];
-  if (day >= 2) {
-    groups.push({
-      tier: 3,
-      count: Math.min(4, 1 + Math.floor(day / 3)),
-      near: 760,
-      far: 1250,
-      spread: 1,
-    });
-  }
-  return groups;
+  };
 }
 
 /** The one-line announcement shown at the start of a day that introduces something. */

@@ -37,7 +37,9 @@ import {
 } from '../game/DayCycle.ts';
 import { deriveStats } from '../game/Upgrades.ts';
 import { modifiersFor, rollOffer } from '../game/Items.ts';
-import { Tutorial, type HintKind, type Lesson } from '../game/Tutorial.ts';
+import { applyUpgrades } from '../game/HiveUpgrades.ts';
+import { unlockAchievements, type AchievementDef } from '../game/Achievements.ts';
+import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
 import type { LevelDoneData } from './LevelDoneScene.ts';
@@ -52,14 +54,6 @@ import {
   withSeed,
   type LevelDef,
 } from '../game/Levels.ts';
-
-/** The levels that teach something, and what. */
-const LESSON_AT: Readonly<Record<number, Lesson>> = {
-  1: 'basics',
-  2: 'branch',
-  4: 'extend',
-  7: 'recall',
-};
 
 /** What the Game scene was started to play. */
 export type GameStart = { mode: 'endless' } | { mode: 'level'; level: number };
@@ -152,8 +146,6 @@ export class GameScene extends BaseGameplayScene {
 
   // --- the drag --------------------------------------------------------
   private previewGfx!: Phaser.GameObjects.Graphics;
-  /** The price tag that rides the tip of a drag, and the refund on a hold. */
-  private previewText!: Phaser.GameObjects.Text;
   private dragStart: LineStart | null = null;
   private plan: LinePlan | null = null;
 
@@ -178,10 +170,10 @@ export class GameScene extends BaseGameplayScene {
   private tutorial = new Tutorial(false);
   private tutorialText!: Phaser.GameObjects.Text;
   private routesDrawn = 0;
-  /** This level's branches, extensions and recalls, for the lessons. */
-  private branchesLaid = 0;
-  private extensions = 0;
-  private recalls = 0;
+  /** Achievements the last endless day unlocked, for the night screen. */
+  private nightAchievements: AchievementDef[] = [];
+  /** Today's finds, for the bank's tally and the level card. */
+  private finds = { flowers: 0, pots: 0, royals: 0, bees: 0 };
 
   constructor() {
     super({ key: 'Game' });
@@ -233,17 +225,6 @@ export class GameScene extends BaseGameplayScene {
     );
     this.routeRenderer = new RouteRenderer(this, DEPTH.route);
     this.previewGfx = this.add.graphics().setDepth(DEPTH.route + 1);
-    this.previewText = this.add
-      .text(0, 0, '', {
-        fontFamily: FONT,
-        fontSize: '22px',
-        fontStyle: 'bold',
-        color: '#fff4d6',
-        stroke: '#1d160c',
-        strokeThickness: 6,
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(DEPTH.hud - 1);
     this.hintGfx = this.add.graphics().setDepth(DEPTH.juice + 1);
     this.fogRenderer = new FogRenderer(
       this,
@@ -264,10 +245,6 @@ export class GameScene extends BaseGameplayScene {
         align: 'center',
         stroke: '#2a1d08',
         strokeThickness: 6,
-        // A backing plate, so a lesson reads over flowers and their labels.
-        backgroundColor: 'rgba(29, 22, 12, 0.72)',
-        padding: { x: 20, y: 8 },
-        wordWrap: { width: 900 },
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
@@ -320,6 +297,8 @@ export class GameScene extends BaseGameplayScene {
 
     if (this.start.mode === 'level') {
       this.level = levelById(this.start.level) ?? levelById(1) ?? null;
+      // The tutorial belongs to the very first level of a fresh save.
+      this.tutorial = new Tutorial(!this.save.tutorialDone && this.level?.id === 1);
       this.beginDay();
       return;
     }
@@ -353,8 +332,9 @@ export class GameScene extends BaseGameplayScene {
     this.phase = 'playing';
     this.day = this.save.day;
     this.scheduleBuzz();
+    this.resetFinds();
 
-    const modifiers = modifiersFor(this.save.items);
+    const modifiers = applyUpgrades(modifiersFor(this.save.items), this.save.upgrades);
     const stats = deriveStats(modifiers);
     this.field.setStats(stats);
     this.field.beginDay(
@@ -394,23 +374,12 @@ export class GameScene extends BaseGameplayScene {
    * and wasps still keep a player honest.
    */
   private beginLevel(level: LevelDef): void {
+    this.resetFinds();
     this.phase = 'playing';
     this.day = level.difficulty;
     this.scheduleBuzz();
 
-    // A lesson plays the first time its level is played, and never again —
-    // being taught twice is worse than not being taught at all.
-    const lesson = LESSON_AT[level.id] ?? null;
-    const firstTime = (this.save.levelStars[level.id - 1] ?? 0) === 0;
-    const wanted =
-      lesson !== null && firstTime && (lesson !== 'basics' || !this.save.tutorialDone);
-    this.tutorial = new Tutorial(wanted, lesson ?? 'basics');
-    this.routesDrawn = 0;
-    this.branchesLaid = 0;
-    this.extensions = 0;
-    this.recalls = 0;
-
-    const modifiers = levelModifiers(level);
+    const modifiers = applyUpgrades(levelModifiers(level), this.save.upgrades);
     this.field.setStats(deriveStats(modifiers));
     withSeed(level.seed, () =>
       this.field.beginDay(
@@ -479,6 +448,37 @@ export class GameScene extends BaseGameplayScene {
    * A campaign level is over. Stars are kept at their best, the honey at its
    * best, and the result goes to the level card.
    */
+  private resetFinds(): void {
+    this.finds = { flowers: 0, pots: 0, royals: 0, bees: 0 };
+  }
+
+  /** Treasures on today's board, and how many were found. */
+  private treasureCount(): { found: number; total: number } {
+    const royal = this.field.patches.filter((p) => p.kind === 'royal');
+    const total = this.field.treasures.length + royal.length;
+    const found =
+      this.field.treasures.filter((t) => t.found).length +
+      royal.filter((p) => p.discovered).length;
+    return { found, total };
+  }
+
+  /**
+   * Puts the day's honey in the bank and counts what was found and fought
+   * toward the achievements. Returns any achievements this unlocked.
+   */
+  private bankDay(honey: number): AchievementDef[] {
+    const banked = Math.max(0, Math.floor(honey));
+    this.save.honeyBank += banked;
+    this.save.lifetimeHoney += banked;
+    const t = this.save.tally;
+    t.wasps += this.field.waspsDowned;
+    t.pots += this.finds.pots;
+    t.royals += this.finds.royals;
+    t.flowersFound += this.finds.flowers;
+    t.bestCombo = Math.max(t.bestCombo, this.field.bestCombo);
+    return unlockAchievements(this.save);
+  }
+
   private endLevel(level: LevelDef, cleared: boolean): void {
     this.phase = 'ended';
     this.cancelDrag();
@@ -506,12 +506,19 @@ export class GameScene extends BaseGameplayScene {
     const celebrateWorld = worldDone && !this.save.worldsCelebrated.includes(level.world);
     if (celebrateWorld) this.save.worldsCelebrated.push(level.world);
 
+    const treasure = this.treasureCount();
+    if (treasure.total > 0 && treasure.found >= treasure.total) {
+      while (this.save.levelExplored.length <= index) this.save.levelExplored.push(0);
+      this.save.levelExplored[index] = 1;
+    }
+    const unlocked = this.bankDay(honey);
+
     if (this.tutorial.finished || stars > 0) this.save.tutorialDone = true;
     // The portal's own celebration cue, for a star gained or a world finished —
     // not for every pass, or it stops meaning anything.
     if (stars > prevStars || celebrateWorld) this.context.portal.happyTime();
     this.tutorial.dismiss();
-    this.tutorialText.setText('').setAlpha(0);
+    this.tutorialText.setText('');
     this.persist();
     this.hud.setVisible(false);
 
@@ -524,10 +531,15 @@ export class GameScene extends BaseGameplayScene {
       prevBest,
       bestCombo: this.field.bestCombo,
       worldComplete: celebrateWorld ? level.world : null,
+      treasure,
+      foundHoney: Math.round(this.field.foundHoney),
+      bank: this.save.honeyBank,
+      achievements: unlocked,
       sfx: this.sfx,
       onRetry: () => this.replayLevel(level.id),
       onNext: () => this.replayLevel(level.id + 1),
       onMap: () => this.toMap(),
+      onHive: () => this.toHive(),
     };
     this.scene.launch('LevelDone', data);
     this.scene.pause();
@@ -596,6 +608,14 @@ export class GameScene extends BaseGameplayScene {
     this.scene.start('Menu');
   }
 
+  /** To the hive's skill shop; it returns to the map. */
+  private toHive(): void {
+    this.scene.stop('LevelDone');
+    this.sfx.stopHumOnly();
+    this.stopGameplay();
+    this.scene.start('Hive', { back: 'Map', world: this.level?.world ?? 0 });
+  }
+
   /** Back to the honeycomb. Anything unfinished on this board is dropped. */
   private toMap(): void {
     this.scene.stop('LevelDone');
@@ -626,6 +646,7 @@ export class GameScene extends BaseGameplayScene {
     const result = evaluateDay(this.day, Math.floor(this.field.honey) + bonus, bonus);
 
     this.save.runScore += result.score;
+    this.nightAchievements = this.bankDay(Math.floor(this.field.honey) + bonus);
     // Surviving further than ever before is endless mode's celebration.
     if (result.outcome === 'met' && this.day > this.save.bestRunDay && this.day > 1) {
       this.context.portal.happyTime();
@@ -633,7 +654,7 @@ export class GameScene extends BaseGameplayScene {
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     if (this.tutorial.finished) this.save.tutorialDone = true;
     this.tutorial.dismiss();
-    this.tutorialText.setText('').setAlpha(0);
+    this.tutorialText.setText('');
 
     if (result.outcome === 'met') {
       this.save.day = this.day + 1;
@@ -661,7 +682,9 @@ export class GameScene extends BaseGameplayScene {
       onNextDay: () => this.startNextDay(),
       onRunOver: () => this.closeRun(),
       onChanged: () => this.persist(),
+      achievements: this.nightAchievements,
     };
+    this.nightAchievements = [];
     this.phase = 'ended';
     this.scene.launch('Night', data);
     this.scene.pause();
@@ -736,27 +759,29 @@ export class GameScene extends BaseGameplayScene {
         return;
       }
 
-      // A press on a line is either a branch (the finger moves off) or a
-      // recall (it holds still). Both are armed; movement decides.
       const start = this.field.lineStartAt(p.worldX, p.worldY);
       if (start) {
         this.dragStart = start;
         this.plan = null;
+        this.sfx.playVaried('draw', 0.14, 300);
+        return;
       }
-      if (!start || start.mode !== 'hive') {
-        this.eraseCandidate = start?.route ?? this.field.routeNear(p.worldX, p.worldY);
-      }
+
+      // A press on a line might be an erase, if the finger stays put.
+      this.eraseCandidate = this.field.routeNear(p.worldX, p.worldY);
     });
 
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
-      const moved = Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY);
-      if (this.eraseCandidate && moved > ERASE_MOVE_TOLERANCE) {
+      if (this.dragStart && p.isDown) {
+        this.plan = this.field.planLine(this.dragStart, p.worldX, p.worldY);
+        return;
+      }
+      if (!this.eraseCandidate) return;
+      if (
+        Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY) > ERASE_MOVE_TOLERANCE
+      ) {
         this.eraseCandidate = null;
         this.holdSeconds = 0;
-      }
-      if (this.dragStart && p.isDown && moved > TAP_SLOP && !this.erasedThisGesture) {
-        if (!this.plan) this.sfx.playVaried('draw', 0.14, 300);
-        this.plan = this.field.planLine(this.dragStart, p.worldX, p.worldY);
       }
     });
 
@@ -784,8 +809,8 @@ export class GameScene extends BaseGameplayScene {
       }
       this.cancelDrag();
 
-      // A tap does not lay a line — lines are drawn, because where they run
-      // is the whole decision. A tap on the board points back at the hive.
+      // A tap never lays a line: lines are drawn from the hive, by hand.
+      // A tap on the board points back at where they start.
       if (moved <= TAP_SLOP) this.fieldRenderer.pingHive();
     });
 
@@ -798,12 +823,9 @@ export class GameScene extends BaseGameplayScene {
   }
 
   private layLine(plan: LinePlan): void {
-    const mode = plan.start.mode;
     const route = this.field.commitLine(plan);
     if (!route) return;
     this.routesDrawn += 1;
-    if (mode === 'branch') this.branchesLaid += 1;
-    if (mode === 'tip') this.extensions += 1;
     this.sfx.playVaried('draw', plan.target ? 0.34 : 0.22, plan.target ? 90 : 260);
   }
 
@@ -824,17 +846,7 @@ export class GameScene extends BaseGameplayScene {
     this.holdSeconds += dt;
     if (this.holdSeconds < ERASE_HOLD_SECONDS) return;
 
-    this.cancelDrag();
-    const refund = this.field.recallRoute(route);
-    this.recalls += 1;
-    this.hud.flashWax();
-    this.floatText(
-      this.pressX,
-      this.pressY - 30,
-      `+${Math.round(refund / 10)} wax`,
-      '#f3dfa0',
-      26,
-    );
+    this.field.killRoute(route);
     this.sfx.playVaried('deposit', 0.25, 300);
     for (let i = 0; i < 6; i += 1) this.juice.scatter(route.tipX, route.tipY);
 
@@ -909,35 +921,12 @@ export class GameScene extends BaseGameplayScene {
         routesDrawn: this.routesDrawn,
         honey: this.field.honey,
         lines: this.field.routes.length,
-        branches: this.branchesLaid,
-        extensions: this.extensions,
-        recalls: this.recalls,
-        dryLine: this.field.routes.some((r) => !r.target && r.hadTarget),
       });
-      const lessonText = this.tutorial.current?.text ?? '';
-      this.tutorialText.setText(lessonText).setAlpha(lessonText ? 1 : 0);
+      this.tutorialText.setText(this.tutorial.current?.text ?? '');
 
-      const plan = this.plan;
-      this.hud.setWax(
-        this.field.wax,
-        this.field.waxBudget,
-        plan?.cost ?? 0,
-        !!plan && plan.short && !plan.target,
-      );
-      const unworked = this.field.knownPatches.some(
-        (p) => p.pool > 0 && !this.field.routeTargeting(p),
-      );
-      const dryLine = this.field.routes.some((r) => !r.target && r.hadTarget);
-      this.hud.setIdle(
-        this.field.idleBees,
-        !unworked
-          ? null
-          : this.field.wax >= TUNING.route.minLength * 2
-            ? 'lay'
-            : dryLine
-              ? 'recall'
-              : null,
-      );
+      const slots = this.field.stats.routeSlots;
+      this.hud.setLines(this.field.routes.length, slots);
+      this.hud.setIdle(this.field.idleBees, this.field.routes.length < slots);
 
       const crossing = this.field.wasps.filter((w) => w.state === 'approaching').length;
       this.hud.setAlert(
@@ -996,9 +985,39 @@ export class GameScene extends BaseGameplayScene {
     }
 
     for (const found of events.found) {
-      for (let i = 0; i < 8; i += 1) this.juice.collect(found.x, found.y, 3);
-      this.sfx.play('upgrade', 0.26);
-      this.floatText(found.x, found.y - 70, 'found!', '#fff4d6', 20);
+      if (found.bonus > 0) this.finds.flowers += 1;
+      if (found.royal) this.finds.royals += 1;
+      for (let i = 0; i < (found.royal ? 24 : 8); i += 1) {
+        this.juice.collect(found.x, found.y, 3);
+      }
+      if (found.royal) {
+        this.sfx.play('fanfare', 0.4);
+        this.cameras.main.flash(220, 200, 160, 255);
+        this.hud.showBanner('You found the Royal Bloom!', '#e6c8ff');
+      } else {
+        this.sfx.play('upgrade', 0.26);
+      }
+      this.floatText(
+        found.x,
+        found.y - 70,
+        found.bonus > 0 ? `found! +${found.bonus}` : 'found!',
+        found.royal ? '#e6c8ff' : '#fff4d6',
+        found.royal ? 30 : 22,
+      );
+    }
+    for (const t of events.treasure) {
+      if (t.kind === 'honey') this.finds.pots += 1;
+      else this.finds.bees += 1;
+      for (let i = 0; i < 16; i += 1) this.juice.collect(t.x, t.y, 3);
+      this.sfx.play('sparkle', 0.4);
+      this.floatText(
+        t.x,
+        t.y - 40,
+        t.kind === 'honey' ? `honey pot! +${t.amount}` : `lost swarm! +${t.amount} bees`,
+        t.kind === 'honey' ? '#ffd466' : '#fff4d6',
+        28,
+      );
+      if (t.kind === 'bees') this.beeRenderer.resize(this.field.bees.length);
     }
 
     if (events.raidWarning) {
@@ -1178,16 +1197,7 @@ export class GameScene extends BaseGameplayScene {
   private drawPreview(): void {
     const g = this.previewGfx;
     g.clear();
-    this.previewText.setText('');
     const plan = this.plan;
-    // Where a branch forks off an existing line: marked so the player sees the
-    // new line joins the network there and pays only from there on.
-    if (this.dragStart && this.dragStart.mode !== 'hive') {
-      g.fillStyle(0xfff4d6, 1);
-      g.fillCircle(this.dragStart.x, this.dragStart.y, 9);
-      g.lineStyle(3, 0x1d160c, 0.8);
-      g.strokeCircle(this.dragStart.x, this.dragStart.y, 9);
-    }
     if (!this.dragStart || !plan || plan.coords.length < 4) {
       if (this.dragStart) {
         // Pressed but not moved yet: show where the line starts from.
@@ -1202,10 +1212,7 @@ export class GameScene extends BaseGameplayScene {
     }
 
     const hit = plan.target !== null;
-    // Green: reaches a flower. Cream: a stub to build on. Red: it cannot be
-    // laid — not enough wax, too many lines — and letting go does nothing.
-    const tint =
-      !plan.valid || (plan.short && !hit) ? 0xff7a5e : hit ? 0x7ee08a : 0xfff4d6;
+    const tint = hit ? 0x7ee08a : 0xfff4d6;
     const coords = plan.coords;
 
     g.lineStyle(12, 0x1d160c, 0.25);
@@ -1262,20 +1269,6 @@ export class GameScene extends BaseGameplayScene {
       g.fillStyle(0xff9a5c, 0.9);
       g.fillCircle(plan.contact.x, plan.contact.y, 6);
     }
-
-    // The price, at the tip: what this line will take out of the wax.
-    const label =
-      plan.reason === 'lines'
-        ? 'Too many lines'
-        : plan.short && !hit
-          ? 'Not enough wax'
-          : `−${Math.max(1, Math.round(plan.cost / 10))} wax`;
-    // Under the flower rather than over it: its honey label sits on top.
-    this.previewText
-      .setText(label)
-      .setColor(tint === 0xff7a5e ? '#ff9b80' : '#fff4d6')
-      .setOrigin(0.5, 0)
-      .setPosition(tipX, tipY + (hit ? TUNING.patch.reachRadius * 0.6 + 10 : 14));
   }
 
   /** The filling ring that shows a hold is about to erase a line. */
@@ -1309,16 +1302,6 @@ export class GameScene extends BaseGameplayScene {
       false,
     );
     g.strokePath();
-
-    const branches = this.field.descendantsOf(route).length;
-    this.previewText
-      .setText(
-        `Take back +${Math.round(this.field.refundFor(route) / 10)} wax` +
-          (branches > 0 ? ` (and ${branches} branch${branches > 1 ? 'es' : ''})` : ''),
-      )
-      .setColor('#ffd0b8')
-      .setOrigin(0.5, 1)
-      .setPosition(this.pressX, this.pressY - radius - 10);
   }
 
   /**
@@ -1329,118 +1312,40 @@ export class GameScene extends BaseGameplayScene {
     const g = this.hintGfx;
     g.clear();
 
-    const kind = this.tutorial.current?.hint ?? null;
-    if (!kind || this.phase !== 'playing' || this.dragStart) return;
-    const hint = this.hintPath(kind);
-    if (!hint) return;
+    if (!this.tutorial.wantsHintLine || this.phase !== 'playing' || this.dragStart)
+      return;
+    const served = new Set(this.field.routes.map((r) => r.target));
+    const patch = this.field.knownPatches
+      .filter((p) => !served.has(p))
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - this.field.hiveX, a.y - this.field.hiveY) -
+          Math.hypot(b.x - this.field.hiveX, b.y - this.field.hiveY),
+      )[0];
+    if (!patch) return;
 
     const cycle = (this.field.time * 0.55) % 1;
-    const alpha = cycle > 0.85 ? (1 - cycle) / 0.15 : 1;
-
-    if (kind === 'hold-dry-line') {
-      // Press, and a ring fills: the hold that takes a line back.
-      const fill = Math.min(1, Math.max(0, (cycle - 0.15) / 0.6));
-      g.lineStyle(5, 0xff7043, 0.9 * alpha);
-      g.beginPath();
-      g.arc(
-        hint.fromX,
-        hint.fromY,
-        30,
-        -Math.PI / 2,
-        -Math.PI / 2 + Math.PI * 2 * fill,
-        false,
-      );
-      g.strokePath();
-      this.drawFinger(g, hint.fromX, hint.fromY, fill > 0, alpha);
-      return;
-    }
-
-    // Rest at the start, glide to the flower, rest there, fade.
+    // Rest at the hive, glide to the flower, rest there, fade.
     const t = Math.min(1, Math.max(0, (cycle - 0.15) / 0.55));
     const ease = t * t * (3 - 2 * t);
-    const fx = hint.fromX + (hint.toX - hint.fromX) * ease;
-    const fy = hint.fromY + (hint.toY - hint.fromY) * ease;
+    const fx = this.field.hiveX + (patch.x - this.field.hiveX) * ease;
+    const fy = this.field.hiveY + (patch.y - this.field.hiveY) * ease;
+    const alpha = cycle > 0.85 ? (1 - cycle) / 0.15 : 1;
 
     g.lineStyle(6, 0xffffff, 0.55 * alpha);
     g.beginPath();
-    g.moveTo(hint.fromX, hint.fromY);
+    g.moveTo(this.field.hiveX, this.field.hiveY);
     g.lineTo(fx, fy);
     g.strokePath();
-    this.drawFinger(g, fx, fy, t > 0 && t < 1, alpha);
-  }
 
-  /** The finger: a pale disc with a dark rim, pressed a little while dragging. */
-  private drawFinger(
-    g: Phaser.GameObjects.Graphics,
-    x: number,
-    y: number,
-    pressed: boolean,
-    alpha: number,
-  ): void {
+    // The finger: a pale disc with a dark rim, pressed a little while dragging.
+    const pressed = t > 0 && t < 1;
     g.fillStyle(0x000000, 0.25 * alpha);
-    g.fillCircle(x + 4, y + 6, 20);
+    g.fillCircle(fx + 4, fy + 6, 20);
     g.fillStyle(0xfff4d6, 0.95 * alpha);
-    g.fillCircle(x, y, pressed ? 17 : 20);
+    g.fillCircle(fx, fy, pressed ? 17 : 20);
     g.lineStyle(3, 0x2a1d08, 0.9 * alpha);
-    g.strokeCircle(x, y, pressed ? 17 : 20);
-  }
-
-  /** Where a lesson's hint hand should drag, on the board as it is now. */
-  private hintPath(
-    kind: HintKind,
-  ): { fromX: number; fromY: number; toX: number; toY: number } | null {
-    const f = this.field;
-    const open = f.knownPatches.filter((p) => p.pool > 0 && !f.routeTargeting(p));
-    const nearestTo = (x: number, y: number, pool = open) =>
-      [...pool].sort(
-        (a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y),
-      )[0];
-
-    if (kind === 'hive-to-flower' || kind === 'hive-to-rich') {
-      const rich = open.filter((p) => p.tier >= 2);
-      const target = nearestTo(
-        f.hiveX,
-        f.hiveY,
-        kind === 'hive-to-rich' && rich.length ? rich : open,
-      );
-      return target
-        ? { fromX: f.hiveX, fromY: f.hiveY, toX: target.x, toY: target.y }
-        : null;
-    }
-    if (kind === 'line-to-flower') {
-      // The open flower closest to any line, from the nearest point on it.
-      let best: {
-        fromX: number;
-        fromY: number;
-        toX: number;
-        toY: number;
-        d: number;
-      } | null = null;
-      for (const p of open) {
-        const on = f.pointOnNetwork(p.x, p.y, 2000);
-        if (!on || Math.hypot(on.x - f.hiveX, on.y - f.hiveY) < 80) continue;
-        const d = Math.hypot(on.x - p.x, on.y - p.y);
-        if (!best || d < best.d)
-          best = { fromX: on.x, fromY: on.y, toX: p.x, toY: p.y, d };
-      }
-      return best;
-    }
-    const dry = f.routes.find((r) => !r.target && r.hadTarget);
-    if (!dry) return null;
-    if (kind === 'dry-tip-to-flower') {
-      const target = nearestTo(dry.tipX, dry.tipY);
-      return target
-        ? { fromX: dry.tipX, fromY: dry.tipY, toX: target.x, toY: target.y }
-        : null;
-    }
-    // hold-dry-line: press on the middle of the dry line.
-    dry.sample(dry.liveLength * 0.6, eraseSample);
-    return {
-      fromX: eraseSample.x,
-      fromY: eraseSample.y,
-      toX: eraseSample.x,
-      toY: eraseSample.y,
-    };
+    g.strokeCircle(fx, fy, pressed ? 17 : 20);
   }
 
   /** Exposed for the automated harness, in dev and `local` builds only. */

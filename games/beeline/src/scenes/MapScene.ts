@@ -100,6 +100,15 @@ export class MapScene extends BaseScene {
       tint: 0x8a6a3a,
       onClick: () => this.scene.start('Menu'),
     }).setDepth(20);
+    new Button(this, {
+      x: view.right - 130,
+      y: view.y + 44,
+      width: 210,
+      label: 'Hive',
+      sublabel: `${Math.floor(this.save.honeyBank).toLocaleString('en-US')} honey`,
+      tint: 0xb07a1e,
+      onClick: () => this.scene.start('Hive', { back: 'Map', world: this.world }),
+    }).setDepth(20);
 
     this.spawnBees();
     this.draw();

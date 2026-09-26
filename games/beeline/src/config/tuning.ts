@@ -358,21 +358,18 @@ export interface ScoreTuning {
  * pays for doing it *now*: it climbs while every bee that could be flying is
  * flying, and slips when bees wait at the hive with a line free for them.
  */
-export interface WaxTuning {
-  base: number;
-  perExtraLine: number;
-  undoSeconds: number;
-  refundShare: number;
-  dryRefundShare: number;
-  maxLines: number;
-  branchGrabRadius: number;
-  endlessFactor: number;
-}
-
-export interface TierTuning {
-  yield: number[];
-  pool: number[];
-  species: number[][];
+export interface TreasureTuning {
+  /** Honey paid the moment a flower is found mid-day, as a share of what it holds. */
+  discoveryShare: number;
+  /** The same, for finding a Royal Bloom. */
+  royalDiscoveryShare: number;
+  royalYieldMultiplier: number;
+  /** A Royal Bloom's pollen, as a multiple of the day's ordinary pool. */
+  royalPoolMultiplier: number;
+  /** A honey pot's honey, as a multiple of the day's ordinary pool. */
+  potHoneyPerPool: number;
+  /** Bees a lost swarm adds to the hive for the rest of the day. */
+  lostBees: number;
 }
 
 export interface ComboTuning {
@@ -451,8 +448,7 @@ export interface Tuning {
   golden: GoldenTuning;
   score: ScoreTuning;
   combo: ComboTuning;
-  wax: WaxTuning;
-  tiers: TierTuning;
+  treasure: TreasureTuning;
   raid: RaidTuning;
   fog: {
     cellSize: number;
@@ -500,7 +496,10 @@ export const TUNING: Tuning = {
     // linearly to `fog.edgeReveal` at the rim, so a flower only counts as found
     // inside about 0.79 of this — at 340 that was 267px, and day one's band
     // reaches 300, so half the time the tutorial had nothing to point at.
-    sightRadius: 600,
+    // The hive sees its own doorstep and no further: what lies beyond is for
+    // the swarm to find. At 600 it lit most of the near board at dawn, and the
+    // first flowers of a day were simply handed over.
+    sightRadius: 380,
   },
 
   bee: {
@@ -540,7 +539,7 @@ export const TUNING: Tuning = {
     // made day one unwinnable — the exact failure mode of taxing the core verb.
     workersPerPixel: 0.03,
     maxWorkerFraction: 0.35,
-    sightRadius: 105,
+    sightRadius: 140,
   },
 
   // Retuned after the first playtest, which reported the original pacing as
@@ -649,7 +648,7 @@ export const TUNING: Tuning = {
     // somebody. Re-run `pnpm --filter @ucgames/game-beeline playtest` after
     // changing anything that moves honey, and refit here if the per-day table
     // drifts.
-    quotas: [70, 200, 500, 840, 1160, 1400, 1620, 1840, 2060, 2280, 2500, 2720],
+    quotas: [120, 230, 340, 400, 560, 760, 960, 1160, 1360, 1560, 1760, 2000],
     quotaGrowthAfterTable: 1.1,
   },
 
@@ -938,41 +937,18 @@ export const TUNING: Tuning = {
   },
 
   /**
-   * The network's budget. Every line costs its own length in wax; a branch
-   * pays only for the part it adds. Numbers are design px of line, shown to
-   * the player divided by ten.
+   * What exploring finds. The mist used to hide flowers and nothing else, and
+   * the last hidden ones lit themselves once the known ones ran dry — so there
+   * was no reason to go looking. Now a find pays on the spot, and the mist
+   * holds things worth a detour on their own.
    */
-  wax: {
-    base: 1400,
-    perExtraLine: 300,
-    // A line recalled this soon after laying is a misdrag: full refund.
-    undoSeconds: 2,
-    // After that, half. Tearing a network up all day should cost something.
-    refundShare: 0.5,
-    // A line whose flower ran dry did its job: taking it back returns all its
-    // wax. Measured: at half, one poor opening sank a regular player's level
-    // about one time in twenty; at full, never — and the planner's lead over
-    // no plan only fell from 4.9x to 4.6x.
-    dryRefundShare: 1,
-    maxLines: 12,
-    // How close to a line a press has to land to fork a branch off it.
-    branchGrabRadius: 30,
-    // Endless days: wax as a multiple of the network to the valuable flowers.
-    endlessFactor: 1.15,
-  },
-
-  /**
-   * Flower tiers: honey per bee-trip, trips before the flower is dry, and the
-   * species (indexes into COLORS.species) that wear each tier.
-   */
-  tiers: {
-    yield: [1, 2, 3],
-    pool: [40, 60, 140],
-    species: [
-      [4, 0], // white daisy, pink
-      [3, 2], // buttercup, poppy
-      [1, 5], // violet, cornflower
-    ],
+  treasure: {
+    discoveryShare: 0.15,
+    royalDiscoveryShare: 0.25,
+    royalYieldMultiplier: 4,
+    royalPoolMultiplier: 2.5,
+    potHoneyPerPool: 3,
+    lostBees: 6,
   },
 
   combo: {

@@ -60,20 +60,6 @@ export class Route {
   nextDepartAt = 0;
   /** Set when the route dies, so Field can sweep it. */
   dead = false;
-  /**
-   * The line this one branches from, or 0 for a line from the hive.
-   *
-   * A branch copies its parent's path up to the fork, so bees fly it
-   * end-to-end on their own, but it only paid wax for the part it added. That
-   * is why recalling a line recalls its branches too: otherwise a player could
-   * lay a trunk, branch off it, recall the trunk for a refund and keep flying
-   * it for free.
-   */
-  parentId = 0;
-  /** Wax this line paid for its own length — the refund basis on recall. */
-  ownCost = 0;
-  /** Field time the line was laid, for the free-undo window. */
-  laidAt = 0;
 
   /**
    * How beaten-in this path is, 0..1. Earned by traffic, lost by neglect.

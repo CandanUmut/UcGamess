@@ -7,20 +7,9 @@ import { RaidClock } from './Raid.ts';
 import { Maze } from './Maze.ts';
 import { slideAlongWalls, type WallSlide } from './deflect.ts';
 import { Fog } from './Fog.ts';
-import {
-  buildPolyline,
-  coordsLength,
-  truncateCoords,
-  type Polyline,
-  type SamplePoint,
-} from './polyline.ts';
+import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
 import { deriveStats, type DerivedStats } from '../game/Upgrades.ts';
-import {
-  dayQuota,
-  type DayFeatures,
-  type FlowerGroup,
-  type FlowerTier,
-} from '../game/DayCycle.ts';
+import { dayQuota, type DayFeatures, type TreasurePlan } from '../game/DayCycle.ts';
 import { noModifiers, type RunModifiers } from '../game/Items.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -82,6 +71,17 @@ function hiveDiscoveryRadius(): number {
   return TUNING.hive.sightRadius * ((1 - discoverAt) / (1 - edgeReveal));
 }
 
+export type TreasureKind = 'honey' | 'bees';
+
+/** Something hidden in the mist, collected the moment a bee's light reaches it. */
+export interface Treasure {
+  x: number;
+  y: number;
+  kind: TreasureKind;
+  amount: number;
+  found: boolean;
+}
+
 export interface FieldStats {
   honey: number;
   bees: number;
@@ -101,7 +101,9 @@ export interface FieldEvents {
   /** Where a new line was pressed into a wall and turned along it. */
   deflected: Array<{ x: number; y: number }>;
   /** Flowers found this step. Discovery is the reward for exploring. */
-  found: Array<{ x: number; y: number; honey: number }>;
+  found: Array<{ x: number; y: number; honey: number; bonus: number; royal: boolean }>;
+  /** Treasure picked up in the mist: a honey pot or a lost swarm. */
+  treasure: Array<{ x: number; y: number; kind: TreasureKind; amount: number }>;
   /** A raid was announced this step, at the edge it will come from. */
   raidWarning: { x: number; y: number; size: number } | null;
   /** A tap landed on a wasp here. */
@@ -132,8 +134,6 @@ export interface FieldEvents {
   comboUp: number;
   /** The multiplier slipped below a whole tier. */
   comboDown: number;
-  /** A line (and its branches) was taken back, for this much wax. */
-  recalled: Array<{ x: number; y: number; refund: number; lines: number }>;
 }
 
 function emptyEvents(): FieldEvents {
@@ -143,6 +143,7 @@ function emptyEvents(): FieldEvents {
     scattered: [],
     deflected: [],
     found: [],
+    treasure: [],
     raidWarning: null,
     struck: [],
     waspDown: [],
@@ -158,7 +159,6 @@ function emptyEvents(): FieldEvents {
     cleared: false,
     comboUp: 0,
     comboDown: 0,
-    recalled: [],
   };
 }
 
@@ -166,16 +166,8 @@ function emptyEvents(): FieldEvents {
 export interface LineStart {
   x: number;
   y: number;
-  /** The line this drag grows from: carried on from its tip, or branched off it. */
+  /** The line being carried on, or null for a fresh one from the hive. */
   route: Route | null;
-  /**
-   * How a drag from here joins the network. 'hive' starts a new line; 'tip'
-   * carries a stub (a line with no working flower) further; 'branch' forks a
-   * new line off `route` at arc length `at`.
-   */
-  mode: 'hive' | 'tip' | 'branch';
-  /** Arc length along `route` where a branch forks. */
-  at: number;
 }
 
 /** A line as it would be laid, for the preview and for committing. */
@@ -187,14 +179,8 @@ export interface LinePlan {
   target: Patch | null;
   /** Where it first ran into a wall, if it did. */
   contact: { x: number; y: number } | null;
-  /** Long enough to be worth laying, affordable, and within the line cap. */
+  /** Long enough to be worth laying. */
   valid: boolean;
-  /** Wax this line costs: its own new length, never the trunk it grows from. */
-  cost: number;
-  /** Cut short to what the wax left would pay for. */
-  short: boolean;
-  /** Why an invalid plan is invalid, for the preview to say. */
-  reason: 'tiny' | 'wax' | 'lines' | null;
 }
 
 const NO_FEATURES: DayFeatures = {
@@ -253,15 +239,10 @@ export class Field {
    * into day one. Now a bee landing at the hive *is* the reward.
    */
   honey = 0;
-  /**
-   * Wax left to build with, in design px of line. Every line costs its own
-   * length; the whole network has to fit in the day's budget. This is what
-   * makes *how* you reach a flower a decision, where before every flower was
-   * one free drag away.
-   */
-  wax = 0;
-  /** The day's full budget, for the HUD's bar. */
-  waxBudget = 0;
+  /** Hidden pickups on today's board. */
+  treasures: Treasure[] = [];
+  /** Honey earned today by exploring: discovery bonuses and honey pots. */
+  foundHoney = 0;
 
   stats: DerivedStats = deriveStats();
   features: DayFeatures = NO_FEATURES;
@@ -280,6 +261,7 @@ export class Field {
    * after a short grace so its slot comes back without the player having to
    * find it and erase it. Erasing by hand was the one chore left in the loop.
    */
+  private readonly jobless = new Map<number, number>();
   /** Field time the next golden bloom opens. */
   private nextGoldenAt = Number.POSITIVE_INFINITY;
   /** Set once the cleared event has fired today, so it fires once. */
@@ -368,6 +350,7 @@ export class Field {
     this.swarmBoost = boost;
     this.honey = 0;
     this.elapsed = 0;
+    this.jobless.clear();
     this.clearedAnnounced = false;
     this.combo = 1;
     this.bestCombo = 1;
@@ -378,11 +361,9 @@ export class Field {
     this.day = day;
 
     this.clearRoutes();
-    this.waxBudget = Math.round(
-      (features.wax ?? TUNING.wax.base) + modifiers.extraLines * TUNING.wax.perExtraLine,
-    );
-    this.wax = this.waxBudget;
     this.patches = [];
+    this.treasures = [];
+    this.foundHoney = 0;
     this.wasps = [];
     this.beesLost = 0;
     this.waspsDowned = 0;
@@ -417,44 +398,38 @@ export class Field {
     // game changing its mind: you planned around what was there, and then a
     // flower appeared somewhere you had already decided not to go. A day is a
     // board you are given, not a board that keeps being rewritten.
-    if (features.flowers && features.flowers.length > 0) {
-      this.placeGroups(features.flowers);
-      // Wildflowers: an extra warm flower somewhere in the middle distance.
-      if (modifiers.extraPatches > 0) {
-        this.placeGroups([
-          { tier: 2, count: modifiers.extraPatches, near: 440, far: 820, spread: 3 },
-        ]);
-      }
-      if (features.waxFactor) {
-        this.waxBudget = Math.round(
-          this.networkCost(this.patches.some((p) => p.tier >= 2) ? 2 : 1) *
-            features.waxFactor +
-            modifiers.extraLines * TUNING.wax.perExtraLine,
-        );
-        this.wax = this.waxBudget;
-      }
-    } else {
-      for (let i = 0; i < patchCount; i += 1) {
-        const kind: PatchKind =
-          features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
-        this.spawnPatch(kind);
-      }
+    for (let i = 0; i < patchCount; i += 1) {
+      const kind: PatchKind =
+        features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
+      this.spawnPatch(kind);
     }
 
     this.fog.clear();
-    // The hive lights its own neighbourhood, and Scout Bees light a great deal
-    // more. Day one's flowers spawn inside the hive's light, so the first
-    // thirty seconds are exactly what they were before fog existed.
-    this.fog.reveal(this.hiveX, this.hiveY, TUNING.hive.sightRadius);
+    // The hive lights its own doorstep, and Scout Bees light a great deal
+    // more. Treasures are placed after this, so they only ever sit in the dark.
+    this.fog.reveal(
+      this.hiveX,
+      this.hiveY,
+      TUNING.hive.sightRadius + modifiers.hiveSightBonus,
+    );
     if (modifiers.scoutRadius > 0) {
       this.fog.reveal(this.hiveX, this.hiveY, modifiers.scoutRadius);
     }
-    // A board of placed clusters is a board to plan, and a plan needs it all
-    // in view. The mist stays only for the old scattered layout.
-    if (features.flowers && features.flowers.length > 0) {
-      this.fog.reveal(this.hiveX, this.hiveY, 4000);
+    this.placeTreasures(features.treasures);
+    this.updateDiscoveries(false);
+    // The hive always knows where its nearest flower is, so a day never opens
+    // on nothing to do. Everything past that is for the swarm to find.
+    if (!this.patches.some((p) => p.discovered)) {
+      const nearest = [...this.patches].sort(
+        (a, b) =>
+          Math.hypot(a.x - this.hiveX, a.y - this.hiveY) -
+          Math.hypot(b.x - this.hiveX, b.y - this.hiveY),
+      )[0];
+      if (nearest) {
+        this.fog.reveal(nearest.x, nearest.y, TUNING.bee.sightRadius);
+        this.updateDiscoveries(false);
+      }
     }
-    this.updateDiscoveries();
 
     this.applyStats();
     for (const bee of this.bees) {
@@ -478,16 +453,40 @@ export class Field {
    * day even if nothing goes near it again — re-finding ground you already paid
    * to explore is busywork wearing a mechanic's clothes.
    */
-  private updateDiscoveries(): void {
+  private updateDiscoveries(pays = true): void {
     for (const patch of this.patches) {
       if (patch.discovered || !patch.alive) continue;
       if (!this.fog.isDiscovered(patch.x, patch.y)) continue;
       patch.discovered = true;
+      // Finding a flower pays on the spot: a share of what it holds. Flowers
+      // seen from the hive at dawn were not found by anyone, so they do not.
+      const royal = patch.kind === 'royal';
+      const share = royal
+        ? TUNING.treasure.royalDiscoveryShare
+        : TUNING.treasure.discoveryShare;
+      const bonus = pays ? Math.round(patch.honeyLeft * share) : 0;
+      if (bonus > 0) {
+        this.honey += bonus;
+        this.foundHoney += bonus;
+      }
       this.events.found.push({
         x: patch.x,
         y: patch.y,
         honey: Math.round(patch.honeyLeft),
+        bonus,
+        royal,
       });
+    }
+    for (const t of this.treasures) {
+      if (t.found || !this.fog.isDiscovered(t.x, t.y)) continue;
+      t.found = true;
+      if (t.kind === 'honey') {
+        this.honey += t.amount;
+        this.foundHoney += t.amount;
+      } else {
+        this.setBeeCount(this.bees.length + t.amount);
+      }
+      this.events.treasure.push({ x: t.x, y: t.y, kind: t.kind, amount: t.amount });
     }
   }
 
@@ -499,7 +498,7 @@ export class Field {
    * fills a second for ground that is permanently lit anyway.
    */
   private revealFromSwarm(): void {
-    const radius = TUNING.bee.sightRadius;
+    const radius = TUNING.bee.sightRadius * (1 + this.modifiers.beeSightBonus);
     for (const bee of this.bees) {
       if (bee.state === 'idle' || bee.state === 'queued') continue;
       this.fog.reveal(bee.x, bee.y, radius);
@@ -628,7 +627,7 @@ export class Field {
       // day one could spawn in the dark. Tightening the board is exactly what
       // opening the yard did, and a test caught it. A guarantee that lapses
       // under pressure is not a guarantee.
-      if (this.day < TUNING.maze.startDay) {
+      if (this.day <= 1) {
         const centre = maze.centreOf(col, row);
         if (Math.hypot(centre.x - this.hiveX, centre.y - this.hiveY) > lightRadius) {
           continue;
@@ -661,159 +660,6 @@ export class Field {
       x: clamp(centre.x + jitterX, margin, WORLD_WIDTH - margin),
       y: clamp(centre.y + jitterY, HUD_MARGIN + margin, WORLD_HEIGHT - margin),
     };
-  }
-
-  /**
-   * Lays the day's flowers out as groups: a cluster of one tier somewhere in a
-   * distance band from the hive, its members in neighbouring cells.
-   *
-   * Clusters are the point. A lone far flower is a straight line or nothing; a
-   * far *cluster* is where a trunk and three short branches beat three long
-   * lines from the hive, and seeing that is the skill the wax budget asks for.
-   */
-  private placeGroups(groups: readonly FlowerGroup[]): void {
-    const { maze } = this;
-    const taken = new Set<number>();
-    const hiveCell = maze.rowAt(this.hiveY) * maze.cols + maze.colAt(this.hiveX);
-    taken.add(hiveCell);
-    for (const p of this.patches)
-      taken.add(maze.rowAt(p.y) * maze.cols + maze.colAt(p.x));
-    const cellCount = maze.cols * maze.rows;
-    const distanceOf = (index: number): number => {
-      const c = maze.centreOf(index % maze.cols, Math.floor(index / maze.cols));
-      return Math.max(
-        this.pathDistanceTo(c.x, c.y),
-        Math.hypot(c.x - this.hiveX, c.y - this.hiveY),
-      );
-    };
-    const free = (index: number): boolean =>
-      !taken.has(index) && (this.cellSteps[index] ?? -1) >= 0;
-
-    for (const group of groups) {
-      const inBand: number[] = [];
-      for (let i = 0; i < cellCount; i += 1) {
-        if (!free(i)) continue;
-        const d = distanceOf(i);
-        if (d >= group.near && d <= group.far) inBand.push(i);
-      }
-      // Prefer a centre with room for the whole cluster around it.
-      const roomy = inBand.filter(
-        (i) =>
-          this.neighbourCells(i, group.spread).filter(free).length >= group.count - 1,
-      );
-      const choices = roomy.length > 0 ? roomy : inBand;
-      const centre = choices[Math.floor(Math.random() * choices.length)];
-      if (centre === undefined) continue;
-
-      const members = [centre];
-      const around = this.neighbourCells(centre, group.spread)
-        .filter((i) => free(i) && i !== centre)
-        .sort(() => Math.random() - 0.5);
-      for (const i of around) {
-        if (members.length >= group.count) break;
-        members.push(i);
-      }
-      for (const index of members) {
-        taken.add(index);
-        this.spawnFlowerInCell(index, group.tier);
-      }
-    }
-  }
-
-  /**
-   * The length of the cheapest network joining the hive to every flower of at
-   * least `minTier`: a minimum spanning tree, with each edge the straight hop
-   * where the hedges allow it and the corridor distance where they do not.
-   *
-   * A level's wax is measured against this over the *valuable* flowers. Just
-   * above it, a trunk-and-branches network reaches them all and separate lines
-   * from the hive do not — which is the gap between planning and not.
-   */
-  networkCost(minTier = 1): number {
-    const nodes = [
-      { x: this.hiveX, y: this.hiveY },
-      ...this.patches.filter((p) => p.tier >= minTier),
-    ];
-    const n = nodes.length;
-    const cellSize = (this.maze.cellWidth + this.maze.cellHeight) / 2;
-    const steps = nodes.map((p) =>
-      this.maze.distancesFrom(this.maze.colAt(p.x), this.maze.rowAt(p.y)),
-    );
-    const edge = (i: number, j: number): number => {
-      const a = nodes[i];
-      const b = nodes[j];
-      if (!a || !b) return Infinity;
-      const straightLine = Math.hypot(a.x - b.x, a.y - b.y);
-      if (!this.pathBlocked(a.x, a.y, b.x, b.y)) return straightLine;
-      const cell = this.maze.rowAt(b.y) * this.maze.cols + this.maze.colAt(b.x);
-      const hops = steps[i]?.[cell] ?? -1;
-      return hops < 0 ? Infinity : Math.max(straightLine, hops * cellSize);
-    };
-    const inTree = new Array<boolean>(n).fill(false);
-    const best = new Array<number>(n).fill(Infinity);
-    best[0] = 0;
-    let total = 0;
-    for (let k = 0; k < n; k += 1) {
-      let pick = -1;
-      for (let i = 0; i < n; i += 1) {
-        if (!inTree[i] && (pick < 0 || (best[i] ?? Infinity) < (best[pick] ?? Infinity)))
-          pick = i;
-      }
-      if (pick < 0 || !Number.isFinite(best[pick] ?? Infinity)) break;
-      inTree[pick] = true;
-      total += best[pick] ?? 0;
-      for (let i = 0; i < n; i += 1) {
-        if (inTree[i]) continue;
-        // A flower is reached at the edge of its reach ring, not its centre.
-        const w = Math.max(0, edge(pick, i) - TUNING.patch.reachRadius * 0.6);
-        if (w < (best[i] ?? Infinity)) best[i] = w;
-      }
-    }
-    return total;
-  }
-
-  /** Cells within `spread` steps (Chebyshev) of `index`, including it. */
-  private neighbourCells(index: number, spread: number): number[] {
-    const { maze } = this;
-    const col = index % maze.cols;
-    const row = Math.floor(index / maze.cols);
-    const out: number[] = [];
-    for (let dr = -spread; dr <= spread; dr += 1) {
-      for (let dc = -spread; dc <= spread; dc += 1) {
-        const c = col + dc;
-        const r = row + dr;
-        if (maze.inside(c, r)) out.push(r * maze.cols + c);
-      }
-    }
-    return out;
-  }
-
-  private spawnFlowerInCell(index: number, tier: FlowerTier): Patch {
-    const { maze } = this;
-    const centre = maze.centreOf(index % maze.cols, Math.floor(index / maze.cols));
-    const jitterX = (Math.random() * 2 - 1) * maze.cellWidth * PATCH_JITTER;
-    const jitterY = (Math.random() * 2 - 1) * maze.cellHeight * PATCH_JITTER;
-    const margin = TUNING.patch.reachRadius;
-    const x = clamp(centre.x + jitterX, margin, WORLD_WIDTH - margin);
-    const y = clamp(centre.y + jitterY, HUD_MARGIN + margin, WORLD_HEIGHT - margin);
-    const pool = Math.round(
-      (TUNING.tiers.pool[tier - 1] ?? TUNING.patch.basePool) * this.modifiers.patchPool,
-    );
-    const patch = new Patch(x, y, pool, 'normal');
-    patch.tier = tier;
-    patch.species = this.speciesForTier(tier);
-    this.patches.push(patch);
-    return patch;
-  }
-
-  /**
-   * A flower's look follows its tier, so value is readable at a glance: the
-   * plain white and pink blooms pay one, the warm ones two, the blue and violet
-   * three. Two species per tier keeps a board from looking like a spreadsheet.
-   */
-  private speciesForTier(tier: FlowerTier): number {
-    const options = TUNING.tiers.species[tier - 1] ?? [0];
-    return options[Math.floor(Math.random() * options.length)] ?? 0;
   }
 
   /** How many maze-steps out a flower of this kind may be placed, for the day. */
@@ -850,12 +696,77 @@ export class Field {
     return { min: this.day >= 2 ? 2 : 1, max: outward + spread + 1 };
   }
 
+  /**
+   * Hides today's treasures in the mist: cells the hive cannot see at dawn,
+   * preferring the far ones. A Royal Bloom goes to the furthest free cell —
+   * finding it is the reward for pushing all the way out.
+   */
+  private placeTreasures(plan: TreasurePlan | undefined): void {
+    if (!plan) return;
+    const { maze } = this;
+    const dark: Array<{ x: number; y: number; steps: number }> = [];
+    for (let index = 0; index < this.cellSteps.length; index += 1) {
+      const steps = this.cellSteps[index] ?? -1;
+      if (steps < 2) continue;
+      const c = maze.centreOf(index % maze.cols, Math.floor(index / maze.cols));
+      if (c.y < HUD_MARGIN + 40) continue;
+      if (this.fog.isDiscovered(c.x, c.y)) continue;
+      const crowded = this.patches.some((p) => Math.hypot(p.x - c.x, p.y - c.y) < 110);
+      if (crowded) continue;
+      dark.push({ x: c.x, y: c.y, steps });
+    }
+    if (dark.length === 0) return;
+    dark.sort((a, b) => b.steps - a.steps);
+
+    const take = (far: boolean): { x: number; y: number } | null => {
+      if (dark.length === 0) return null;
+      const pool = far ? dark.slice(0, Math.max(1, Math.ceil(dark.length / 3))) : dark;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      if (!pick) return null;
+      dark.splice(dark.indexOf(pick), 1);
+      return pick;
+    };
+
+    if (plan.royalBloom) {
+      const spot = take(true);
+      if (spot) {
+        const patch = new Patch(
+          spot.x,
+          spot.y,
+          Math.round(this.patchPool * TUNING.treasure.royalPoolMultiplier),
+          'royal',
+        );
+        patch.species = 1;
+        this.patches.push(patch);
+      }
+    }
+    for (let i = 0; i < plan.honeyPots; i += 1) {
+      const spot = take(false);
+      if (!spot) break;
+      this.treasures.push({
+        ...spot,
+        kind: 'honey',
+        amount: Math.round(this.patchPool * TUNING.treasure.potHoneyPerPool),
+        found: false,
+      });
+    }
+    for (let i = 0; i < plan.lostBees; i += 1) {
+      const spot = take(false);
+      if (!spot) break;
+      this.treasures.push({
+        ...spot,
+        kind: 'bees',
+        amount: TUNING.treasure.lostBees,
+        found: false,
+      });
+    }
+  }
+
   spawnPatch(kind: PatchKind = 'normal'): Patch {
     const spot = this.randomPatchPosition(kind);
     const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
-    patch.tier = kind === 'rich' ? 3 : 1;
-    patch.species =
-      kind === 'night' ? this.nextSpecies() : this.speciesForTier(patch.tier);
+    patch.distanceMultiplier = this.distanceMultiplierAt(spot.x, spot.y);
+    patch.species = this.nextSpecies();
     this.patches.push(patch);
     return patch;
   }
@@ -1069,7 +980,23 @@ export class Field {
    */
   createRoute(coords: readonly number[]): Route | null {
     if (coordsLength(coords) < TUNING.route.minLength) return null;
-    if (this.routes.length >= TUNING.wax.maxLines) return null;
+
+    if (this.routes.length >= this.stats.routeSlots) {
+      // At the cap, the *least worked* line is the one that goes.
+      //
+      // Refusing the drag was the alternative and it is worse: a gesture that
+      // does nothing on a touchscreen is indistinguishable from a broken game.
+      // Strength is traffic the road has actually carried, so the line the
+      // swarm has used least is the one the player would have picked anyway.
+      let weakest = this.routes[0];
+      for (const route of this.routes) {
+        if (weakest && route.strength < weakest.strength) weakest = route;
+      }
+      if (weakest) {
+        this.events.replaced.push({ x: weakest.tipX, y: weakest.tipY });
+        this.killRoute(weakest);
+      }
+    }
 
     const route = new Route(coords);
     route.updateTip();
@@ -1111,6 +1038,7 @@ export class Field {
     route.dead = true;
     const index = this.routes.indexOf(route);
     if (index >= 0) this.routes.splice(index, 1);
+    this.jobless.delete(route.id);
 
     for (const bee of this.bees) {
       if (bee.routeId === route.id) {
@@ -1148,17 +1076,9 @@ export class Field {
         this.killRoute(route);
         continue;
       }
-      const had = route.target;
-      if (route.target && (!route.target.alive || route.target.pool <= 0)) {
-        route.target = null;
-      }
+      if (route.target && !route.target.alive) route.target = null;
       if (!route.target) this.retarget(route);
-      if (had && !route.target) {
-        // The flower ran dry. The line stays — it is wax the player paid for
-        // and a trunk they can build on — but its crew comes home for work.
-        this.events.drained.push({ x: route.tipX, y: route.tipY });
-        this.sendCrewHome(route);
-      }
+      this.retireIfJobless(route, dt);
     }
 
     for (const bee of this.bees) this.stepBee(bee, dt);
@@ -1166,7 +1086,6 @@ export class Field {
 
     this.revealFromSwarm();
     this.updateDiscoveries();
-    this.revealLastFlowers();
 
     if (!this.clearedAnnounced && this.cleared) {
       this.clearedAnnounced = true;
@@ -1175,24 +1094,35 @@ export class Field {
   }
 
   /**
-   * Turns a line's crew for home: bees still waiting leave the queue, bees out
-   * on it fly back along it. They bank what they carry and are reassigned.
+   * Retires a line that has nothing left to do.
+   *
+   * Two cases. Its flower ran dry — the ordinary end of a line's life, and
+   * the moment the slot should come back. Or it never reached a flower at all
+   * and the bees have had time to fly it and light what is out there, which
+   * is how a line pushed into the mist scouts rather than sits there.
+   *
+   * A line whose tip is being carried on — the player is building a longer
+   * route leg by leg — gets a longer grace, since the next leg is usually a
+   * second away.
    */
-  private sendCrewHome(route: Route): void {
-    for (const bee of this.bees) {
-      if (bee.routeId !== route.id) continue;
-      if (bee.state === 'queued' || bee.state === 'idle') {
-        this.releaseBee(bee);
-        bee.state = 'idle';
-      } else if (
-        bee.state === 'outbound' ||
-        bee.state === 'building' ||
-        bee.state === 'confused' ||
-        bee.state === 'collect'
-      ) {
-        bee.state = 'inbound';
-      }
+  private retireIfJobless(route: Route, dt: number): void {
+    if (route.target) {
+      this.jobless.delete(route.id);
+      return;
     }
+
+    const idle = (this.jobless.get(route.id) ?? 0) + dt;
+    this.jobless.set(route.id, idle);
+
+    const hadFlower = route.hadTarget;
+    const grace = hadFlower
+      ? TUNING.line.retireSeconds
+      : Math.max(4, route.liveLength / (this.stats.beeSpeed * 0.8));
+    if (idle < grace) return;
+
+    if (hadFlower) this.events.drained.push({ x: route.tipX, y: route.tipY });
+    else this.events.fizzled.push({ x: route.tipX, y: route.tipY });
+    this.killRoute(route);
   }
 
   /** The whole tier of the Busy Hive multiplier: what honey is paid at. */
@@ -1211,12 +1141,8 @@ export class Field {
     const { max, risePerSecond, fallPerSecond, graceSeconds, idleTolerance } =
       TUNING.combo;
     const before = this.comboTier;
-    // Idle bees are the player's to fix whenever an unworked flower is in
-    // sight: extend a stub, branch, or recall something to afford it.
-    const workLeft = this.patches.some(
-      (p) => p.alive && p.discovered && p.pool > 0 && !this.routeTargeting(p),
-    );
-    const waitingBees = this.idleBees >= idleTolerance && workLeft;
+    const slotFree = this.routes.length < this.stats.routeSlots;
+    const waitingBees = this.idleBees >= idleTolerance && slotFree;
 
     if (waitingBees) {
       this.waiting += dt;
@@ -1225,7 +1151,7 @@ export class Field {
       }
     } else {
       this.waiting = 0;
-      const working = this.routes.some((r) => r.target !== null && r.beeCount > 0);
+      const working = this.routes.some((r) => r.target !== null);
       if (working) this.combo = Math.min(max, this.combo + risePerSecond * dt);
     }
 
@@ -1261,29 +1187,6 @@ export class Field {
     );
   }
 
-  /**
-   * Lights the last flowers once there is nothing known left to work.
-   *
-   * The mist is there to make the *order* a decision — what to scout, what to
-   * take first — not to hide the last flower of the day until the clock runs
-   * out. Once every flower the player has found is dry, the swarm smells the
-   * rest.
-   */
-  private revealLastFlowers(): void {
-    const known = this.patches.some((p) => p.alive && p.discovered && p.kind !== 'night');
-    if (known) return;
-    for (const patch of this.patches) {
-      if (!patch.alive || patch.discovered) continue;
-      this.fog.reveal(patch.x, patch.y, TUNING.bee.sightRadius * 1.2);
-      patch.discovered = true;
-      this.events.found.push({
-        x: patch.x,
-        y: patch.y,
-        honey: Math.round(patch.honeyLeft),
-      });
-    }
-  }
-
   /** Opens a golden bloom when its time comes. */
   private stepGolden(): void {
     if (this.elapsed < this.nextGoldenAt) return;
@@ -1308,92 +1211,51 @@ export class Field {
   // ---------------------------------------------------------------- lines
 
   /**
-   * Where a drag starting at (x, y) joins the network, or null if it does not.
+   * Where a line pressed at (x, y) would start from, or null for nowhere.
    *
-   * The end of a stub — a line with no working flower — carries on from its
-   * tip. Anywhere else along a line forks a branch off it, *including the tip
-   * of a line that is working a flower*: dragging on from a flower keeps that
-   * flower served and chains the next one on. Near the hive with no line under
-   * the finger, a fresh line starts.
+   * The hive, or the end of a line the player already owns — whichever the
+   * press is nearer. A line's end wins only inside its own grab radius, so a
+   * press on the hive with a short line's end nearby still starts a new line.
    */
   lineStartAt(x: number, y: number): LineStart | null {
     const toHive = Math.hypot(x - this.hiveX, y - this.hiveY);
-
-    let tipRoute: Route | null = null;
-    let tipDist = TUNING.line.tipGrabRadius;
+    let best: Route | null = null;
+    let bestDist = TUNING.line.tipGrabRadius;
     for (const route of this.routes) {
       if (route.dead) continue;
       const dist = Math.hypot(route.tipX - x, route.tipY - y);
-      if (dist < tipDist) {
-        tipDist = dist;
-        tipRoute = route;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = route;
       }
     }
-    if (tipRoute && tipDist < toHive) {
-      if (!tipRoute.target) {
-        return {
-          x: tipRoute.tipX,
-          y: tipRoute.tipY,
-          route: tipRoute,
-          mode: 'tip',
-          at: 0,
-        };
-      }
-      return {
-        x: tipRoute.tipX,
-        y: tipRoute.tipY,
-        route: tipRoute,
-        mode: 'branch',
-        at: tipRoute.liveLength,
-      };
-    }
-
-    // A press on a line is about that line — to branch off it or hold it for
-    // a refund — unless it is right on the hive itself, where every line
-    // starts and a fresh one is the likelier intent.
-    const along = this.pointOnNetwork(x, y, TUNING.wax.branchGrabRadius);
-    if (along && toHive > TUNING.hive.drawRadius * 0.5) {
-      return { x: along.x, y: along.y, route: along.route, mode: 'branch', at: along.s };
-    }
-    if (toHive <= TUNING.line.startRadius) {
-      return { x: this.hiveX, y: this.hiveY, route: null, mode: 'hive', at: 0 };
-    }
+    if (best && bestDist < toHive) return { x: best.tipX, y: best.tipY, route: best };
+    if (toHive <= TUNING.line.startRadius)
+      return { x: this.hiveX, y: this.hiveY, route: null };
     return null;
   }
 
-  /** The nearest point on any line to (x, y), within `tolerance`. */
-  pointOnNetwork(
-    x: number,
-    y: number,
-    tolerance: number,
-  ): { route: Route; s: number; x: number; y: number } | null {
-    let best: { route: Route; s: number; x: number; y: number } | null = null;
-    let bestDist = tolerance;
-    for (const route of this.routes) {
-      if (route.dead) continue;
-      for (let s = 0; s <= route.liveLength; s += 8) {
-        route.sample(s, scratch);
-        const dist = Math.hypot(scratch.x - x, scratch.y - y);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = { route, s, x: scratch.x, y: scratch.y };
-        }
-      }
-    }
-    return best;
-  }
-
   /**
-   * The line a drag from `start` to (toX, toY) would lay, and what it costs.
+   * The line a drag from `start` to (toX, toY) would lay.
    *
-   * Straight — a beeline — snapped onto a found flower the finger is near, slid
-   * along any hedge it presses into, and cut short where the wax runs out. The
-   * preview draws exactly this, so what the player sees while dragging is what
-   * they get when they let go, price included.
+   * Straight — a beeline — clamped to the longest leg, snapped onto a found
+   * flower the finger is near, and slid along any hedge it presses into. The
+   * preview draws exactly this, so what the player sees while dragging is
+   * what they get when they let go.
    */
   planLine(start: LineStart, toX: number, toY: number): LinePlan {
-    let endX = clamp(toX, 6, WORLD_WIDTH - 6);
-    let endY = clamp(toY, 6, WORLD_HEIGHT - 6);
+    let endX = toX;
+    let endY = toY;
+    const dx = endX - start.x;
+    const dy = endY - start.y;
+    const len = Math.hypot(dx, dy);
+    const max = TUNING.line.maxLegLength;
+    if (len > max) {
+      endX = start.x + (dx / len) * max;
+      endY = start.y + (dy / len) * max;
+    }
+    endX = clamp(endX, 6, WORLD_WIDTH - 6);
+    endY = clamp(endY, 6, WORLD_HEIGHT - 6);
 
     // Aim assist: a release near a found flower means that flower.
     const near = this.nearestPatchTo(endX, endY, TUNING.patch.aimAssistRadius, true);
@@ -1404,127 +1266,45 @@ export class Field {
 
     const raw = straight(start.x, start.y, endX, endY);
     const slid = this.slidePath(raw);
-    let coords = slid.coords;
-    let cost = coordsLength(coords);
-    let short = false;
-    if (cost > this.wax) {
-      coords = truncateCoords(buildPolyline(coords), this.wax);
-      cost = coordsLength(coords);
-      short = true;
-    }
+    const coords = slid.coords;
     const tipX = coords[coords.length - 2] ?? start.x;
     const tipY = coords[coords.length - 1] ?? start.y;
     const target = this.nearestPatchTo(tipX, tipY, TUNING.patch.reachRadius, true);
-
-    const needsSlot = start.mode !== 'tip';
-    let reason: LinePlan['reason'] = null;
-    if (needsSlot && this.routes.length >= TUNING.wax.maxLines) reason = 'lines';
-    // A short spur is fine when it reaches a flower: a line passing right by
-    // one has to be able to pick it up. Only a stub to nowhere is too short.
-    else if (cost < TUNING.route.minLength && !target) reason = short ? 'wax' : 'tiny';
 
     return {
       start,
       coords,
       target,
       contact: slid.contact,
-      valid: reason === null,
-      cost,
-      short,
-      reason,
+      valid: coordsLength(coords) >= TUNING.route.minLength,
     };
   }
 
-  /** Lays a planned line and pays for it. Returns the route it created or carried on. */
+  /** Lays a planned line. Returns the route it created or carried on. */
   commitLine(plan: LinePlan): Route | null {
     if (!plan.valid) return null;
     if (plan.contact) this.events.deflected.push(plan.contact);
 
     const tipX = plan.coords[plan.coords.length - 2] ?? plan.start.x;
     const tipY = plan.coords[plan.coords.length - 1] ?? plan.start.y;
-    const parent = plan.start.route;
 
-    if (plan.start.mode === 'tip' && parent && !parent.dead) {
-      parent.extendWith(plan.coords);
-      parent.ownCost += plan.cost;
-      this.wax -= plan.cost;
-      this.retarget(parent);
-      this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!parent.target });
-      return parent;
+    const carried = plan.start.route;
+    if (carried && !carried.dead) {
+      carried.extendWith(plan.coords);
+      this.retarget(carried);
+      this.jobless.delete(carried.id);
+      this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!carried.target });
+      return carried;
     }
 
-    let full = plan.coords;
-    if (plan.start.mode === 'branch' && parent && !parent.dead) {
-      const trunk = truncateCoords(parent.poly, plan.start.at);
-      full = trunk.concat(plan.coords.slice(2));
-    }
-    const route = this.createRoute(full);
+    // A second line to a flower that already has one is a second crew on it,
+    // not a replacement. Replacing it used to reset every bee already working
+    // the first line — a drag that slid along a hedge onto the wrong flower
+    // could quietly undo a line that was paying.
+    const route = this.createRoute(plan.coords);
     if (!route) return null;
-    route.parentId = plan.start.mode === 'branch' && parent ? parent.id : 0;
-    route.ownCost = plan.cost;
-    route.laidAt = this.elapsed;
-    this.wax -= plan.cost;
     this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!route.target });
     return route;
-  }
-
-  /**
-   * Takes a line back, and every branch growing from it, for some of the wax.
-   *
-   * Full refund for a line laid in the last couple of seconds — a misdrag is
-   * undone, not punished — and a share after that, so a network that is torn
-   * up and relaid all day costs more than one that was planned. Returns the
-   * wax refunded.
-   */
-  recallRoute(route: Route): number {
-    const doomed = [route, ...this.descendantsOf(route)];
-    let refund = 0;
-    for (const r of doomed) {
-      refund += r.ownCost * this.refundShareOf(r);
-      this.killRoute(r);
-    }
-    refund = Math.round(refund);
-    this.wax = Math.min(this.waxBudget, this.wax + refund);
-    this.events.recalled.push({
-      x: route.tipX,
-      y: route.tipY,
-      refund,
-      lines: doomed.length,
-    });
-    return refund;
-  }
-
-  /** The share of its own wax a line gives back if recalled now. */
-  private refundShareOf(route: Route): number {
-    if (this.elapsed - route.laidAt <= TUNING.wax.undoSeconds) return 1;
-    return route.hadTarget && !route.target
-      ? TUNING.wax.dryRefundShare
-      : TUNING.wax.refundShare;
-  }
-
-  /** Every line branched, directly or not, off `route`. */
-  descendantsOf(route: Route): Route[] {
-    const out: Route[] = [];
-    const frontier = [route.id];
-    while (frontier.length > 0) {
-      const id = frontier.pop();
-      for (const r of this.routes) {
-        if (r.parentId === id && !r.dead && !out.includes(r)) {
-          out.push(r);
-          frontier.push(r.id);
-        }
-      }
-    }
-    return out;
-  }
-
-  /** What recalling `route` now would give back, for the hold preview. */
-  refundFor(route: Route): number {
-    let refund = 0;
-    for (const r of [route, ...this.descendantsOf(route)]) {
-      refund += r.ownCost * this.refundShareOf(r);
-    }
-    return Math.round(refund);
   }
 
   /**
@@ -1876,7 +1656,7 @@ export class Field {
     let best: Route | null = null;
     const crew = this.crewSize;
     for (const route of this.routes) {
-      if (route.dead || route.beeCount >= crew || !route.target) continue;
+      if (route.dead || route.beeCount >= crew) continue;
       if (!best || route.beeCount < best.beeCount) best = route;
     }
 

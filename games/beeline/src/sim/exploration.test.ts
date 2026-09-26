@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TUNING } from '../config/tuning.ts';
-import { Field, WORLD_HEIGHT, WORLD_WIDTH, type LineStart } from './Field.ts';
+import { Field, WORLD_HEIGHT, WORLD_WIDTH } from './Field.ts';
 import { Fog } from './Fog.ts';
 import { Patch } from './Patch.ts';
 import { Route } from './Route.ts';
@@ -69,21 +69,22 @@ describe('discovery', () => {
     }
   });
 
-  it('lights a clustered board at dawn, and keeps the mist for the old scatter', () => {
-    // The fog was brought back once because knowing the whole board "turned a
-    // meadow into a checklist" — and it did, when every flower paid the same
-    // and the only choice was which to take first. With wax and branching the
-    // board *is* the puzzle: the question is how to reach the rich cluster
-    // with the network you can afford, and that needs it in view. So a board
-    // laid out in clusters opens fully lit; the mist remains for the legacy
-    // scattered layout only.
-    const lit = newDay(5);
-    expect(lit.patches.every((p) => p.discovered)).toBe(true);
+  it('keeps most of the board dark, and more of it each day', () => {
+    // The fog is back. Removing it made planning easy and the board boring —
+    // knowing where everything is turns a meadow into a checklist. Finding a
+    // flower is one of the few moments in this game that feels like a reward.
+    const known = (day: number): number => {
+      let total = 0;
+      const trials = 120;
+      for (let t = 0; t < trials; t += 1) {
+        const field = newDay(day);
+        total += field.knownPatches.length / Math.max(1, field.patches.length);
+      }
+      return total / trials;
+    };
 
-    const misty = new Field();
-    const { flowers: _flowers, waxFactor: _waxFactor, ...scatter } = featuresForDay(9);
-    misty.beginDay(9, scatter, patchesForDay(9), 1);
-    expect(misty.patches.some((p) => !p.discovered)).toBe(true);
+    expect(known(2)).toBeGreaterThan(0.4);
+    expect(known(9)).toBeLessThan(known(2));
   });
 
   it('finds a flower once a bee has been near it, and reports it once', () => {
@@ -110,7 +111,7 @@ describe('discovery', () => {
     const hidden = field.patches[0]!;
     hidden.discovered = false;
 
-    const from: LineStart = { x: 300, y: 300, route: null, mode: 'hive', at: 0 };
+    const from = { x: 300, y: 300, route: null };
     expect(field.planLine(from, 330, 300).target).toBeNull();
 
     hidden.discovered = true;
@@ -162,10 +163,10 @@ describe('discovery', () => {
     expect(route!.target).not.toBe(hidden);
     expect(route!.target).toBeNull();
 
-    // And it does not quietly re-aim later either: a dry line stays a stub,
-    // with no flower and no crew, until the player builds on it.
+    // And it does not linger pointing at nothing: a line whose flower is done
+    // retires itself, so the slot comes back without a chore.
     for (let i = 0; i < 60; i += 1) field.step(1 / 60);
-    expect(route!.target).not.toBe(hidden);
+    expect(route!.dead).toBe(true);
     // (With nothing known left alive the hidden flower *is* then revealed —
     // on purpose, by `revealLastFlowers`, so the last flower of a day is never
     // lost in the mist. What must never happen is the old line quietly
