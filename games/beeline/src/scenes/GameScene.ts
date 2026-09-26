@@ -37,7 +37,7 @@ import {
 } from '../game/DayCycle.ts';
 import { deriveStats } from '../game/Upgrades.ts';
 import { modifiersFor, rollOffer } from '../game/Items.ts';
-import { Tutorial, type HintKind, type Lesson } from '../game/Tutorial.ts';
+import { Tutorial } from '../game/Tutorial.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
 import type { LevelDoneData } from './LevelDoneScene.ts';
@@ -52,14 +52,6 @@ import {
   withSeed,
   type LevelDef,
 } from '../game/Levels.ts';
-
-/** The levels that teach something, and what. */
-const LESSON_AT: Readonly<Record<number, Lesson>> = {
-  1: 'basics',
-  2: 'branch',
-  4: 'extend',
-  7: 'recall',
-};
 
 /** What the Game scene was started to play. */
 export type GameStart = { mode: 'endless' } | { mode: 'level'; level: number };
@@ -152,8 +144,6 @@ export class GameScene extends BaseGameplayScene {
 
   // --- the drag --------------------------------------------------------
   private previewGfx!: Phaser.GameObjects.Graphics;
-  /** The price tag that rides the tip of a drag, and the refund on a hold. */
-  private previewText!: Phaser.GameObjects.Text;
   private dragStart: LineStart | null = null;
   private plan: LinePlan | null = null;
 
@@ -178,10 +168,6 @@ export class GameScene extends BaseGameplayScene {
   private tutorial = new Tutorial(false);
   private tutorialText!: Phaser.GameObjects.Text;
   private routesDrawn = 0;
-  /** This level's branches, extensions and recalls, for the lessons. */
-  private branchesLaid = 0;
-  private extensions = 0;
-  private recalls = 0;
 
   constructor() {
     super({ key: 'Game' });
@@ -233,17 +219,6 @@ export class GameScene extends BaseGameplayScene {
     );
     this.routeRenderer = new RouteRenderer(this, DEPTH.route);
     this.previewGfx = this.add.graphics().setDepth(DEPTH.route + 1);
-    this.previewText = this.add
-      .text(0, 0, '', {
-        fontFamily: FONT,
-        fontSize: '22px',
-        fontStyle: 'bold',
-        color: '#fff4d6',
-        stroke: '#1d160c',
-        strokeThickness: 6,
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(DEPTH.hud - 1);
     this.hintGfx = this.add.graphics().setDepth(DEPTH.juice + 1);
     this.fogRenderer = new FogRenderer(
       this,
@@ -264,10 +239,6 @@ export class GameScene extends BaseGameplayScene {
         align: 'center',
         stroke: '#2a1d08',
         strokeThickness: 6,
-        // A backing plate, so a lesson reads over flowers and their labels.
-        backgroundColor: 'rgba(29, 22, 12, 0.72)',
-        padding: { x: 20, y: 8 },
-        wordWrap: { width: 900 },
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
@@ -320,6 +291,8 @@ export class GameScene extends BaseGameplayScene {
 
     if (this.start.mode === 'level') {
       this.level = levelById(this.start.level) ?? levelById(1) ?? null;
+      // The tutorial belongs to the very first level of a fresh save.
+      this.tutorial = new Tutorial(!this.save.tutorialDone && this.level?.id === 1);
       this.beginDay();
       return;
     }
@@ -397,18 +370,6 @@ export class GameScene extends BaseGameplayScene {
     this.phase = 'playing';
     this.day = level.difficulty;
     this.scheduleBuzz();
-
-    // A lesson plays the first time its level is played, and never again —
-    // being taught twice is worse than not being taught at all.
-    const lesson = LESSON_AT[level.id] ?? null;
-    const firstTime = (this.save.levelStars[level.id - 1] ?? 0) === 0;
-    const wanted =
-      lesson !== null && firstTime && (lesson !== 'basics' || !this.save.tutorialDone);
-    this.tutorial = new Tutorial(wanted, lesson ?? 'basics');
-    this.routesDrawn = 0;
-    this.branchesLaid = 0;
-    this.extensions = 0;
-    this.recalls = 0;
 
     const modifiers = levelModifiers(level);
     this.field.setStats(deriveStats(modifiers));
@@ -511,7 +472,7 @@ export class GameScene extends BaseGameplayScene {
     // not for every pass, or it stops meaning anything.
     if (stars > prevStars || celebrateWorld) this.context.portal.happyTime();
     this.tutorial.dismiss();
-    this.tutorialText.setText('').setAlpha(0);
+    this.tutorialText.setText('');
     this.persist();
     this.hud.setVisible(false);
 
@@ -633,7 +594,7 @@ export class GameScene extends BaseGameplayScene {
     this.save.bestRunDay = Math.max(this.save.bestRunDay, this.day);
     if (this.tutorial.finished) this.save.tutorialDone = true;
     this.tutorial.dismiss();
-    this.tutorialText.setText('').setAlpha(0);
+    this.tutorialText.setText('');
 
     if (result.outcome === 'met') {
       this.save.day = this.day + 1;
@@ -736,27 +697,29 @@ export class GameScene extends BaseGameplayScene {
         return;
       }
 
-      // A press on a line is either a branch (the finger moves off) or a
-      // recall (it holds still). Both are armed; movement decides.
       const start = this.field.lineStartAt(p.worldX, p.worldY);
       if (start) {
         this.dragStart = start;
         this.plan = null;
+        this.sfx.playVaried('draw', 0.14, 300);
+        return;
       }
-      if (!start || start.mode !== 'hive') {
-        this.eraseCandidate = start?.route ?? this.field.routeNear(p.worldX, p.worldY);
-      }
+
+      // A press on a line might be an erase, if the finger stays put.
+      this.eraseCandidate = this.field.routeNear(p.worldX, p.worldY);
     });
 
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
-      const moved = Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY);
-      if (this.eraseCandidate && moved > ERASE_MOVE_TOLERANCE) {
+      if (this.dragStart && p.isDown) {
+        this.plan = this.field.planLine(this.dragStart, p.worldX, p.worldY);
+        return;
+      }
+      if (!this.eraseCandidate) return;
+      if (
+        Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY) > ERASE_MOVE_TOLERANCE
+      ) {
         this.eraseCandidate = null;
         this.holdSeconds = 0;
-      }
-      if (this.dragStart && p.isDown && moved > TAP_SLOP && !this.erasedThisGesture) {
-        if (!this.plan) this.sfx.playVaried('draw', 0.14, 300);
-        this.plan = this.field.planLine(this.dragStart, p.worldX, p.worldY);
       }
     });
 
@@ -784,9 +747,15 @@ export class GameScene extends BaseGameplayScene {
       }
       this.cancelDrag();
 
-      // A tap does not lay a line — lines are drawn, because where they run
-      // is the whole decision. A tap on the board points back at the hive.
-      if (moved <= TAP_SLOP) this.fieldRenderer.pingHive();
+      // A tap. On a flower, lay a beeline to it; anywhere else, nothing —
+      // except a gentle reminder of where lines come from.
+      const route = this.field.tapFlower(p.worldX, p.worldY);
+      if (route) {
+        this.routesDrawn += 1;
+        this.sfx.playVaried('draw', 0.3, 120);
+      } else if (moved <= TAP_SLOP) {
+        this.fieldRenderer.pingHive();
+      }
     });
 
     // A pointer leaving the canvas mid-drag should not strand the preview.
@@ -798,12 +767,9 @@ export class GameScene extends BaseGameplayScene {
   }
 
   private layLine(plan: LinePlan): void {
-    const mode = plan.start.mode;
     const route = this.field.commitLine(plan);
     if (!route) return;
     this.routesDrawn += 1;
-    if (mode === 'branch') this.branchesLaid += 1;
-    if (mode === 'tip') this.extensions += 1;
     this.sfx.playVaried('draw', plan.target ? 0.34 : 0.22, plan.target ? 90 : 260);
   }
 
@@ -824,17 +790,7 @@ export class GameScene extends BaseGameplayScene {
     this.holdSeconds += dt;
     if (this.holdSeconds < ERASE_HOLD_SECONDS) return;
 
-    this.cancelDrag();
-    const refund = this.field.recallRoute(route);
-    this.recalls += 1;
-    this.hud.flashWax();
-    this.floatText(
-      this.pressX,
-      this.pressY - 30,
-      `+${Math.round(refund / 10)} wax`,
-      '#f3dfa0',
-      26,
-    );
+    this.field.killRoute(route);
     this.sfx.playVaried('deposit', 0.25, 300);
     for (let i = 0; i < 6; i += 1) this.juice.scatter(route.tipX, route.tipY);
 
@@ -909,35 +865,12 @@ export class GameScene extends BaseGameplayScene {
         routesDrawn: this.routesDrawn,
         honey: this.field.honey,
         lines: this.field.routes.length,
-        branches: this.branchesLaid,
-        extensions: this.extensions,
-        recalls: this.recalls,
-        dryLine: this.field.routes.some((r) => !r.target && r.hadTarget),
       });
-      const lessonText = this.tutorial.current?.text ?? '';
-      this.tutorialText.setText(lessonText).setAlpha(lessonText ? 1 : 0);
+      this.tutorialText.setText(this.tutorial.current?.text ?? '');
 
-      const plan = this.plan;
-      this.hud.setWax(
-        this.field.wax,
-        this.field.waxBudget,
-        plan?.cost ?? 0,
-        !!plan && plan.short && !plan.target,
-      );
-      const unworked = this.field.knownPatches.some(
-        (p) => p.pool > 0 && !this.field.routeTargeting(p),
-      );
-      const dryLine = this.field.routes.some((r) => !r.target && r.hadTarget);
-      this.hud.setIdle(
-        this.field.idleBees,
-        !unworked
-          ? null
-          : this.field.wax >= TUNING.route.minLength * 2
-            ? 'lay'
-            : dryLine
-              ? 'recall'
-              : null,
-      );
+      const slots = this.field.stats.routeSlots;
+      this.hud.setLines(this.field.routes.length, slots);
+      this.hud.setIdle(this.field.idleBees, this.field.routes.length < slots);
 
       const crossing = this.field.wasps.filter((w) => w.state === 'approaching').length;
       this.hud.setAlert(
@@ -1178,16 +1111,7 @@ export class GameScene extends BaseGameplayScene {
   private drawPreview(): void {
     const g = this.previewGfx;
     g.clear();
-    this.previewText.setText('');
     const plan = this.plan;
-    // Where a branch forks off an existing line: marked so the player sees the
-    // new line joins the network there and pays only from there on.
-    if (this.dragStart && this.dragStart.mode !== 'hive') {
-      g.fillStyle(0xfff4d6, 1);
-      g.fillCircle(this.dragStart.x, this.dragStart.y, 9);
-      g.lineStyle(3, 0x1d160c, 0.8);
-      g.strokeCircle(this.dragStart.x, this.dragStart.y, 9);
-    }
     if (!this.dragStart || !plan || plan.coords.length < 4) {
       if (this.dragStart) {
         // Pressed but not moved yet: show where the line starts from.
@@ -1202,10 +1126,7 @@ export class GameScene extends BaseGameplayScene {
     }
 
     const hit = plan.target !== null;
-    // Green: reaches a flower. Cream: a stub to build on. Red: it cannot be
-    // laid — not enough wax, too many lines — and letting go does nothing.
-    const tint =
-      !plan.valid || (plan.short && !hit) ? 0xff7a5e : hit ? 0x7ee08a : 0xfff4d6;
+    const tint = hit ? 0x7ee08a : 0xfff4d6;
     const coords = plan.coords;
 
     g.lineStyle(12, 0x1d160c, 0.25);
@@ -1262,20 +1183,6 @@ export class GameScene extends BaseGameplayScene {
       g.fillStyle(0xff9a5c, 0.9);
       g.fillCircle(plan.contact.x, plan.contact.y, 6);
     }
-
-    // The price, at the tip: what this line will take out of the wax.
-    const label =
-      plan.reason === 'lines'
-        ? 'Too many lines'
-        : plan.short && !hit
-          ? 'Not enough wax'
-          : `−${Math.max(1, Math.round(plan.cost / 10))} wax`;
-    // Under the flower rather than over it: its honey label sits on top.
-    this.previewText
-      .setText(label)
-      .setColor(tint === 0xff7a5e ? '#ff9b80' : '#fff4d6')
-      .setOrigin(0.5, 0)
-      .setPosition(tipX, tipY + (hit ? TUNING.patch.reachRadius * 0.6 + 10 : 14));
   }
 
   /** The filling ring that shows a hold is about to erase a line. */
@@ -1309,16 +1216,6 @@ export class GameScene extends BaseGameplayScene {
       false,
     );
     g.strokePath();
-
-    const branches = this.field.descendantsOf(route).length;
-    this.previewText
-      .setText(
-        `Take back +${Math.round(this.field.refundFor(route) / 10)} wax` +
-          (branches > 0 ? ` (and ${branches} branch${branches > 1 ? 'es' : ''})` : ''),
-      )
-      .setColor('#ffd0b8')
-      .setOrigin(0.5, 1)
-      .setPosition(this.pressX, this.pressY - radius - 10);
   }
 
   /**
@@ -1329,118 +1226,40 @@ export class GameScene extends BaseGameplayScene {
     const g = this.hintGfx;
     g.clear();
 
-    const kind = this.tutorial.current?.hint ?? null;
-    if (!kind || this.phase !== 'playing' || this.dragStart) return;
-    const hint = this.hintPath(kind);
-    if (!hint) return;
+    if (!this.tutorial.wantsHintLine || this.phase !== 'playing' || this.dragStart)
+      return;
+    const served = new Set(this.field.routes.map((r) => r.target));
+    const patch = this.field.knownPatches
+      .filter((p) => !served.has(p))
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - this.field.hiveX, a.y - this.field.hiveY) -
+          Math.hypot(b.x - this.field.hiveX, b.y - this.field.hiveY),
+      )[0];
+    if (!patch) return;
 
     const cycle = (this.field.time * 0.55) % 1;
-    const alpha = cycle > 0.85 ? (1 - cycle) / 0.15 : 1;
-
-    if (kind === 'hold-dry-line') {
-      // Press, and a ring fills: the hold that takes a line back.
-      const fill = Math.min(1, Math.max(0, (cycle - 0.15) / 0.6));
-      g.lineStyle(5, 0xff7043, 0.9 * alpha);
-      g.beginPath();
-      g.arc(
-        hint.fromX,
-        hint.fromY,
-        30,
-        -Math.PI / 2,
-        -Math.PI / 2 + Math.PI * 2 * fill,
-        false,
-      );
-      g.strokePath();
-      this.drawFinger(g, hint.fromX, hint.fromY, fill > 0, alpha);
-      return;
-    }
-
-    // Rest at the start, glide to the flower, rest there, fade.
+    // Rest at the hive, glide to the flower, rest there, fade.
     const t = Math.min(1, Math.max(0, (cycle - 0.15) / 0.55));
     const ease = t * t * (3 - 2 * t);
-    const fx = hint.fromX + (hint.toX - hint.fromX) * ease;
-    const fy = hint.fromY + (hint.toY - hint.fromY) * ease;
+    const fx = this.field.hiveX + (patch.x - this.field.hiveX) * ease;
+    const fy = this.field.hiveY + (patch.y - this.field.hiveY) * ease;
+    const alpha = cycle > 0.85 ? (1 - cycle) / 0.15 : 1;
 
     g.lineStyle(6, 0xffffff, 0.55 * alpha);
     g.beginPath();
-    g.moveTo(hint.fromX, hint.fromY);
+    g.moveTo(this.field.hiveX, this.field.hiveY);
     g.lineTo(fx, fy);
     g.strokePath();
-    this.drawFinger(g, fx, fy, t > 0 && t < 1, alpha);
-  }
 
-  /** The finger: a pale disc with a dark rim, pressed a little while dragging. */
-  private drawFinger(
-    g: Phaser.GameObjects.Graphics,
-    x: number,
-    y: number,
-    pressed: boolean,
-    alpha: number,
-  ): void {
+    // The finger: a pale disc with a dark rim, pressed a little while dragging.
+    const pressed = t > 0 && t < 1;
     g.fillStyle(0x000000, 0.25 * alpha);
-    g.fillCircle(x + 4, y + 6, 20);
+    g.fillCircle(fx + 4, fy + 6, 20);
     g.fillStyle(0xfff4d6, 0.95 * alpha);
-    g.fillCircle(x, y, pressed ? 17 : 20);
+    g.fillCircle(fx, fy, pressed ? 17 : 20);
     g.lineStyle(3, 0x2a1d08, 0.9 * alpha);
-    g.strokeCircle(x, y, pressed ? 17 : 20);
-  }
-
-  /** Where a lesson's hint hand should drag, on the board as it is now. */
-  private hintPath(
-    kind: HintKind,
-  ): { fromX: number; fromY: number; toX: number; toY: number } | null {
-    const f = this.field;
-    const open = f.knownPatches.filter((p) => p.pool > 0 && !f.routeTargeting(p));
-    const nearestTo = (x: number, y: number, pool = open) =>
-      [...pool].sort(
-        (a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y),
-      )[0];
-
-    if (kind === 'hive-to-flower' || kind === 'hive-to-rich') {
-      const rich = open.filter((p) => p.tier >= 2);
-      const target = nearestTo(
-        f.hiveX,
-        f.hiveY,
-        kind === 'hive-to-rich' && rich.length ? rich : open,
-      );
-      return target
-        ? { fromX: f.hiveX, fromY: f.hiveY, toX: target.x, toY: target.y }
-        : null;
-    }
-    if (kind === 'line-to-flower') {
-      // The open flower closest to any line, from the nearest point on it.
-      let best: {
-        fromX: number;
-        fromY: number;
-        toX: number;
-        toY: number;
-        d: number;
-      } | null = null;
-      for (const p of open) {
-        const on = f.pointOnNetwork(p.x, p.y, 2000);
-        if (!on || Math.hypot(on.x - f.hiveX, on.y - f.hiveY) < 80) continue;
-        const d = Math.hypot(on.x - p.x, on.y - p.y);
-        if (!best || d < best.d)
-          best = { fromX: on.x, fromY: on.y, toX: p.x, toY: p.y, d };
-      }
-      return best;
-    }
-    const dry = f.routes.find((r) => !r.target && r.hadTarget);
-    if (!dry) return null;
-    if (kind === 'dry-tip-to-flower') {
-      const target = nearestTo(dry.tipX, dry.tipY);
-      return target
-        ? { fromX: dry.tipX, fromY: dry.tipY, toX: target.x, toY: target.y }
-        : null;
-    }
-    // hold-dry-line: press on the middle of the dry line.
-    dry.sample(dry.liveLength * 0.6, eraseSample);
-    return {
-      fromX: eraseSample.x,
-      fromY: eraseSample.y,
-      toX: eraseSample.x,
-      toY: eraseSample.y,
-    };
+    g.strokeCircle(fx, fy, pressed ? 17 : 20);
   }
 
   /** Exposed for the automated harness, in dev and `local` builds only. */

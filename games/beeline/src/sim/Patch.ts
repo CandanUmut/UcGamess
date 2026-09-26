@@ -76,14 +76,6 @@ export class Patch {
    */
   distanceMultiplier = 1;
 
-  /**
-   * How much a bee-trip here is worth: 1, 2 or 3 honey, shown by the flower's
-   * colour. Distance no longer pays anything back — a far flower of the same
-   * tier is simply worse, so reaching the rich ones out there cheaply is the
-   * thing to be good at.
-   */
-  tier: 1 | 2 | 3 = 1;
-
   /** Honey per bee-trip from this patch. */
   get yieldPerTrip(): number {
     return this.kindMultiplier * this.distanceMultiplier;
@@ -91,10 +83,12 @@ export class Patch {
 
   private get kindMultiplier(): number {
     switch (this.kind) {
+      case 'rich':
+        return TUNING.patch.richYieldMultiplier;
       case 'night':
         return TUNING.patch.nightBloomMultiplier;
       default:
-        return TUNING.tiers.yield[this.tier - 1] ?? 1;
+        return 1;
     }
   }
 

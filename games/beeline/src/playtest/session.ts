@@ -1,4 +1,4 @@
-import { Field, type LineStart } from '../sim/Field.ts';
+import { Field, WORLD_HEIGHT, WORLD_WIDTH, type LineStart } from '../sim/Field.ts';
 import type { Patch } from '../sim/Patch.ts';
 import type { Route } from '../sim/Route.ts';
 import {
@@ -8,18 +8,9 @@ import {
   featuresForDay,
   patchesForDay,
   sunsetBonus,
-  type DayFeatures,
 } from '../game/DayCycle.ts';
 import { deriveStats } from '../game/Upgrades.ts';
-import { TUNING } from '../config/tuning.ts';
-import {
-  ITEMS,
-  modifiersFor,
-  noModifiers,
-  rollOffer,
-  type ItemId,
-  type RunModifiers,
-} from '../game/Items.ts';
+import { ITEMS, modifiersFor, rollOffer, type ItemId } from '../game/Items.ts';
 import { gaussian, seeded, type Persona } from './personas.ts';
 import {
   levelFeatures,
@@ -44,9 +35,7 @@ export const MAX_DAYS = Number(ENV?.BEELINE_MAX_DAYS ?? 25);
 
 /** One input the bot has decided on, landing after its reaction time. */
 interface Pending {
-  kind: 'line' | 'swat' | 'recall';
-  /** For a recall: the line to take back. */
-  route?: Route;
+  kind: 'line' | 'swat';
   /** Field time the input lands. */
   at: number;
   /** For a line: where the drag starts from. */
@@ -58,28 +47,14 @@ interface Pending {
   target?: Patch | null;
 }
 
-/** A way of joining a flower to the network, with what it costs and earns. */
-interface Option {
-  start: LineStart;
-  target: Patch;
-  /** Where the first drag is released: the flower, or a corridor corner. */
-  aim: { x: number; y: number };
-  cost: number;
-  score: number;
-}
-
 /**
- * A simulated player of the network game.
+ * A simulated player of the drag-a-line game.
  *
- * Two brains on the same hands. `nearest` is the player who has not thought
- * about it: a line from the hive to whichever unworked flower is closest, and
- * when the wax runs out, recall something dry. `value` (the planner) weighs
- * every way of reaching every flower — from the hive, off the tip of a dry
- * stub, or as a branch off any line — by what the flower will pay against the
- * wax it costs, the way a player who has understood the game does.
- *
- * The gap between the two on the same level is the number this whole redesign
- * is about: if thinking does not beat not thinking, the stars mean nothing.
+ * It reads the board a few times a second, picks one thing to do, and does it
+ * after a human reaction delay and with a human amount of aim error. A drag
+ * takes time to perform. Everything it knows, a person looking at the screen
+ * would know: it only targets flowers that are drawn, and it scouts into the
+ * mist rather than towards flowers it cannot see.
  */
 class DragBot {
   inputs = 0;
@@ -87,8 +62,6 @@ class DragBot {
   private pending: Pending | null = null;
   private thinkIn = 0;
   private readonly persona: Persona;
-  /** Where a stub this bot laid was heading, so the next leg carries on. */
-  private readonly intent = new Map<number, Patch>();
 
   constructor(persona: Persona) {
     this.persona = persona;
@@ -97,7 +70,6 @@ class DragBot {
   beginDay(): void {
     this.pending = null;
     this.thinkIn = 0.6;
-    this.intent.clear();
   }
 
   step(field: Field): Activity {
@@ -119,43 +91,40 @@ class DragBot {
   private perform(field: Field, p: Pending): void {
     this.pending = null;
     this.inputs += 1;
+    const x = gaussian(p.x, this.persona.aimSd);
+    const y = gaussian(p.y, this.persona.aimSd);
 
     if (p.kind === 'swat') {
-      const x = gaussian(p.x, this.persona.aimSd);
-      const y = gaussian(p.y, this.persona.aimSd);
       if (!field.swatAt(x, y)) this.wasted += 1;
-      return;
-    }
-    if (p.kind === 'recall') {
-      const route = p.route;
-      if (route && !route.dead) field.recallRoute(route);
-      else this.wasted += 1;
       return;
     }
 
     if (!p.start) return;
-    // The line the drag grows from may have changed while the finger moved.
-    if (p.start.route?.dead) {
+    // The start may have moved (a line retired) while the finger was on its way.
+    const start = field.lineStartAt(p.start.x, p.start.y);
+    if (!start) {
       this.wasted += 1;
       return;
     }
-    // Aim assist snaps a release onto a flower, so aim error matters for
-    // corners and for the start of the drag, less for the end.
-    const x = gaussian(p.x, this.persona.aimSd * 0.5);
-    const y = gaussian(p.y, this.persona.aimSd * 0.5);
-    const plan = field.planLine(p.start, x, y);
-    // A player watches the preview: a drag that would stop short of the wax
-    // or run nowhere useful is not released.
-    if (!plan.valid || (plan.short && !plan.target)) {
-      this.wasted += 1;
-      return;
+    let plan = field.planLine(start, x, y);
+    // A person watches the preview while dragging. If it has snapped onto
+    // some other flower — the line slid along a hedge — they steer to the
+    // corridor corner instead of letting go on the wrong thing. Only a player
+    // who reads the maze does this; a first-timer lets go regardless.
+    if (
+      p.target &&
+      plan.target &&
+      plan.target !== p.target &&
+      this.persona.sloppiness <= 0.4
+    ) {
+      // Steer to the corridor corner instead. If even that lands on another
+      // flower, let go anyway — a line to *a* flower still pays, and a person
+      // does not hover over the board forever.
+      const corner = waypoint(field, start.x, start.y, p.target.x, p.target.y);
+      plan = field.planLine(start, corner.x, corner.y);
     }
     const route = field.commitLine(plan);
-    if (!route) {
-      this.wasted += 1;
-      return;
-    }
-    if (!route.target && p.target) this.intent.set(route.id, p.target);
+    if (!route) this.wasted += 1;
   }
 
   private delay(): number {
@@ -164,10 +133,10 @@ class DragBot {
 
   private decide(field: Field): Pending | null {
     const sloppy = Math.random() < this.persona.sloppiness;
-    const greedy = sloppy || this.persona.strategy === 'nearest';
     const now = field.time;
 
-    // 1. A wasp on the board. Swat it where it will be when the tap lands.
+    // 1. A wasp on the board. Swat it where it will be when the tap lands —
+    // a practised player leads the target, a new one taps where it is.
     const wasp = field.wasps.find((w) => w.alive && w.state !== 'fleeing');
     if (wasp && !(sloppy && Math.random() < 0.5)) {
       const rt = this.delay();
@@ -182,218 +151,53 @@ class DragBot {
       };
     }
 
-    // 2. Only build when bees are waiting or the network is short of crew.
-    const crew = field.crewSize;
-    const working = field.routes.filter((r) => r.target).length;
-    if (field.idleBees === 0 && working * crew >= field.bees.length) return null;
+    // 2. A free line and a flower worth working.
+    if (field.routes.length >= field.stats.routeSlots) return null;
 
-    const open = field.knownPatches.filter((p) => p.pool > 0 && !field.routeTargeting(p));
-    if (open.length === 0) return null;
+    const served = new Set<Patch>();
+    for (const r of field.routes) if (r.target) served.add(r.target);
 
-    // 3. Carry on a stub this bot laid towards a flower it still wants.
-    for (const route of field.routes) {
-      const want = this.intent.get(route.id);
-      if (route.target || !want) continue;
-      if (!want.alive || field.routeTargeting(want)) {
-        this.intent.delete(route.id);
-        continue;
-      }
-      const start: LineStart = {
-        x: route.tipX,
-        y: route.tipY,
-        route,
-        mode: 'tip',
-        at: 0,
-      };
-      // A leg that can no longer be finished (the wax ran short) is given up.
-      const check = field.planLine(start, want.x, want.y);
-      if (check.short && check.target !== want) {
-        this.intent.delete(route.id);
-        continue;
-      }
-      // Everyone steers for the gap in a hedge; a first-timer only sometimes.
-      const aim =
-        sloppy && Math.random() < 0.5
-          ? { x: want.x, y: want.y }
-          : waypoint(field, route.tipX, route.tipY, want.x, want.y);
-      return this.line(field, start, aim, want);
+    const open = field.knownPatches.filter((p) => !served.has(p));
+    const partial = this.partialLine(field);
+
+    if (open.length === 0) {
+      // Nothing known to work: push a line into the mist, if any is left.
+      if (partial) return null;
+      const dark = this.nearestDark(field);
+      if (!dark) return null;
+      return this.line(field, { x: field.hiveX, y: field.hiveY, route: null }, dark);
     }
 
-    const best = greedy
-      ? this.nearestOption(field, open, sloppy)
-      : this.bestOption(field, open);
-    if (best) return this.line(field, best.start, best.aim, best.target);
-
-    // 4. Nothing affordable: take back a dry line for its wax.
-    const dry = field.routes
-      .filter(
-        (r) => !r.target && r.hadTarget && !field.descendantsOf(r).some((d) => d.target),
-      )
-      .sort((a, b) => b.ownCost - a.ownCost)[0];
-    if (dry) {
-      return { kind: 'recall', at: now + this.delay() + 0.6, route: dry, x: 0, y: 0 };
-    }
-    return null;
-  }
-
-  /** The unthinking choice: straight from the hive to the closest flower. */
-  private nearestOption(field: Field, open: Patch[], sloppy: boolean): Option | null {
-    const target = [...open].sort(
-      (a, b) =>
-        Math.hypot(a.x - field.hiveX, a.y - field.hiveY) -
-        Math.hypot(b.x - field.hiveX, b.y - field.hiveY),
-    )[0];
+    const target = this.pick(field, open, sloppy);
     if (!target) return null;
-    const start: LineStart = {
-      x: field.hiveX,
-      y: field.hiveY,
-      route: null,
-      mode: 'hive',
-      at: 0,
-    };
-    const plan = field.planLine(start, target.x, target.y);
-    if (plan.target === target) {
-      return {
-        start,
-        target,
-        aim: { x: target.x, y: target.y },
-        cost: plan.cost,
-        score: 0,
-      };
-    }
-    // Blocked or unaffordable. Steer for the gap in the hedge, if it is that.
+
+    // Carry on a line that stopped short, if there is one.
+    const from: LineStart = partial
+      ? { x: partial.tipX, y: partial.tipY, route: partial }
+      : { x: field.hiveX, y: field.hiveY, route: null };
+
+    // Where to aim this leg: straight at the flower, or — for a player who
+    // reads the maze — at the furthest corridor corner they can see from here.
+    // A person drags straight at the flower first and watches the preview: if
+    // it turns green, they let go. Only when it does not do they steer for
+    // the corridor corner — and a first-timer does not know to do even that.
+    const straightPlan = field.planLine(from, target.x, target.y);
     const aim =
-      sloppy && Math.random() < 0.5
+      sloppy || this.persona.sloppiness > 0.4 || straightPlan.target === target
         ? { x: target.x, y: target.y }
-        : waypoint(field, start.x, start.y, target.x, target.y);
-    const leg = field.planLine(start, aim.x, aim.y);
-    if (!leg.valid || leg.short) return null;
-    return { start, target, aim, cost: leg.cost, score: 0 };
+        : waypoint(field, from.x, from.y, target.x, target.y);
+    const pending = this.line(field, from, aim);
+    pending.target = target;
+    return pending;
   }
 
-  /** The planner: every flower, every way in, scored by honey per wax. */
-  private bestOption(field: Field, open: Patch[]): Option | null {
-    const starts = this.startsOn(field);
-    const speed = field.stats.beeSpeed;
-    const timeLeft = Math.max(1, this.secondsLeft - field.time);
-    let best: Option | null = null;
-
-    for (const target of open) {
-      // Rank ways in by a straight-line guess, then plan only the best few.
-      const guesses = starts
-        .map((st) => ({
-          st,
-          guess: Math.hypot(target.x - st.start.x, target.y - st.start.y),
-        }))
-        .filter((g) => g.guess <= field.wax + TUNING.patch.reachRadius)
-        .sort((a, b) => a.guess - b.guess)
-        .slice(0, 4);
-
-      for (const { st } of guesses) {
-        let cost: number;
-        let aim = { x: target.x, y: target.y };
-        const plan = field.planLine(st.start, target.x, target.y);
-        if (plan.target === target && !plan.short) {
-          cost = plan.cost;
-        } else {
-          // Round a hedge: one leg to the corridor corner, then on.
-          aim = waypoint(field, st.start.x, st.start.y, target.x, target.y);
-          const leg = field.planLine(st.start, aim.x, aim.y);
-          if (!leg.valid || leg.short) continue;
-          const tipX = leg.coords[leg.coords.length - 2] ?? aim.x;
-          const tipY = leg.coords[leg.coords.length - 1] ?? aim.y;
-          const rest = Math.hypot(target.x - tipX, target.y - tipY);
-          if (field.pathBlocked(tipX, tipY, target.x, target.y)) continue;
-          cost = leg.cost + rest;
-          if (cost > field.wax) continue;
-        }
-        const trip = st.arc + cost;
-        const earn = this.earnFrom(field, target, trip, timeLeft, speed);
-        // A branch off a line to a flower about to run dry ties the new line
-        // to one that cannot be taken back without it. A planner avoids it.
-        const parent = st.start.route;
-        const fragile =
-          st.start.mode === 'branch' &&
-          parent !== null &&
-          (!parent.target || parent.target.honeyLeft < 60);
-        // What this line opens up: the unworked flowers near its end, each a
-        // short branch away. This is what makes a trunk to a far cluster worth
-        // more than its first flower alone — the thing a planner sees and a
-        // flower-by-flower player does not.
-        let extraEarn = 0;
-        let extraCost = 0;
-        for (const other of open) {
-          if (other === target) continue;
-          const d = Math.hypot(other.x - target.x, other.y - target.y);
-          if (d > 260 || field.pathBlocked(target.x, target.y, other.x, other.y))
-            continue;
-          extraEarn += 0.6 * this.earnFrom(field, other, trip + d, timeLeft, speed);
-          extraCost += d;
-        }
-        const score =
-          (earn / (cost + 60) +
-            (extraEarn > 0 ? (0.5 * (earn + extraEarn)) / (cost + extraCost + 60) : 0)) *
-          (fragile ? 0.5 : 1);
-        if (!best || score > best.score)
-          best = { start: st.start, target, aim, cost, score };
-      }
-    }
-    return best;
+  /** A line with no flower under its tip, still young enough to carry on. */
+  private partialLine(field: Field): Route | null {
+    return field.routes.find((r) => !r.target && !r.hadTarget) ?? null;
   }
 
-  /** Honey a crew on a line of length `trip` to `target` could bring in by dusk. */
-  private earnFrom(
-    field: Field,
-    target: Patch,
-    trip: number,
-    timeLeft: number,
-    speed: number,
-  ): number {
-    const tripSeconds = (2 * trip) / speed + TUNING.bee.collectSeconds + 0.3;
-    const window =
-      target.kind === 'night' ? Math.min(timeLeft, target.windowRemaining) : timeLeft;
-    return Math.min(
-      target.honeyLeft,
-      (field.crewSize * target.yieldPerTrip * window) / tripSeconds,
-    );
-  }
-
-  /** Every place a drag could start: the hive, stub tips, and along each line. */
-  private startsOn(field: Field): Array<{ start: LineStart; arc: number }> {
-    const out: Array<{ start: LineStart; arc: number }> = [
-      {
-        start: { x: field.hiveX, y: field.hiveY, route: null, mode: 'hive', at: 0 },
-        arc: 0,
-      },
-    ];
-    const probe = { x: 0, y: 0, tx: 0, ty: 0 };
-    for (const route of field.routes) {
-      if (!route.target) {
-        out.push({
-          start: { x: route.tipX, y: route.tipY, route, mode: 'tip', at: 0 },
-          arc: route.liveLength,
-        });
-      }
-      for (let s = 60; s <= route.liveLength; s += 40) {
-        route.sample(Math.min(s, route.liveLength), probe);
-        out.push({
-          start: { x: probe.x, y: probe.y, route, mode: 'branch', at: s },
-          arc: s,
-        });
-      }
-    }
-    return out;
-  }
-
-  /** Seconds in today's level, set by the harness so the planner can weigh time. */
-  secondsLeft = 60;
-
-  private line(
-    field: Field,
-    start: LineStart,
-    to: { x: number; y: number },
-    target: Patch,
-  ): Pending {
+  private line(field: Field, start: LineStart, to: { x: number; y: number }): Pending {
+    // Reaction, then the drag itself — longer for a longer drag.
     const dist = Math.hypot(to.x - start.x, to.y - start.y);
     const gesture = 0.18 + dist / 2400 + this.persona.sloppiness * 0.2;
     return {
@@ -402,8 +206,42 @@ class DragBot {
       start,
       x: to.x,
       y: to.y,
-      target,
     };
+  }
+
+  private pick(field: Field, open: Patch[], sloppy: boolean): Patch | null {
+    const scored = open.map((p) => {
+      const straightLine = Math.hypot(p.x - field.hiveX, p.y - field.hiveY);
+      // A player who reads the maze judges distance by the corridors; a
+      // first-timer judges it by eye.
+      const dist = sloppy
+        ? straightLine
+        : Math.max(straightLine, field.pathDistanceTo(p.x, p.y));
+      const golden = p.kind === 'night' ? 4 : 1;
+      return {
+        p,
+        value: sloppy ? -straightLine : (golden * p.honeyLeft) / (120 + dist),
+      };
+    });
+    scored.sort((a, b) => b.value - a.value);
+    return scored[0]?.p ?? null;
+  }
+
+  /** The nearest unlit ground to the hive, as a person would see the mist. */
+  private nearestDark(field: Field): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestDist = Infinity;
+    for (let y = 140; y < WORLD_HEIGHT - 30; y += 40) {
+      for (let x = 40; x < WORLD_WIDTH - 30; x += 40) {
+        if (field.fog.isDiscovered(x, y)) continue;
+        const d = Math.hypot(x - field.hiveX, y - field.hiveY);
+        if (d < bestDist) {
+          bestDist = d;
+          best = { x, y };
+        }
+      }
+    }
+    return best;
   }
 }
 
@@ -455,13 +293,6 @@ function waypoint(
     }
   }
   return best;
-}
-
-/** Writes a diagnostic line to stdout (the harness runs under Node). */
-function write(line: string): void {
-  (
-    globalThis as { process?: { stdout?: { write(s: string): void } } }
-  ).process?.stdout?.write(`${line}\n`);
 }
 
 /** One line of the second-by-second trace, for diagnosing a bad day. */
@@ -551,8 +382,7 @@ function playDay(
     const events = field.drainEvents();
     stolen += events.stolen;
     if (field.idleBees * 2 >= field.bees.length) swarmIdle += DT;
-    if (TRACE > 0 && TRACE === traceDay && Math.floor(t) !== Math.floor(t - DT))
-      trace(field, t);
+    if (TRACE === traceDay && Math.floor(t) !== Math.floor(t - DT)) trace(field, t);
     log.feedbackEvents +=
       events.found.length +
       events.waspDown.length +
@@ -602,20 +432,9 @@ export function playLevel(persona: Persona, level: LevelDef, seed: number): Leve
   Math.random = seeded(seed);
   try {
     bot.beginDay();
-    bot.secondsLeft = level.seconds;
     const log = emptyLog(persona.name);
-    const play = playDay(field, bot, level.seconds, log, 1);
+    const play = playDay(field, bot, level.seconds, log, 0);
     const bonus = play.cleared ? levelSunsetBonus(level, level.seconds - play.t) : 0;
-    // BOT_REPORT=1 prints, per level played, the wax spent and how much of
-    // each flower was worked — the fastest way to see why a board scores.
-    if (ENV?.BOT_REPORT) {
-      const taken = field.patches
-        .map((p) => `t${p.tier}:${Math.round(100 * (1 - p.pool / p.maxPool))}%`)
-        .join(' ');
-      write(
-        `L${level.id} ${persona.name} wax ${field.waxBudget}->${Math.round(field.wax)} honey ${Math.floor(field.honey)} | ${taken}`,
-      );
-    }
     return {
       honey: Math.floor(field.honey) + bonus,
       cleared: play.cleared,
@@ -656,7 +475,6 @@ function playRunInner(persona: Persona, maxDays: number): RunLog {
     const features = featuresForDay(day);
     field.beginDay(day, features, patchesForDay(day) + stats.extraPatches, 1, modifiers);
     bot.beginDay();
-    bot.secondsLeft = dayLength(day) + modifiers.extraDaySeconds;
 
     const seconds = dayLength(day) + modifiers.extraDaySeconds;
     const { t, cleared, stolen, swarmIdle } = playDay(field, bot, seconds, log, day);
@@ -692,37 +510,4 @@ function playRunInner(persona: Persona, maxDays: number): RunLog {
   // The results screen after a failed run.
   log.overheadSeconds += persona.nightSeconds;
   return log;
-}
-
-/** A board to play that is not (yet) a campaign level: for tuning experiments. */
-export interface Setup {
-  features: DayFeatures;
-  seconds: number;
-  /** Seeds the layout, so every persona plays the same board. */
-  layoutSeed: number;
-  modifiers?: RunModifiers;
-}
-
-/** Plays `setup` once, the way `persona` would. */
-export function playSetup(persona: Persona, setup: Setup, seed: number): LevelPlay {
-  const field = new Field();
-  const bot = new DragBot(persona);
-  const modifiers = setup.modifiers ?? noModifiers();
-  field.setStats(deriveStats(modifiers));
-  withSeed(setup.layoutSeed, () => field.beginDay(1, setup.features, 0, 1, modifiers));
-  const realRandom = Math.random;
-  Math.random = seeded(seed);
-  try {
-    bot.beginDay();
-    bot.secondsLeft = setup.seconds;
-    const play = playDay(field, bot, setup.seconds, emptyLog(persona.name), 1);
-    return {
-      honey: Math.floor(field.honey),
-      cleared: play.cleared,
-      bestCombo: field.bestCombo,
-      seconds: play.t,
-    };
-  } finally {
-    Math.random = realRandom;
-  }
 }

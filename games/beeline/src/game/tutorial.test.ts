@@ -53,29 +53,6 @@ describe('tutorial', () => {
     expect(tutorial.wantsHintLine).toBe(false);
   });
 
-  it('teaches branching on its own board, and waits for a real branch', () => {
-    const tutorial = new Tutorial(true, 'branch');
-    expect(tutorial.current?.id).toBe('reach');
-    tutorial.update({ ...nothing, routesDrawn: 1, lines: 1 });
-    expect(tutorial.current?.id).toBe('branch');
-    // A second line from the hive is not a branch.
-    tutorial.update({ ...nothing, routesDrawn: 2, lines: 2, branches: 0 });
-    expect(tutorial.current?.id).toBe('branch');
-    tutorial.update({ ...nothing, routesDrawn: 3, lines: 3, branches: 1 });
-    expect(tutorial.finished).toBe(true);
-  });
-
-  it('holds a dry-line lesson back until a line has actually run dry', () => {
-    const tutorial = new Tutorial(true, 'extend');
-    tutorial.update({ ...nothing, routesDrawn: 2, lines: 2 });
-    expect(tutorial.current).toBeNull();
-    expect(tutorial.finished).toBe(false);
-    tutorial.update({ ...nothing, routesDrawn: 2, lines: 2, dryLine: true });
-    expect(tutorial.current?.id).toBe('extend');
-    tutorial.update({ ...nothing, dryLine: true, extensions: 1 });
-    expect(tutorial.finished).toBe(true);
-  });
-
   it('can be dismissed outright', () => {
     const tutorial = new Tutorial(true);
     tutorial.dismiss();

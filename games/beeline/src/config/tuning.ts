@@ -358,23 +358,6 @@ export interface ScoreTuning {
  * pays for doing it *now*: it climbs while every bee that could be flying is
  * flying, and slips when bees wait at the hive with a line free for them.
  */
-export interface WaxTuning {
-  base: number;
-  perExtraLine: number;
-  undoSeconds: number;
-  refundShare: number;
-  dryRefundShare: number;
-  maxLines: number;
-  branchGrabRadius: number;
-  endlessFactor: number;
-}
-
-export interface TierTuning {
-  yield: number[];
-  pool: number[];
-  species: number[][];
-}
-
 export interface ComboTuning {
   /** Highest multiplier. */
   max: number;
@@ -451,8 +434,6 @@ export interface Tuning {
   golden: GoldenTuning;
   score: ScoreTuning;
   combo: ComboTuning;
-  wax: WaxTuning;
-  tiers: TierTuning;
   raid: RaidTuning;
   fog: {
     cellSize: number;
@@ -649,7 +630,7 @@ export const TUNING: Tuning = {
     // somebody. Re-run `pnpm --filter @ucgames/game-beeline playtest` after
     // changing anything that moves honey, and refit here if the per-day table
     // drifts.
-    quotas: [70, 200, 500, 840, 1160, 1400, 1620, 1840, 2060, 2280, 2500, 2720],
+    quotas: [150, 340, 520, 700, 980, 1200, 1420, 1700, 1950, 2150, 2350, 2600],
     quotaGrowthAfterTable: 1.1,
   },
 
@@ -935,44 +916,6 @@ export const TUNING: Tuning = {
     sunsetBonusPerSecond: 0.02,
     twoStars: 1.4,
     threeStars: 1.9,
-  },
-
-  /**
-   * The network's budget. Every line costs its own length in wax; a branch
-   * pays only for the part it adds. Numbers are design px of line, shown to
-   * the player divided by ten.
-   */
-  wax: {
-    base: 1400,
-    perExtraLine: 300,
-    // A line recalled this soon after laying is a misdrag: full refund.
-    undoSeconds: 2,
-    // After that, half. Tearing a network up all day should cost something.
-    refundShare: 0.5,
-    // A line whose flower ran dry did its job: taking it back returns all its
-    // wax. Measured: at half, one poor opening sank a regular player's level
-    // about one time in twenty; at full, never — and the planner's lead over
-    // no plan only fell from 4.9x to 4.6x.
-    dryRefundShare: 1,
-    maxLines: 12,
-    // How close to a line a press has to land to fork a branch off it.
-    branchGrabRadius: 30,
-    // Endless days: wax as a multiple of the network to the valuable flowers.
-    endlessFactor: 1.15,
-  },
-
-  /**
-   * Flower tiers: honey per bee-trip, trips before the flower is dry, and the
-   * species (indexes into COLORS.species) that wear each tier.
-   */
-  tiers: {
-    yield: [1, 2, 3],
-    pool: [40, 60, 140],
-    species: [
-      [4, 0], // white daisy, pink
-      [3, 2], // buttercup, poppy
-      [1, 5], // violet, cornflower
-    ],
   },
 
   combo: {

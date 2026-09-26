@@ -11,15 +11,9 @@ function line(field: Field, length: number): number[] {
   return coords;
 }
 
-/**
- * A day's field with wax to spare: these tests are about bees and flowers,
- * and a test that places its own flowers would otherwise inherit whatever the
- * random board was priced at. The wax rules have their own tests below.
- */
 function newDay(day = 1): Field {
   const field = new Field();
   field.beginDay(day, featuresForDay(day), patchesForDay(day), 1);
-  field.wax = field.waxBudget = 100_000;
   return field;
 }
 
@@ -38,11 +32,7 @@ function flowerAt(x: number, y: number, pool = 500): Patch {
 
 /** Lays a line from the hive to (x, y) the way a drag would. */
 function lay(field: Field, x: number, y: number) {
-  const plan = field.planLine(
-    { x: field.hiveX, y: field.hiveY, route: null, mode: 'hive', at: 0 },
-    x,
-    y,
-  );
+  const plan = field.planLine({ x: field.hiveX, y: field.hiveY, route: null }, x, y);
   return field.commitLine(plan);
 }
 
@@ -91,124 +81,34 @@ describe('lines and crews', () => {
     expect(firstAt).toBeLessThan(5);
   });
 
-  it('keeps a line whose flower ran dry, and sends its crew home for work', () => {
-    // The line is wax the player paid for and a trunk to build on, so it
-    // stays; what it must not do is hold bees at a dead flower.
+  it('retires a line when its flower runs dry, freeing the slot', () => {
     const field = newDay();
     field.patches = [flowerAt(field.hiveX + 220, field.hiveY, 6)];
-    const route = lay(field, field.hiveX + 220, field.hiveY);
-    expect(route).not.toBeNull();
+    lay(field, field.hiveX + 220, field.hiveY);
+    expect(field.routes).toHaveLength(1);
 
     let drained = 0;
-    for (let t = 0; t < 20; t += 1 / 60) {
+    for (let t = 0; t < 20 && field.routes.length > 0; t += 1 / 60) {
       field.step(1 / 60);
       drained += field.drainEvents().drained.length;
     }
+    expect(field.routes).toHaveLength(0);
     expect(drained).toBe(1);
-    expect(field.routes).toContain(route);
-    expect(route!.target).toBeNull();
-    expect(field.bees.filter((b) => b.routeId === route!.id)).toHaveLength(0);
   });
 
-  it('leaves a line into nothing as a stub, with no crew on it', () => {
+  it('lets a line into nothing scout, then give up', () => {
     const field = newDay();
     field.patches = [flowerAt(field.hiveX + 250, field.hiveY - 250)];
     const route = lay(field, field.hiveX + 400, field.hiveY + 100);
     expect(route?.target).toBeNull();
-    advance(field, 5);
-    expect(field.routes).toContain(route);
-    expect(field.bees.filter((b) => b.routeId === route!.id)).toHaveLength(0);
-  });
-});
 
-describe('wax', () => {
-  function pricedDay(): Field {
-    const field = new Field();
-    field.beginDay(1, featuresForDay(1), patchesForDay(1), 1);
-    return field;
-  }
-  const hive = (field: Field) =>
-    ({ x: field.hiveX, y: field.hiveY, route: null, mode: 'hive', at: 0 }) as const;
-
-  it('charges a line its own length', () => {
-    const field = pricedDay();
-    field.patches = [flowerAt(field.hiveX + 200, field.hiveY)];
-    const before = field.wax;
-    const plan = field.planLine(hive(field), field.hiveX + 200, field.hiveY);
-    field.commitLine(plan);
-    expect(before - field.wax).toBeCloseTo(plan.cost, 5);
-    expect(plan.cost).toBeGreaterThan(150);
-  });
-
-  it('charges a branch only for what it adds, and flies it end to end', () => {
-    const field = pricedDay();
-    field.wax = field.waxBudget = 5000;
-    const a = flowerAt(field.hiveX + 400, field.hiveY);
-    const b = flowerAt(field.hiveX + 400, field.hiveY - 150);
-    field.patches = [a, b];
-    const trunk = field.commitLine(field.planLine(hive(field), a.x, a.y))!;
-    const before = field.wax;
-    const start = field.lineStartAt(trunk.tipX, trunk.tipY)!;
-    expect(start.mode).toBe('branch');
-    const branch = field.commitLine(field.planLine(start, b.x, b.y))!;
-    expect(branch.target).toBe(b);
-    // Paid about the 150 px it added, not the 550 px it flies.
-    expect(before - field.wax).toBeLessThan(200);
-    expect(branch.liveLength).toBeGreaterThan(500);
-    expect(branch.parentId).toBe(trunk.id);
-  });
-
-  it('cuts a drag short at the wax there is, and will not lay it to nowhere', () => {
-    const field = pricedDay();
-    field.patches = [flowerAt(field.hiveX + 600, field.hiveY)];
-    field.wax = 200;
-    const plan = field.planLine(hive(field), field.hiveX + 600, field.hiveY);
-    expect(plan.short).toBe(true);
-    expect(plan.target).toBeNull();
-    expect(plan.cost).toBeLessThanOrEqual(200);
-  });
-
-  it('refunds half a working line, all of a dry one, and all of a fresh misdrag', () => {
-    const field = pricedDay();
-    field.wax = field.waxBudget = 5000;
-    field.patches = [flowerAt(field.hiveX + 300, field.hiveY, 500)];
-    const misdrag = field.commitLine(
-      field.planLine(hive(field), field.hiveX + 300, field.hiveY),
-    )!;
-    expect(field.recallRoute(misdrag)).toBe(Math.round(misdrag.ownCost));
-
-    const working = field.commitLine(
-      field.planLine(hive(field), field.hiveX + 300, field.hiveY),
-    )!;
-    advance(field, TUNING.wax.undoSeconds + 1);
-    expect(field.recallRoute(working)).toBe(
-      Math.round(working.ownCost * TUNING.wax.refundShare),
-    );
-
-    field.patches = [flowerAt(field.hiveX + 300, field.hiveY, 2)];
-    const dry = field.commitLine(
-      field.planLine(hive(field), field.hiveX + 300, field.hiveY),
-    )!;
-    advance(field, 12);
-    expect(dry.target).toBeNull();
-    expect(field.recallRoute(dry)).toBe(
-      Math.round(dry.ownCost * TUNING.wax.dryRefundShare),
-    );
-  });
-
-  it("takes a line's branches back with it", () => {
-    const field = pricedDay();
-    field.wax = field.waxBudget = 5000;
-    const a = flowerAt(field.hiveX + 400, field.hiveY);
-    const b = flowerAt(field.hiveX + 400, field.hiveY - 150);
-    field.patches = [a, b];
-    const trunk = field.commitLine(field.planLine(hive(field), a.x, a.y))!;
-    field.commitLine(
-      field.planLine(field.lineStartAt(trunk.tipX, trunk.tipY)!, b.x, b.y),
-    );
-    expect(field.routes).toHaveLength(2);
-    field.recallRoute(trunk);
+    let fizzled = 0;
+    for (let t = 0; t < 15 && field.routes.length > 0; t += 1 / 60) {
+      field.step(1 / 60);
+      fizzled += field.drainEvents().fizzled.length;
+    }
     expect(field.routes).toHaveLength(0);
+    expect(fizzled).toBe(1);
   });
 
   it('announces a cleared meadow once, when every flower is dry', () => {
@@ -255,7 +155,7 @@ describe('pollen is finite for the day', () => {
     // mind. The only arrivals are golden blooms: marked as special, brief,
     // and one at a time.
     const field = newDay(6);
-    const dawn = field.patches.filter((p) => p.alive).length;
+    expect(field.patches.filter((p) => p.alive).length).toBe(patchesForDay(6));
 
     for (let t = 0; t < 60 * 60; t += 1) {
       field.step(1 / 60);
@@ -264,7 +164,7 @@ describe('pollen is finite for the day', () => {
       expect(golden.length).toBeLessThanOrEqual(1);
     }
     const ordinary = field.patches.filter((p) => p.kind !== 'night');
-    expect(ordinary.length).toBe(dawn);
+    expect(ordinary.length).toBe(patchesForDay(6));
   });
 
   it('gives day one somewhere to move to when the first flower dies', () => {
@@ -272,15 +172,13 @@ describe('pollen is finite for the day', () => {
     expect(patchesForDay(1)).toBeGreaterThanOrEqual(2);
   });
 
-  it('pays by tier: a richer flower is worth more a trip and more in all', () => {
-    const field = newDay(10);
-    const byTier = (tier: number) => field.patches.find((p) => p.tier === tier);
-    const [one, two, three] = [byTier(1), byTier(2), byTier(3)];
-    expect(one && two && three).toBeTruthy();
-    expect(two!.yieldPerTrip).toBeGreaterThan(one!.yieldPerTrip);
-    expect(three!.yieldPerTrip).toBeGreaterThan(two!.yieldPerTrip);
-    expect(three!.honeyLeft).toBeGreaterThan(two!.honeyLeft);
-    expect(two!.honeyLeft).toBeGreaterThan(one!.honeyLeft);
+  it('scales pools with the day, since throughput grows too', () => {
+    const early = new Field();
+    early.beginDay(1, featuresForDay(1), patchesForDay(1), 1);
+    const late = new Field();
+    late.beginDay(10, featuresForDay(10), patchesForDay(10), 1);
+
+    expect(late.patches[0]!.maxPool).toBeGreaterThan(early.patches[0]!.maxPool);
   });
 });
 

@@ -47,15 +47,15 @@ describe('day pacing', () => {
 describe('escalation schedule', () => {
   it('introduces nothing on day one', () => {
     const features = featuresForDay(1);
-    expect(features).toMatchObject({
+    expect(features).toEqual({
       raidSize: 0,
       wave: [],
       mazeOpenness: 1,
       richPatches: false,
       nightBloom: false,
     });
-    // Daisies by the hive and one warm cluster: no rich flowers yet.
-    expect(features.flowers?.every((g) => g.tier <= 2)).toBe(true);
+    // Three, against three lines: day one is the one board a first-timer
+    // can hold in full, and clearing it early is the first win they get.
     expect(patchesForDay(1)).toBe(3);
   });
 

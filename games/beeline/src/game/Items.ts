@@ -129,12 +129,11 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     id: 'moreLines',
     glyph: 'comb',
     iconTint: 0xf0c14b,
-    // The id stays `moreLines` so saved runs still load; what it buys is wax.
-    name: 'More Wax',
+    name: 'More Lines',
     rarity: 'rare',
-    effect: '+30 wax a day',
-    // The flagship. Wax is how much of the board your network can reach, and
-    // the board always has more flowers than wax to reach them.
+    effect: '+1 line at once',
+    // The flagship. A line is how much of the board you can hold at once, and
+    // the board always has more flowers than you have lines.
     relevant: () => true,
     apply: (m) => {
       m.extraLines += 1;
@@ -158,7 +157,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     iconTint: 0xe2669a,
     name: 'Wildflowers',
     rarity: 'rare',
-    effect: '+1 warm flower a day',
+    effect: '+1 flower a day',
     relevant: () => true,
     apply: (m) => {
       m.extraPatches += 1;
@@ -186,8 +185,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     name: 'Scout Bees',
     rarity: 'common',
     effect: 'field mapped at dawn',
-    // Retired (see RETIRED below): every board now opens fully lit.
-    relevant: () => false,
+    relevant: () => true,
     // Deliberately does not stack: a second copy of "you can see everything"
     // is worth nothing, and selling a player a second one would be a lie.
     apply: (m) => {
@@ -349,13 +347,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   },
 };
 
-/**
- * Items still offered in the draft. Scout Bees is retired (every board opens
- * lit) but stays in `ITEMS`, so a saved run that bought one still loads.
- */
-const RETIRED: ReadonlySet<ItemId> = new Set<ItemId>(['scoutBees']);
-
-export const ITEM_IDS = (Object.keys(ITEMS) as ItemId[]).filter((id) => !RETIRED.has(id));
+export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
 
 export function isItemId(value: unknown): value is ItemId {
   return typeof value === 'string' && value in ITEMS;
