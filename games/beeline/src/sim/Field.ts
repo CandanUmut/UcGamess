@@ -5,7 +5,7 @@ import { Route } from './Route.ts';
 import { Wasp, type WaspKind } from './Wasp.ts';
 import { RaidClock } from './Raid.ts';
 import { Maze } from './Maze.ts';
-import { slideAlongWalls, type WallSlide } from './deflect.ts';
+import { stopAtWalls, type WallStop } from './deflect.ts';
 import { Fog } from './Fog.ts';
 import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
 import { deriveStats, type DerivedStats } from '../game/Upgrades.ts';
@@ -1573,7 +1573,7 @@ export class Field {
     }
 
     const raw = straight(start.x, start.y, endX, endY);
-    const slid = this.slidePath(raw);
+    const slid = this.clipPath(raw);
     const coords = slid.coords;
     const tipX = coords[coords.length - 2] ?? start.x;
     const tipY = coords[coords.length - 1] ?? start.y;
@@ -1963,15 +1963,9 @@ export class Field {
     return this.wasps.some((w) => w.isRaiding);
   }
 
-  /**
-   * Slides a path the player just drew clear of the walls it pressed into.
-   *
-   * Shared with the commit path so a freshly drawn line and a wind-bowed one
-   * are deflected by exactly the same rule. Two notions of what a wall does is
-   * how an obstacle stops being something a player can predict.
-   */
-  slidePath(coords: readonly number[]): WallSlide {
-    return slideAlongWalls(coords, this.maze);
+  /** A drawn leg, cut where it first meets a hedge. */
+  clipPath(coords: readonly number[]): WallStop {
+    return stopAtWalls(coords, this.maze);
   }
 
   /** Most bees one line carries today. */

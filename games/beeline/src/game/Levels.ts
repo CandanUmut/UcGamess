@@ -317,7 +317,7 @@ const SPECS: readonly Spec[] = [
     lesson: 'raid',
     // The wasps have two flowers on their doorstep to your one: their jar
     // runs ahead, and a raid only pays on a fuller jar than yours.
-    rival: { ...NEST, bees: 20, lines: 3, skill: 'steady', raidOut: true },
+    rival: { ...NEST, bees: 16, lines: 3, skill: 'steady', raidOut: true },
     walls: mirroredWalls([
       [4, 1, 'L'],
       [4, 2, 'L'],
@@ -369,7 +369,7 @@ const SPECS: readonly Spec[] = [
     lesson: 'mist',
     lessonPoints: { via: { x: 600, y: 300 } },
     fog: true,
-    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raidOut: true },
     walls: mirroredWalls([
       [3, 2, 'L'],
       [3, 3, 'L'],
@@ -397,7 +397,7 @@ const SPECS: readonly Spec[] = [
     fog: true,
     golden: true,
     wave: ['raider'],
-    rival: { ...NEST, bees: 32, lines: 4, skill: 'sharp', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'sharp', raids: true, raidOut: true },
     // A real maze: the centre is walled in and opened only from above and
     // below, so every rich flower is a route, not a line.
     walls: mirroredWalls([
@@ -425,7 +425,9 @@ const SPECS: readonly Spec[] = [
   // ---- Bramble Maze: hand-built, routing in legs. Every board is a
   // different shape on each side — a fair fight, never a mirror — and from
   // 2-2 on, buds open partway through, so the board you plan at the start is
-  // not the board you finish on.
+  // not the board you finish on. Hedges and buds only: no golden blooms and
+  // no raids on your hive, so the routing is the whole puzzle. You may still
+  // raid them.
   {
     name: 'First Hedges',
     seconds: 0,
@@ -435,7 +437,7 @@ const SPECS: readonly Spec[] = [
     bees: 24,
     difficulty: 4,
     intro: 'Drag on from the end of a line to steer round hedges',
-    rival: { ...NEST, bees: 20, lines: 3, skill: 'dozy', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 20, lines: 3, skill: 'dozy', raids: false },
     // Your rich flowers wait behind your own hedge; theirs sit in the open.
     walls: [
       [2, 1, 'L'],
@@ -463,7 +465,7 @@ const SPECS: readonly Spec[] = [
     bees: 24,
     difficulty: 5,
     intro: 'Buds open later — have a line free when they do',
-    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: false },
     // An S through the middle; the big honey is still in bud at the start.
     walls: [
       [3, 0, 'L'],
@@ -492,8 +494,7 @@ const SPECS: readonly Spec[] = [
     bees: 24,
     difficulty: 5,
     fog: true,
-    golden: true,
-    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: false },
     // Three bands of meadow joined by narrow gaps: the middle gap is shared,
     // the top band is reached only round the far edges — yours on the left.
     walls: [
@@ -530,7 +531,7 @@ const SPECS: readonly Spec[] = [
     bees: 32,
     difficulty: 6,
     fog: true,
-    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: false },
     // The Royal Bloom's garden opens toward the wasps; you have a private
     // pocket top-left, reached only the long way round.
     walls: [
@@ -564,8 +565,7 @@ const SPECS: readonly Spec[] = [
     bees: 24,
     difficulty: 6,
     fog: true,
-    golden: true,
-    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: false },
     // Each colony has a hidden pocket in its own corner, walled off and
     // entered from the side away from home. Find yours first.
     walls: [
@@ -595,7 +595,7 @@ const SPECS: readonly Spec[] = [
     lines: 4,
     bees: 32,
     difficulty: 7,
-    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: false },
     // A ring of hedge round the middle: you get in at the bottom-left, they
     // get in at the top-right, and the buds outside open late.
     walls: [
@@ -632,8 +632,7 @@ const SPECS: readonly Spec[] = [
     bees: 32,
     difficulty: 8,
     fog: true,
-    golden: true,
-    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: false },
     // A hedge down the middle, open only at the bottom: the far side is a
     // long trip for either colony, and the bud there is worth making it.
     walls: [
@@ -667,8 +666,7 @@ const SPECS: readonly Spec[] = [
     bees: 32,
     difficulty: 8,
     fog: true,
-    golden: true,
-    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 24, lines: 4, skill: 'steady', raids: false },
     // The Royal Bloom at the heart has one gate, on the wasps' side of the
     // bottom; your consolation is a bud in your own corner.
     walls: [
@@ -701,7 +699,7 @@ const SPECS: readonly Spec[] = [
     lines: 5,
     bees: 40,
     difficulty: 9,
-    rival: { ...NEST, bees: 34, lines: 5, skill: 'steady', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 34, lines: 5, skill: 'steady', raids: false },
     // Hedges with gaps in different rows on each side: five roads across,
     // none of them straight. The two big buds in the middle open together.
     walls: [
@@ -740,8 +738,7 @@ const SPECS: readonly Spec[] = [
     bees: 40,
     difficulty: 10,
     fog: true,
-    golden: true,
-    rival: { ...NEST, bees: 36, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 36, lines: 5, skill: 'sharp', raids: false },
     // A true maze, different on each side: yours winds, theirs is open but
     // long. The Royal Bloom sits in a dead end that both have to plan for.
     walls: [
@@ -851,11 +848,10 @@ const SPECS: readonly Spec[] = [
     wave: [R, R, R],
     rival: { ...NEST, bees: 20, lines: 4, skill: 'steady', raids: true, raidOut: true },
     // A long hedge across the middle row: top and bottom are two meadows,
-    // and the gap is on the wasps' side.
+    // joined by one narrow gap on each side.
     walls: [
       [0, 2, 'T'],
       [1, 2, 'T'],
-      [2, 2, 'T'],
       [3, 2, 'T'],
       [4, 2, 'T'],
       [5, 2, 'T'],
@@ -954,7 +950,7 @@ const SPECS: readonly Spec[] = [
     fog: true,
     golden: true,
     wave: [D, D, R, R],
-    rival: { ...NEST, bees: 30, lines: 4, skill: 'sharp', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 27, lines: 4, skill: 'sharp', raids: true, raidOut: true },
     // Diagonal hedges: what is near as the bee flies is far as the line goes.
     walls: [
       [1, 1, 'L'],
@@ -1064,7 +1060,7 @@ const SPECS: readonly Spec[] = [
     fog: true,
     golden: true,
     wave: [H, D, D, R, R, R],
-    rival: { ...NEST, bees: 28, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    rival: { ...NEST, bees: 26, lines: 5, skill: 'sharp', raids: true, raidOut: true },
     // A maze down the middle and the buds on their side: you will be behind
     // at the half, and the raid is how you get back.
     walls: [
@@ -1104,8 +1100,8 @@ const SPECS: readonly Spec[] = [
     difficulty: 12,
     fog: true,
     golden: true,
-    wave: [H, H, D, D, R, R, R],
-    rival: { ...NEST, bees: 31, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    wave: [H, D, D, R, R, R],
+    rival: { ...NEST, bees: 22, lines: 5, skill: 'sharp', raids: true, raidOut: true },
     // Everything the summer taught: a walled heart with the Royal Bloom,
     // pockets in the mist, buds in two waves, and a colony as good as you.
     walls: [
@@ -1195,40 +1191,39 @@ function treasuresFor(index: number): TreasurePlan {
 /**
  * [goal, three-star seconds, two-star seconds] per level, fitted by
  * `src/playtest/fit-levels.ts`. The goal column is the board's own jar,
- * repeated for reference. 3-3's times are set by hand from a run with the
- * swarm it ships with.
+ * repeated for reference. 3-3 is set by hand, after its hedge gap changed.
  */
 export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
-  [25, 17, 22],
-  [50, 18, 24],
-  [75, 23, 32],
-  [115, 27, 37],
-  [120, 26, 37],
-  [115, 43, 64],
-  [90, 43, 56],
-  [160, 39, 52],
-  [140, 59, 123],
-  [240, 48, 87],
-  [135, 38, 52],
-  [160, 63, 101],
-  [165, 48, 88],
-  [170, 69, 115],
-  [150, 60, 64],
-  [200, 67, 89],
-  [200, 78, 85],
-  [210, 65, 78],
-  [270, 87, 111],
-  [260, 67, 106],
-  [160, 57, 94],
-  [185, 46, 79],
-  [210, 110, 150],
-  [215, 49, 67],
-  [215, 62, 85],
-  [235, 60, 81],
-  [245, 40, 102],
-  [250, 47, 82],
-  [275, 66, 102],
-  [315, 54, 102],
+  [25, 21, 28],
+  [50, 23, 30],
+  [75, 27, 38],
+  [115, 30, 46],
+  [120, 36, 47],
+  [115, 48, 74],
+  [90, 48, 63],
+  [160, 80, 84],
+  [140, 74, 107],
+  [240, 78, 113],
+  [135, 42, 57],
+  [160, 66, 83],
+  [165, 112, 136],
+  [170, 73, 134],
+  [150, 45, 79],
+  [200, 67, 108],
+  [200, 89, 115],
+  [210, 109, 125],
+  [270, 98, 126],
+  [260, 139, 179],
+  [160, 79, 122],
+  [185, 69, 93],
+  [210, 82, 100],
+  [215, 66, 88],
+  [215, 69, 97],
+  [235, 84, 117],
+  [245, 69, 102],
+  [250, 62, 89],
+  [275, 72, 102],
+  [315, 55, 102],
 ];
 
 /**
@@ -1330,10 +1325,11 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     // Worth chasing, never the whole jar: a bloom that held most of the goal
     // turned a timed board into waiting for it to open.
     goldenHoney: Math.max(10, Math.round(level.goal * 0.15)),
-    // Early enough to matter: a bloom that opened as the jar filled, or a
-    // wasp that landed at 192 of 200, was scenery.
-    firstGoldenAt: 4,
-    firstRaidAt: 8,
+    // Not in the first seconds: the opening is for reading the board and
+    // laying the first lines. A bloom at 4s and raiders at 8s, on top of a
+    // rival, was a race nobody could follow.
+    firstGoldenAt: 18,
+    firstRaidAt: 25,
     // What a raider steals is a share of this. Against the wasps a theft
     // counts twice — out of your jar and into theirs — so it is a third of
     // what a lone hive's raider takes.
@@ -1356,10 +1352,9 @@ export function levelModifiers(level: LevelDef): RunModifiers {
   m.extraBees = level.bees - TUNING.bee.baseCount;
   // No mist: light the whole board at dawn.
   if (!level.fog) m.scoutRadius = 2000;
-  // Quicker wings on campaign boards: a level is short, and the stretch
-  // between laying a line and the honey arriving was the part testers
-  // called watching rather than playing.
-  m.beeSpeedBonus = 0.3;
+  // Ordinary wings. Campaign bees used to fly 30% faster to cut the wait,
+  // and with a rival on the board it made everything happen at once.
+  m.beeSpeedBonus = 0;
   return m;
 }
 

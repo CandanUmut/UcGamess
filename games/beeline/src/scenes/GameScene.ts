@@ -41,7 +41,7 @@ import { applyUpgrades } from '../game/HiveUpgrades.ts';
 import { unlockAchievements, type AchievementDef } from '../game/Achievements.ts';
 import { Tutorial } from '../game/Tutorial.ts';
 import { Lesson, type LessonState } from '../game/Lessons.ts';
-import { clearRival, Rivalry } from '../game/Rival.ts';
+import { clearRival, QUIET_SECONDS, Rivalry } from '../game/Rival.ts';
 import { RivalRenderer } from '../render/RivalRenderer.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
@@ -1440,13 +1440,15 @@ export class GameScene extends BaseGameplayScene {
       this.hud.setAlert(
         raidOut !== null
           ? `RAID-OUT  ${Math.ceil(raidOut)}s — the fuller jar wins`
-          : this.field.underAttack
-            ? 'The hive is being robbed — tap the wasps!'
-            : this.field.raidWarningAt
-              ? 'Wasps incoming!'
-              : crossing > 0
-                ? `${crossing} wasp${crossing > 1 ? 's' : ''} — tap to swat`
-                : null,
+          : (this.rival?.quietFor ?? 0) >= QUIET_SECONDS / 2
+            ? `All quiet — fuller jar wins in ${Math.ceil(QUIET_SECONDS - (this.rival?.quietFor ?? 0))}s`
+            : this.field.underAttack
+              ? 'The hive is being robbed — tap the wasps!'
+              : this.field.raidWarningAt
+                ? 'Wasps incoming!'
+                : crossing > 0
+                  ? `${crossing} wasp${crossing > 1 ? 's' : ''} — tap to swat`
+                  : null,
         seconds,
       );
     }
@@ -1464,7 +1466,7 @@ export class GameScene extends BaseGameplayScene {
       this.floatText(cut.x, cut.y - 40, 'wasps cut your raid!', '#ff8a70', 22);
     }
     rival.cutLines = [];
-    if (this.field.time - this.raidTally.at < 1.2) return;
+    if (this.field.time - this.raidTally.at < 2.5) return;
     this.raidTally.at = this.field.time;
     if (this.raidTally.lost >= 1) {
       this.floatText(

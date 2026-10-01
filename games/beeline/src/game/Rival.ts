@@ -37,6 +37,13 @@ export interface RivalSpec {
 export const RAID_OUT_SECONDS = 12;
 
 /**
+ * Seconds with neither jar moving before the race is called for the fuller
+ * one. A flower nobody has found, or can reach, would otherwise keep the
+ * meadow from ever running dry, and the race would simply hang.
+ */
+export const QUIET_SECONDS = 20;
+
+/**
  * How well the wasps play. Plain human-factors numbers, the same kind the
  * playtest personas use; harder rivals think faster and waste less, they are
  * never given bees out of nowhere.
@@ -74,6 +81,9 @@ export class Rivalry {
   private waspNest: Patch | null = null;
   /** The player's hive as a raid target: its honey is the player's jar. */
   private playerNest: Patch | null = null;
+  /** Seconds neither jar has moved and no bee has carried anything. */
+  quietFor = 0;
+  private lastJars = { board: 0, rival: 0 };
   /** Seconds left in the raid-out, or null before it starts. */
   raidOutLeft: number | null = null;
   /** Honey raided this step, each way, for the floating numbers. */
@@ -91,6 +101,7 @@ export class Rivalry {
       raids: spec.raids ?? false,
       // A beat before the wasps react to a golden bloom, as a person needs.
       goldenDelay: 2,
+      readsMaze: true,
       contested: () => {
         const worked = new Set<Patch>();
         for (const r of this.board?.routes ?? []) if (r.target) worked.add(r.target);
@@ -114,6 +125,8 @@ export class Rivalry {
     this.field.beginRivalDay(board, m);
     this.board = board;
     this.raidOutLeft = null;
+    this.quietFor = 0;
+    this.lastJars = { board: board.honey, rival: 0 };
     this.raidAge.clear();
     this.cutLines = [];
     // Each hive is a target on the shared board: a line to the other side's
@@ -146,6 +159,9 @@ export class Rivalry {
   verdict(board: Field, goal: number): 'won' | 'beaten' | null {
     if (board.honey >= goal) return 'won';
     if (this.field.honey >= goal) return 'beaten';
+    if (this.quietFor >= QUIET_SECONDS) {
+      return board.honey >= this.field.honey ? 'won' : 'beaten';
+    }
     // The meadow is dry once every flower is: raids alone could pass the
     // same honey back and forth for ever, so the fuller jar wins then.
     const golden = board.patches.some((p) => p.kind === 'night' && p.alive);
@@ -232,6 +248,15 @@ export class Rivalry {
       }
     }
     this.syncNests();
+    if (board) {
+      const moved =
+        Math.abs(board.honey - this.lastJars.board) > 0.001 ||
+        Math.abs(this.field.honey - this.lastJars.rival) > 0.001 ||
+        this.carrying ||
+        board.bees.some((b) => b.carrying > 0);
+      this.quietFor = moved ? 0 : this.quietFor + dt;
+      this.lastJars = { board: board.honey, rival: this.field.honey };
+    }
     // Nothing on screen reads a rival's events; drop them so they never pile up.
     this.field.drainEvents();
   }
