@@ -109,6 +109,19 @@ export interface DayFeatures {
    * to make exploring pay.
    */
   treasures?: TreasurePlan;
+  /** Hand-placed flowers. When present, replaces the random placement. */
+  layout?: readonly FlowerSpot[];
+  /** Hand-placed hedges. When present, replaces the generated maze. */
+  walls?: ReadonlyArray<readonly [col: number, row: number, side: 'L' | 'T']>;
+}
+
+/** One hand-placed flower: where, and how much honey it holds in all. */
+export interface FlowerSpot {
+  x: number;
+  y: number;
+  honey: number;
+  /** 'royal' for a Royal Bloom. */
+  kind?: 'normal' | 'royal';
 }
 
 export interface TreasurePlan {

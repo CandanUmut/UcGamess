@@ -40,6 +40,7 @@ import { modifiersFor, rollOffer } from '../game/Items.ts';
 import { applyUpgrades } from '../game/HiveUpgrades.ts';
 import { unlockAchievements, type AchievementDef } from '../game/Achievements.ts';
 import { Tutorial } from '../game/Tutorial.ts';
+import { Lesson, type LessonState } from '../game/Lessons.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
 import type { LevelDoneData } from './LevelDoneScene.ts';
@@ -49,8 +50,7 @@ import {
   levelById,
   levelFeatures,
   levelModifiers,
-  levelStarsFor,
-  levelSunsetBonus,
+  levelStarsForTime,
   withSeed,
   type LevelDef,
 } from '../game/Levels.ts';
@@ -140,8 +140,21 @@ export class GameScene extends BaseGameplayScene {
   private day = 1;
   private secondsLeft = 0;
   private daySeconds = 0;
-  /** `loading` until the save has been read; the simulation is idle until then. */
-  private phase: 'loading' | 'playing' | 'clearing' | 'ended' = 'loading';
+  /**
+   * `loading` until the save has been read; the simulation is idle until then.
+   * `intro` is a level's goal card, up until the first touch.
+   */
+  private phase: 'loading' | 'intro' | 'playing' | 'clearing' | 'ended' = 'loading';
+  /** The level clock: runs from the first line, and only while playing. */
+  private clockStarted = false;
+  private levelClock = 0;
+  /** When the jar filled, on the level clock; null until it does. */
+  private filledAt: number | null = null;
+  private lesson = new Lesson(undefined);
+  private lessonDrained = 0;
+  private goalCard: Phaser.GameObjects.Container | null = null;
+  /** Throttle for "lines start at the hive" nudges. */
+  private lastNudgeAt = -99;
   private clearTimer = 0;
 
   // --- the drag --------------------------------------------------------
@@ -237,14 +250,16 @@ export class GameScene extends BaseGameplayScene {
     this.juice = new Juice(this, DEPTH.juice);
     this.hud = new Hud(this, DEPTH.hud);
     this.tutorialText = this.add
-      .text(DESIGN_WIDTH / 2, 150, '', {
+      .text(DESIGN_WIDTH / 2, 168, '', {
         fontFamily: FONT,
-        fontSize: '26px',
+        fontSize: '24px',
         fontStyle: 'bold',
         color: '#ffe38a',
         align: 'center',
         stroke: '#2a1d08',
-        strokeThickness: 6,
+        strokeThickness: 5,
+        backgroundColor: 'rgba(42, 33, 20, 0.82)',
+        padding: { x: 18, y: 10 },
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
@@ -392,7 +407,12 @@ export class GameScene extends BaseGameplayScene {
     );
 
     this.daySeconds = level.seconds;
-    this.secondsLeft = this.daySeconds;
+    this.secondsLeft = level.timed ? level.seconds : 0;
+    this.clockStarted = false;
+    this.levelClock = 0;
+    this.filledAt = null;
+    this.lesson = new Lesson(level.lesson, level.lessonPoints);
+    this.lessonDrained = 0;
     this.beeRenderer.resize(this.field.bees.length);
     this.cancelDrag();
 
@@ -400,10 +420,76 @@ export class GameScene extends BaseGameplayScene {
     this.hud.setVisible(true);
     this.hud.setPauseVisible(true);
     this.refreshHud(0);
-    this.hud.showBanner(level.intro ?? level.name);
 
     this.sfx.startHum();
     this.sfx.startMusic();
+    this.showGoalCard(level);
+  }
+
+  /**
+   * The goal, said once and big before anything moves: what fills the jar,
+   * and whether the sun is up. The first touch anywhere puts it away.
+   */
+  private showGoalCard(level: LevelDef): void {
+    this.phase = 'intro';
+    this.goalCard?.destroy();
+    const cx = DESIGN_WIDTH / 2;
+    const cy = DESIGN_HEIGHT / 2 - 10;
+    const card = this.add.container(cx, cy).setScrollFactor(0).setDepth(DEPTH.hud + 5);
+    const g = this.add.graphics();
+    g.fillStyle(0x2a2114, 0.94);
+    g.fillRoundedRect(-300, -120, 600, 240, 26);
+    g.lineStyle(4, 0xffc93c, 0.9);
+    g.strokeRoundedRect(-300, -120, 600, 240, 26);
+    const say = (y: number, text: string, size: number, colour: string, bold = true) =>
+      this.add
+        .text(0, y, text, {
+          fontFamily: FONT,
+          fontSize: `${size}px`,
+          fontStyle: bold ? 'bold' : 'normal',
+          color: colour,
+          align: 'center',
+          stroke: '#1d160c',
+          strokeThickness: bold ? 6 : 0,
+        })
+        .setOrigin(0.5);
+    const number = `${level.world + 1}-${((level.id - 1) % LEVELS_PER_WORLD) + 1}`;
+    card.add([
+      g,
+      say(-84, `${number}  ${level.name}`, 22, '#c9b98f', false),
+      say(-34, `Fill the jar with ${level.goal} honey`, 38, '#ffe38a'),
+      say(
+        18,
+        level.timed
+          ? `before the sun sets — ${level.seconds} seconds`
+          : 'No rush on this one — take your time',
+        22,
+        '#fff4d6',
+        false,
+      ),
+      say(60, 'Faster fills earn more stars', 18, '#c9b98f', false),
+      say(96, 'Tap to start', 20, '#a8f0b4'),
+    ]);
+    card.setScale(0.8).setAlpha(0);
+    this.tweens.add({ targets: card, scale: 1, alpha: 1, duration: 260, ease: 'Back.easeOut' });
+    this.goalCard = card;
+  }
+
+  /** Puts the goal card away and lets the board run. */
+  private dismissGoalCard(): void {
+    if (this.phase !== 'intro') return;
+    const card = this.goalCard;
+    this.goalCard = null;
+    if (card) {
+      this.tweens.add({
+        targets: card,
+        alpha: 0,
+        scale: 0.9,
+        duration: 160,
+        onComplete: () => card.destroy(),
+      });
+    }
+    this.phase = 'playing';
     if (!this.externallyPaused) this.startGameplay();
   }
 
@@ -418,19 +504,32 @@ export class GameScene extends BaseGameplayScene {
     ];
   }
 
-  /** The sunset bonus the daylight left would pay right now. */
+  /** The sunset bonus the daylight left would pay right now (endless only). */
   private get bonusNow(): number {
-    return this.level
-      ? levelSunsetBonus(this.level, this.secondsLeft)
-      : sunsetBonus(this.day, this.secondsLeft);
+    return sunsetBonus(this.day, this.secondsLeft);
   }
 
   private refreshHud(deltaSeconds: number): void {
-    const label = this.level
-      ? `${this.level.world + 1}-${((this.level.id - 1) % LEVELS_PER_WORLD) + 1}  ${this.level.name}`
-      : `Day ${this.day}`;
+    if (this.level) {
+      const level = this.level;
+      this.hud.updateLevel(
+        `${level.world + 1}-${((level.id - 1) % LEVELS_PER_WORLD) + 1}  ${level.name}`,
+        this.field.honey,
+        {
+          goal: level.goal,
+          clock: this.filledAt ?? this.levelClock,
+          starTimes: level.starTimes,
+          timed: level.timed,
+          started: this.clockStarted,
+          secondsLeft: this.secondsLeft,
+          daySeconds: this.daySeconds,
+        },
+        deltaSeconds,
+      );
+      return;
+    }
     this.hud.update(
-      label,
+      `Day ${this.day}`,
       this.field.honey,
       this.targets,
       this.secondsLeft,
@@ -479,23 +578,34 @@ export class GameScene extends BaseGameplayScene {
     return unlockAchievements(this.save);
   }
 
-  private endLevel(level: LevelDef, cleared: boolean): void {
+  /**
+   * A campaign level is over: the jar filled, or it could not be. Stars come
+   * from how fast it filled; the honey goes to the bank either way, so even a
+   * miss buys something.
+   */
+  private endLevel(level: LevelDef, why: 'filled' | 'sunset' | 'empty'): void {
     this.phase = 'ended';
     this.cancelDrag();
     this.stopGameplay();
     this.sfx.play('dayEnd', 0.45);
 
-    const bonus = cleared ? levelSunsetBonus(level, this.secondsLeft) : 0;
-    const honey = Math.floor(this.field.honey) + bonus;
-    const stars = levelStarsFor(level, honey);
+    const filled = why === 'filled';
+    const seconds = filled ? Math.max(1, Math.ceil(this.filledAt ?? this.levelClock)) : null;
+    const honey = Math.floor(this.field.honey);
+    const stars = levelStarsForTime(level, seconds);
     const index = level.id - 1;
     const prevStars = this.save.levelStars[index] ?? 0;
     const prevBest = this.save.levelBest[index] ?? 0;
+    const prevTime = this.save.levelTime[index] ?? 0;
 
     while (this.save.levelStars.length <= index) this.save.levelStars.push(0);
     while (this.save.levelBest.length <= index) this.save.levelBest.push(0);
+    while (this.save.levelTime.length <= index) this.save.levelTime.push(0);
     this.save.levelStars[index] = Math.max(prevStars, stars);
     this.save.levelBest[index] = Math.max(prevBest, honey);
+    if (seconds !== null && (prevTime === 0 || seconds < prevTime)) {
+      this.save.levelTime[index] = seconds;
+    }
 
     // A world is complete the first time all ten of its levels are passed.
     const first = level.world * LEVELS_PER_WORLD;
@@ -519,17 +629,18 @@ export class GameScene extends BaseGameplayScene {
     if (stars > prevStars || celebrateWorld) this.context.portal.happyTime();
     this.tutorial.dismiss();
     this.tutorialText.setText('');
+    this.hintGfx.clear();
     this.persist();
     this.hud.setVisible(false);
 
     const data: LevelDoneData = {
       level,
       honey,
-      bonus,
       stars,
       prevStars,
-      prevBest,
-      bestCombo: this.field.bestCombo,
+      seconds,
+      prevTime,
+      why,
       worldComplete: celebrateWorld ? level.world : null,
       treasure,
       foundHoney: Math.round(this.field.foundHoney),
@@ -564,7 +675,7 @@ export class GameScene extends BaseGameplayScene {
    * pause, and the result screens have their own way out.
    */
   private openPause(): void {
-    if (this.phase !== 'playing' || this.externallyPaused) return;
+    if ((this.phase !== 'playing' && this.phase !== 'intro') || this.externallyPaused) return;
     if (!this.scene.isActive() || this.scene.isActive('Pause')) return;
     this.cancelDrag();
     this.sfx.stopHumOnly();
@@ -592,7 +703,7 @@ export class GameScene extends BaseGameplayScene {
     this.scene.stop('Pause');
     this.scene.resume();
     this.sfx.startHum();
-    this.startGameplay();
+    if (this.phase === 'playing') this.startGameplay();
   }
 
   /** Leaves the board: the map in the campaign, the menu otherwise. */
@@ -633,7 +744,7 @@ export class GameScene extends BaseGameplayScene {
   private endDay(cleared: boolean): void {
     if (this.phase === 'ended') return;
     if (this.level) {
-      this.endLevel(this.level, cleared);
+      this.endLevel(this.level, 'filled');
       return;
     }
     this.phase = 'ended';
@@ -744,6 +855,11 @@ export class GameScene extends BaseGameplayScene {
    */
   private bindInput(): void {
     this.input.on(Phaser.Input.Events.POINTER_DOWN, (p: Phaser.Input.Pointer) => {
+      if (this.phase === 'intro' && !this.externallyPaused) {
+        this.dismissGoalCard();
+        this.swattedThisGesture = true; // the touch that closed the card does nothing else
+        return;
+      }
       if (this.phase !== 'playing' || this.externallyPaused) return;
 
       this.pressX = p.worldX;
@@ -769,6 +885,16 @@ export class GameScene extends BaseGameplayScene {
 
       // A press on a line might be an erase, if the finger stays put.
       this.eraseCandidate = this.field.routeNear(p.worldX, p.worldY);
+    });
+
+    // A drag that starts away from the hive does nothing — so say why, and
+    // where to start instead, rather than leaving the player to guess.
+    this.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
+      if (this.phase !== 'playing' || !p.isDown || this.dragStart || this.eraseCandidate)
+        return;
+      if (this.swattedThisGesture || this.erasedThisGesture) return;
+      if (Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY) < TAP_SLOP * 1.5) return;
+      this.nudge('Lines start at the hive — drag from there', this.pressX, this.pressY);
     });
 
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
@@ -811,7 +937,12 @@ export class GameScene extends BaseGameplayScene {
 
       // A tap never lays a line: lines are drawn from the hive, by hand.
       // A tap on the board points back at where they start.
-      if (moved <= TAP_SLOP) this.fieldRenderer.pingHive();
+      if (moved <= TAP_SLOP) {
+        this.fieldRenderer.pingHive();
+        if (this.field.nearestPatchTo(p.worldX, p.worldY, 70, true)) {
+          this.nudge('Drag from the hive to this flower', p.worldX, p.worldY);
+        }
+      }
     });
 
     // A pointer leaving the canvas mid-drag should not strand the preview.
@@ -823,10 +954,33 @@ export class GameScene extends BaseGameplayScene {
   }
 
   private layLine(plan: LinePlan): void {
+    const full = !plan.start.route && this.field.routes.length >= this.field.stats.routeSlots;
     const route = this.field.commitLine(plan);
-    if (!route) return;
+    if (!route) {
+      this.nudge('Too short — drag further', plan.start.x, plan.start.y);
+      return;
+    }
+    if (full) {
+      this.nudge(
+        `You have ${this.field.stats.routeSlots} lines — your weakest one moved here`,
+        route.tipX,
+        route.tipY,
+      );
+    }
     this.routesDrawn += 1;
+    if (this.level && !this.clockStarted) this.clockStarted = true;
     this.sfx.playVaried('draw', plan.target ? 0.34 : 0.22, plan.target ? 90 : 260);
+  }
+
+  /**
+   * A short explanation where the player just touched, at most every couple
+   * of seconds — the answer to a gesture that did not do what they meant.
+   */
+  private nudge(text: string, x: number, y: number): void {
+    if (this.field.time - this.lastNudgeAt < 2.2) return;
+    this.lastNudgeAt = this.field.time;
+    this.floatText(x, y - 40, text, '#fff4d6', 20);
+    this.fieldRenderer.pingHive();
   }
 
   private cancelDrag(): void {
@@ -885,11 +1039,38 @@ export class GameScene extends BaseGameplayScene {
     this.updateEraseHold(dt);
     this.field.step(dt);
 
+    const level = this.level;
+    if (level) {
+      if (this.clockStarted) {
+        this.levelClock += dt;
+        if (level.timed) this.secondsLeft = Math.max(0, this.secondsLeft - dt);
+      }
+      if (this.field.honey >= level.goal) {
+        this.jarFull();
+      } else if (level.timed && this.clockStarted && this.secondsLeft <= 0) {
+        this.endLevel(level, 'sunset');
+      } else if (this.field.exhausted) {
+        this.endLevel(level, 'empty');
+      }
+      return;
+    }
+
     this.secondsLeft -= dt;
     if (this.secondsLeft <= 0) {
       this.secondsLeft = 0;
       this.endDay(false);
     }
+  }
+
+  /** The jar is full: the level is won, this instant. */
+  private jarFull(): void {
+    this.filledAt = this.levelClock;
+    this.phase = 'clearing';
+    this.clearTimer = CLEAR_PAUSE;
+    this.cancelDrag();
+    this.hud.showBanner('The jar is full!', '#ffe38a');
+    this.sfx.play('fanfare', 0.55);
+    this.cameras.main.flash(260, 255, 230, 150);
   }
 
   protected override renderUpdate(alpha: number): void {
@@ -904,6 +1085,12 @@ export class GameScene extends BaseGameplayScene {
 
   override update(time: number, delta: number): void {
     super.update(time, delta);
+    // The board is drawn under the goal card, though nothing on it moves yet.
+    if (this.phase === 'intro') {
+      this.renderUpdate(1);
+      this.tutorialText.setVisible(false);
+      this.hud.setLines(this.field.routes.length, this.field.stats.routeSlots);
+    }
 
     const seconds = delta / 1000;
     this.juice.update(seconds);
@@ -917,12 +1104,18 @@ export class GameScene extends BaseGameplayScene {
         this.sfx.playVaried('buzz', 0.1, 260);
       }
 
-      this.tutorial.update({
-        routesDrawn: this.routesDrawn,
-        honey: this.field.honey,
-        lines: this.field.routes.length,
-      });
-      this.tutorialText.setText(this.tutorial.current?.text ?? '');
+      if (this.level) {
+        this.lesson.update(this.lessonState());
+        this.tutorialText.setText(this.phase === 'playing' ? this.lesson.text : '');
+      } else {
+        this.tutorial.update({
+          routesDrawn: this.routesDrawn,
+          honey: this.field.honey,
+          lines: this.field.routes.length,
+        });
+        this.tutorialText.setText(this.tutorial.current?.text ?? '');
+      }
+      this.tutorialText.setVisible(this.tutorialText.text !== '');
 
       const slots = this.field.stats.routeSlots;
       this.hud.setLines(this.field.routes.length, slots);
@@ -940,6 +1133,31 @@ export class GameScene extends BaseGameplayScene {
         seconds,
       );
     }
+  }
+
+  /** What the lesson needs to know about the board. */
+  private lessonState(): LessonState {
+    const golden = this.field.patches.find((p) => p.kind === 'night' && p.alive);
+    let connected = 0;
+    let goldenServed = false;
+    for (const r of this.field.routes) {
+      if (r.dead || !r.target || !r.reachesTarget()) continue;
+      connected += 1;
+      if (r.target === golden) goldenServed = true;
+    }
+    return {
+      time: this.field.time,
+      routesDrawn: this.routesDrawn,
+      lines: this.field.routes.length,
+      honey: this.field.honey,
+      drained: this.lessonDrained,
+      wasps: this.field.wasps.length,
+      waspsDowned: this.field.waspsDowned,
+      discovered: this.field.knownPatches.length,
+      golden: golden !== undefined,
+      goldenServed,
+      connected,
+    };
   }
 
   /** Turns simulation events into sound and particles, once per frame. */
@@ -1072,6 +1290,7 @@ export class GameScene extends BaseGameplayScene {
       if (spot.connected) this.sfx.playVaried('pop', 0.35, 150);
     }
 
+    this.lessonDrained += events.drained.length;
     for (const spot of events.drained) {
       for (let i = 0; i < 8; i += 1) this.juice.collect(spot.x, spot.y, 3);
       this.floatText(spot.x, spot.y - 50, 'all gathered!', '#fff4d6', 18);
@@ -1100,7 +1319,7 @@ export class GameScene extends BaseGameplayScene {
       this.sfx.playVaried('deposit', 0.3, 80);
     }
 
-    if (events.cleared && this.phase === 'playing') {
+    if (events.cleared && this.phase === 'playing' && !this.level) {
       this.phase = 'clearing';
       this.clearTimer = CLEAR_PAUSE;
       this.cancelDrag();
@@ -1305,47 +1524,105 @@ export class GameScene extends BaseGameplayScene {
   }
 
   /**
-   * The tutorial hand: a finger that drags from the hive to the best nearby
-   * flower, over and over, until the player does it themselves.
+   * The teaching hand: a finger that shows the move — a drag from the hive to
+   * a flower, around a hedge, into the mist, or a tap on a wasp — over and
+   * over until the player does it themselves.
    */
   private drawHint(): void {
     const g = this.hintGfx;
     g.clear();
+    if (this.phase !== 'playing' || this.dragStart) return;
 
-    if (!this.tutorial.wantsHintLine || this.phase !== 'playing' || this.dragStart)
+    const move = this.hintMove();
+    if (!move) return;
+
+    if (move.tap) {
+      // A finger that presses down on the target, with a ring where it lands.
+      const cycle = (this.field.time * 1.4) % 1;
+      const pressed = cycle > 0.4 && cycle < 0.7;
+      g.lineStyle(4, 0xfff4d6, 0.9 * (1 - cycle));
+      g.strokeCircle(move.to.x, move.to.y, 30 + cycle * 30);
+      this.finger(g, move.to.x + 6, move.to.y + 10, pressed, 1);
       return;
-    const served = new Set(this.field.routes.map((r) => r.target));
-    const patch = this.field.knownPatches
-      .filter((p) => !served.has(p))
-      .sort(
-        (a, b) =>
-          Math.hypot(a.x - this.field.hiveX, a.y - this.field.hiveY) -
-          Math.hypot(b.x - this.field.hiveX, b.y - this.field.hiveY),
-      )[0];
-    if (!patch) return;
+    }
 
+    const from = move.from;
+    const to = move.to;
     const cycle = (this.field.time * 0.55) % 1;
-    // Rest at the hive, glide to the flower, rest there, fade.
+    // Rest at the start, glide to the end, rest there, fade.
     const t = Math.min(1, Math.max(0, (cycle - 0.15) / 0.55));
     const ease = t * t * (3 - 2 * t);
-    const fx = this.field.hiveX + (patch.x - this.field.hiveX) * ease;
-    const fy = this.field.hiveY + (patch.y - this.field.hiveY) * ease;
+    const fx = from.x + (to.x - from.x) * ease;
+    const fy = from.y + (to.y - from.y) * ease;
     const alpha = cycle > 0.85 ? (1 - cycle) / 0.15 : 1;
 
     g.lineStyle(6, 0xffffff, 0.55 * alpha);
     g.beginPath();
-    g.moveTo(this.field.hiveX, this.field.hiveY);
+    g.moveTo(from.x, from.y);
     g.lineTo(fx, fy);
     g.strokePath();
+    // Where it is headed, ringed, so the goal of the gesture is plain too.
+    g.lineStyle(4, 0xfff4d6, 0.6 * alpha);
+    g.strokeCircle(to.x, to.y, 34);
+    this.finger(g, fx, fy, t > 0 && t < 1, alpha);
+  }
 
-    // The finger: a pale disc with a dark rim, pressed a little while dragging.
-    const pressed = t > 0 && t < 1;
+  private finger(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    pressed: boolean,
+    alpha: number,
+  ): void {
+    const r = pressed ? 17 : 20;
     g.fillStyle(0x000000, 0.25 * alpha);
-    g.fillCircle(fx + 4, fy + 6, 20);
+    g.fillCircle(x + 4, y + 6, 20);
     g.fillStyle(0xfff4d6, 0.95 * alpha);
-    g.fillCircle(fx, fy, pressed ? 17 : 20);
+    g.fillCircle(x, y, r);
     g.lineStyle(3, 0x2a1d08, 0.9 * alpha);
-    g.strokeCircle(fx, fy, pressed ? 17 : 20);
+    g.strokeCircle(x, y, r);
+  }
+
+  /** The move the hand should show right now, or null for none. */
+  private hintMove(): {
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+    tap?: boolean;
+  } | null {
+    const hive = { x: this.field.hiveX, y: this.field.hiveY };
+    const hint = this.level
+      ? this.lesson.hint
+      : this.tutorial.wantsHintLine
+        ? ({ kind: 'drag-to-flower' } as const)
+        : null;
+    if (!hint) return null;
+
+    switch (hint.kind) {
+      case 'drag-to-flower': {
+        const served = new Set(this.field.routes.map((r) => r.target));
+        const patch = this.field.knownPatches
+          .filter((p) => !served.has(p) && p.alive && p.kind !== 'night')
+          .sort(
+            (a, b) =>
+              Math.hypot(a.x - hive.x, a.y - hive.y) - Math.hypot(b.x - hive.x, b.y - hive.y),
+          )[0];
+        return patch ? { from: hive, to: patch } : null;
+      }
+      case 'drag-to':
+        return { from: hive, to: hint };
+      case 'drag-from-tip': {
+        const route = this.field.routes[this.field.routes.length - 1];
+        return route ? { from: { x: route.tipX, y: route.tipY }, to: hint } : null;
+      }
+      case 'tap-wasp': {
+        const wasp = this.field.wasps[0];
+        return wasp ? { from: wasp, to: wasp, tap: true } : null;
+      }
+      case 'drag-to-golden': {
+        const bloom = this.field.patches.find((p) => p.kind === 'night' && p.alive);
+        return bloom ? { from: hive, to: bloom } : null;
+      }
+    }
   }
 
   /** Exposed for the automated harness, in dev and `local` builds only. */

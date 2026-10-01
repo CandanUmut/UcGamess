@@ -10,7 +10,7 @@ import {
 import { COLORS } from '../config/tuning.ts';
 import { GAME_TITLE } from '../config/title.ts';
 import { Button } from '../ui/Button.ts';
-import { LEVELS, isUnlocked, totalStars } from '../game/Levels.ts';
+import { LEVELS, endlessOpen, hiveOpen, isUnlocked, totalStars } from '../game/Levels.ts';
 import { ACHIEVEMENTS } from '../game/Achievements.ts';
 import {
   coerceSave,
@@ -151,15 +151,10 @@ export class MenuScene extends BaseScene {
     this.context.audio.hydrate(this.context.save.get(AudioManager.saveKey, false));
     this.save = coerceSave(this.context.save.get<unknown>(SAVE_KEY, null));
 
-    // A brand-new player lands straight in the first level. CrazyGames asks
-    // for new users to be in gameplay immediately (one click at most), and
-    // the first level *is* the tutorial — the menu can wait until they have
-    // something to come back to.
-    if (this.isFirstVisit()) {
-      this.scene.start('Game', { mode: 'level', level: 1 });
-      return;
-    }
-
+    // A brand-new player sees the title and one button, so the first click is
+    // into gameplay (CrazyGames asks for at most one) while the game still
+    // gets to say what it is. Landing cold on a board with no title read to
+    // testers as a game that had skipped its own start.
     this.layoutMenu();
     this.ready = true;
   }
@@ -212,7 +207,7 @@ export class MenuScene extends BaseScene {
     });
 
     this.add
-      .text(cx, 214, 'Drag lines from the hive. Feed the swarm.', {
+      .text(cx, 214, 'Drag lines from the hive. Fill the jar with honey.', {
         fontFamily: FONT,
         fontSize: '24px',
         fontStyle: 'bold',
@@ -225,6 +220,24 @@ export class MenuScene extends BaseScene {
     const resuming = this.save.day > 1;
     const stars = totalStars(this.save.levelStars);
     const next = this.nextLevel();
+    const first = this.isFirstVisit();
+    // The rest of the menu appears as it is earned: a first-timer sees one
+    // button, and each new one later is something to have unlocked.
+    const hive = hiveOpen(this.save.levelStars);
+    const endless = endlessOpen(this.save.levelStars) || this.save.bestRunDay > 0;
+
+    if (first) {
+      new Button(this, {
+        x: cx,
+        y: 330,
+        width: 420,
+        label: '▶  Play',
+        tint: 0x3aa860,
+        big: true,
+        onClick: () => this.scene.start('Game', { mode: 'level', level: 1 }),
+      }).pulse();
+      return;
+    }
 
     // Two ways to play, and the campaign is the one the screen is about: it is
     // the one with an end, and the one a first-timer should meet first.
@@ -255,6 +268,7 @@ export class MenuScene extends BaseScene {
     });
 
     // Where honey goes: the hive's skills.
+    if (hive) {
     new Button(this, {
       x: cx - 345,
       y: 300,
@@ -273,6 +287,27 @@ export class MenuScene extends BaseScene {
       tint: 0x7a5aa8,
       onClick: () => this.scene.start('Awards'),
     });
+    }
+
+    if (!endless) {
+      this.add
+        .text(
+          cx,
+          410,
+          hive
+            ? 'Finish the Spring Meadow to open Endless mode'
+            : 'Pass level 1-5 to open the Hive shop',
+          {
+            fontFamily: FONT,
+            fontSize: '20px',
+            color: '#fff4d6',
+            stroke: '#2a1d08',
+            strokeThickness: 5,
+          },
+        )
+        .setOrigin(0.5);
+      return;
+    }
 
     const best =
       this.save.bestScore > 0

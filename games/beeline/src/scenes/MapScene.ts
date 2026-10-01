@@ -5,6 +5,7 @@ import {
   LEVELS,
   LEVELS_PER_WORLD,
   WORLDS,
+  hiveOpen,
   isUnlocked,
   totalStars,
   type LevelDef,
@@ -100,15 +101,17 @@ export class MapScene extends BaseScene {
       tint: 0x8a6a3a,
       onClick: () => this.scene.start('Menu'),
     }).setDepth(20);
-    new Button(this, {
-      x: view.right - 130,
-      y: view.y + 44,
-      width: 210,
-      label: 'Hive',
-      sublabel: `${Math.floor(this.save.honeyBank).toLocaleString('en-US')} honey`,
-      tint: 0xb07a1e,
-      onClick: () => this.scene.start('Hive', { back: 'Map', world: this.world }),
-    }).setDepth(20);
+    if (hiveOpen(this.save.levelStars)) {
+      new Button(this, {
+        x: view.right - 130,
+        y: view.y + 44,
+        width: 210,
+        label: 'Hive',
+        sublabel: `${Math.floor(this.save.honeyBank).toLocaleString('en-US')} honey`,
+        tint: 0xb07a1e,
+        onClick: () => this.scene.start('Hive', { back: 'Map', world: this.world }),
+      }).setDepth(20);
+    }
 
     this.spawnBees();
     this.draw();
@@ -304,7 +307,7 @@ export class MapScene extends BaseScene {
       // Stars under the number, or a lock.
       if (unlocked) {
         for (let s = 0; s < 3; s += 1) {
-          star(g, x + (s - 1) * 22, y + 26, 9, s < earned ? 0xfff7d6 : 0x2a1d08);
+          star(g, x + (s - 1) * 22, y + 26, 9, s < earned ? 0xffd84a : 0x5a4a30);
         }
       } else {
         g.fillStyle(0x8a7a5a, 1);

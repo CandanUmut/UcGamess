@@ -59,6 +59,24 @@ export class Hud {
   onPause: (() => void) | null = null;
   private starPops: number[] = [0, 0, 0];
 
+  // --- level mode: the jar ---------------------------------------------
+  /** Set by `updateLevel`; the endless HUD is the default. */
+  private levelMode = false;
+  private jar: JarView = {
+    goal: 1,
+    clock: 0,
+    starTimes: [20, 35],
+    timed: false,
+    started: false,
+  };
+  /** Stars still on offer for speed: 3, 2 or 1. */
+  private starsKept = 3;
+  private starDrops: number[] = [0, 0, 0];
+  private readonly jarText: Phaser.GameObjects.Text;
+  private readonly starClockText: Phaser.GameObjects.Text;
+  /** Called with the star (2 or 3) the moment it is lost to the clock. */
+  onStarLost: ((star: number) => void) | null = null;
+
   constructor(scene: Phaser.Scene, depth: number) {
     this.scene = scene;
     this.root = scene.add.container(0, 0).setDepth(depth);
@@ -92,6 +110,8 @@ export class Hud {
     this.linesText = text(17, '#fff4d6', true).setOrigin(0, 0.5);
     this.idleText = text(17, '#ffd466', true).setOrigin(0, 0.5);
     this.alertText = text(22, '#ff8a70', true).setOrigin(0.5, 0.5).setAlpha(0);
+    this.jarText = text(30, '#fff4d6', true).setOrigin(0.5, 0.5);
+    this.starClockText = text(17, '#fff4d6', true).setOrigin(0, 0.5);
     this.banner = text(28, '#fff4d6', true)
       .setOrigin(0.5)
       .setAlign('center')
@@ -114,6 +134,8 @@ export class Hud {
       this.linesText,
       this.idleText,
       this.alertText,
+      this.jarText,
+      this.starClockText,
       this.banner,
     ]);
   }
@@ -138,6 +160,166 @@ export class Hud {
     this.idleText.setPosition(safe.x + 30, top + 80);
     this.alertText.setPosition(safe.centerX, top + 86);
     this.banner.setPosition(safe.centerX, safe.y + 236);
+    this.jarText.setPosition(safe.centerX + 24, top - 6);
+    this.starClockText.setPosition(safe.centerX + 30, top + 34);
+  }
+
+  /**
+   * The campaign HUD: one jar to fill, and three stars that each stay lit
+   * only while the jar could still be filled in time for them.
+   *
+   * Replaces the endless HUD's bar, multiplier badge and "next star" line.
+   * Every number on it answers one question — how full, how fast — so a
+   * player new to the game can read the whole of it at a glance.
+   */
+  updateLevel(label: string, honey: number, view: JarView, deltaSeconds: number): void {
+    if (!this.levelMode) this.setLevelMode(true);
+    this.dayText.setText(label);
+    this.jar = view;
+    this.quota = Math.max(1, view.goal);
+
+    if (honey > this.target + 0.5) this.punch(this.jarText, 1.1);
+    this.target = honey;
+    const k = Math.min(1, deltaSeconds * 9);
+    this.shown += (this.target - this.shown) * k;
+    if (Math.abs(this.target - this.shown) < 0.5) this.shown = this.target;
+    const shown = Math.min(view.goal, Math.floor(this.shown));
+    this.jarText.setText(`${shown} / ${view.goal}`);
+    this.jarText.setColor(shown >= view.goal ? '#a8f0b4' : '#ffd466');
+    const left = this.safe.centerX - this.barWidth / 2;
+    this.starClockText.setPosition(left + 140, this.safe.y + 68);
+
+    // Stars go out as their time passes.
+    const [three, two] = view.starTimes;
+    const kept = view.clock > two ? 1 : view.clock > three ? 2 : 3;
+    for (let s = this.starsKept; s > kept; s -= 1) {
+      this.starDrops[s - 1] = 1;
+      this.onStarLost?.(s);
+    }
+    this.starsKept = kept;
+    for (let i = 0; i < 3; i += 1) {
+      this.starDrops[i] = Math.max(0, (this.starDrops[i] ?? 0) - deltaSeconds * 2);
+    }
+
+    const next = kept === 3 ? three : kept === 2 ? two : 0;
+    this.starClockText.setText(
+      !view.started
+        ? 'Stars for speed — the clock starts with your first line'
+        : next > 0
+          ? `${Math.max(0, Math.ceil(next - view.clock))}s left for ${kept} stars`
+          : 'Fill the jar for a star',
+    );
+    this.starClockText.setColor(
+      view.started && next > 0 && next - view.clock <= 5 ? '#ffb09c' : '#e9dcc0',
+    );
+
+    this.secondsLeft = view.secondsLeft ?? 0;
+    this.dayFraction =
+      view.timed && view.daySeconds ? Math.max(0, this.secondsLeft / view.daySeconds) : 1;
+    const seconds = Math.max(0, Math.ceil(this.secondsLeft));
+    this.timerText.setVisible(view.timed).setText(String(seconds));
+    this.timerText.setColor(seconds <= 10 ? '#ff8a70' : '#fff4d6');
+
+    this.drawLevel();
+  }
+
+  private setLevelMode(on: boolean): void {
+    this.levelMode = on;
+    this.honeyText.setVisible(!on);
+    this.quotaText.setVisible(!on);
+    this.comboText.setVisible(!on);
+    this.idleText.setVisible(!on);
+    this.dropIcon?.setVisible(!on);
+    this.jarText.setVisible(on);
+    this.starClockText.setVisible(on);
+    this.timerText.setVisible(true);
+  }
+
+  /** The jar, its stars, the lines in hand and — on a timed board — the sun. */
+  private drawLevel(): void {
+    const g = this.gfx;
+    g.clear();
+    const { x, y, right, centerX } = this.safe;
+    const top = y + 34;
+
+    plate(g, x + 14, top - 24, Math.max(150, this.dayText.displayWidth + 34), 48);
+    plate(g, x + 14, top + 30, 96 + this.lines.owned * 24, 40);
+    for (let i = 0; i < this.lines.owned; i += 1) {
+      const cx = x + 100 + i * 24;
+      const cy = top + 50;
+      const used = i < this.lines.used;
+      g.fillStyle(used ? HONEY : 0x000000, used ? 1 : 0.35);
+      g.fillCircle(cx, cy, 8);
+      g.lineStyle(2, HONEY, 0.9);
+      g.strokeCircle(cx, cy, 8);
+    }
+
+    // The jar: a plate with a honey level that rises to the brim.
+    const w = this.barWidth;
+    const left = centerX - w / 2;
+    plate(g, left - 20, top - 30, w + 40, 96);
+    const fill = Math.min(1, this.shown / Math.max(1, this.jar.goal));
+    const barY = top - 26;
+    const barH = 40;
+    g.fillStyle(0x000000, 0.35);
+    g.fillRoundedRect(left + 34, barY + 4, w - 40, barH - 8, 14);
+    if (fill > 0) {
+      g.fillStyle(fill >= 1 ? GOOD : HONEY, 1);
+      g.fillRoundedRect(
+        left + 34,
+        barY + 4,
+        Math.max(28, (w - 40) * fill),
+        barH - 8,
+        14,
+      );
+      // A highlight along the top, so it reads as honey rather than a bar.
+      g.fillStyle(0xffffff, 0.22);
+      g.fillRoundedRect(left + 40, barY + 8, Math.max(16, (w - 52) * fill), 6, 3);
+    }
+    this.jarGlyph(g, left + 8, top - 6, fill);
+
+    // Stars for speed, each lit while it can still be had.
+    for (let i = 0; i < 3; i += 1) {
+      const lit = i < this.starsKept;
+      const drop = this.starDrops[i] ?? 0;
+      star(
+        g,
+        left + 60 + i * 28,
+        top + 34 + drop * 10,
+        11 * (1 + drop * 0.5),
+        lit ? STAR_ON : STAR_OFF,
+      );
+    }
+
+    if (!this.jar.timed) return;
+    const sx = right - 52;
+    const sy = top + 2;
+    g.fillStyle(PLATE, PLATE_ALPHA);
+    g.fillCircle(sx, sy, 34);
+    g.lineStyle(6, 0x000000, 0.35);
+    g.strokeCircle(sx, sy, 26);
+    const low = this.secondsLeft <= 10;
+    g.lineStyle(6, low ? 0xff7043 : 0xffc94a, 1);
+    g.beginPath();
+    g.arc(sx, sy, 26, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * this.dayFraction, false);
+    g.strokePath();
+  }
+
+  /** A little honey jar, filled to `fill`. */
+  private jarGlyph(g: Phaser.GameObjects.Graphics, cx: number, cy: number, fill: number): void {
+    const w = 34;
+    const h = 40;
+    g.fillStyle(0xfff4d6, 0.25);
+    g.fillRoundedRect(cx - w / 2, cy - h / 2 + 6, w, h - 6, 8);
+    if (fill > 0) {
+      const fh = (h - 10) * fill;
+      g.fillStyle(fill >= 1 ? GOOD : HONEY, 1);
+      g.fillRoundedRect(cx - w / 2 + 3, cy + h / 2 - 3 - fh, w - 6, fh, 6);
+    }
+    g.lineStyle(3, 0xfff4d6, 0.9);
+    g.strokeRoundedRect(cx - w / 2, cy - h / 2 + 6, w, h - 6, 8);
+    g.fillStyle(0xc98a2b, 1);
+    g.fillRoundedRect(cx - w / 2 - 3, cy - h / 2, w + 6, 9, 3);
   }
 
   /** Called every frame with the day's numbers. */
@@ -301,6 +483,9 @@ export class Hud {
 
   /** Where a flying drop of honey should land, in screen space. */
   get honeyAnchor(): { x: number; y: number } {
+    if (this.levelMode) {
+      return { x: this.safe.centerX - this.barWidth / 2 + 8, y: this.safe.y + 28 };
+    }
     const target = this.dropIcon ?? this.honeyText;
     return { x: target.x, y: target.y };
   }
@@ -343,6 +528,10 @@ export class Hud {
 
   /** A drop just landed in the counter. */
   catchDrop(): void {
+    if (this.levelMode) {
+      this.punch(this.jarText, 1.08);
+      return;
+    }
     if (!this.dropIcon) return;
     this.scene.tweens.killTweensOf(this.dropIcon);
     this.dropIcon.setDisplaySize(40, 40);
@@ -401,6 +590,10 @@ export class Hud {
 
   resetDay(): void {
     this.comboPulse = 0;
+    this.starsKept = 3;
+    this.starDrops = [0, 0, 0];
+    this.jarText.setScale(1);
+    if (this.levelMode) this.setLevelMode(false);
     this.shown = 0;
     this.target = 0;
     this.starsLit = 0;
@@ -419,6 +612,18 @@ export class Hud {
   destroy(): void {
     this.root.destroy(true);
   }
+}
+
+export interface JarView {
+  goal: number;
+  /** Seconds since the first line, on the clock that awards the stars. */
+  clock: number;
+  starTimes: readonly [three: number, two: number];
+  timed: boolean;
+  /** False until the first line: the clock has not started. */
+  started: boolean;
+  secondsLeft?: number;
+  daySeconds?: number;
 }
 
 export interface ComboView {

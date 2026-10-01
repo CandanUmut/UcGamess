@@ -373,6 +373,7 @@ export interface TreasureTuning {
 }
 
 export interface ComboTuning {
+  enabled: boolean;
   /** Highest multiplier. */
   max: number;
   /** Multiplier gained per second of a fully busy hive. */
@@ -926,7 +927,7 @@ export const TUNING: Tuning = {
     firstAt: 9,
     minGap: 14,
     maxGap: 24,
-    window: 7,
+    window: 10,
     poolShare: 0.5,
   },
 
@@ -952,6 +953,7 @@ export const TUNING: Tuning = {
   },
 
   combo: {
+    enabled: false,
     max: 5,
     // About eight seconds a tier: x5 is twenty-five seconds of never letting a
     // bee wait, which is most of a day and exactly what an expert does.

@@ -4,6 +4,7 @@ import {
   LEVELS,
   LEVELS_PER_WORLD,
   WORLDS,
+  hiveOpen,
   isUnlocked,
   totalStars,
   type LevelDef,
@@ -20,14 +21,17 @@ const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export interface LevelDoneData {
   level: LevelDef;
+  /** Honey brought home — all of it goes to the bank. */
   honey: number;
-  /** The part of `honey` that was the sunset bonus. */
-  bonus: number;
   stars: number;
-  /** Stars and best honey before this attempt, for "new star" and "new best". */
+  /** Stars before this attempt, for "new star". */
   prevStars: number;
-  prevBest: number;
-  bestCombo: number;
+  /** Seconds the jar took to fill, or null if it did not. */
+  seconds: number | null;
+  /** Best fill time before this attempt; 0 for none. */
+  prevTime: number;
+  /** How it ended. */
+  why: 'filled' | 'sunset' | 'empty';
   /** A world finished for the first time by this level, or null. */
   worldComplete: number | null;
   sfx: Sfx;
@@ -82,7 +86,7 @@ export class LevelDoneScene extends BaseScene {
       .setAlpha(0);
     this.tweens.add({ targets: shade, alpha: 1, duration: 200 });
 
-    const { level, stars, honey, bonus, prevBest, prevStars, bestCombo } = this.done;
+    const { level, stars, honey, prevStars, seconds, prevTime, why } = this.done;
     const cx = DESIGN_WIDTH / 2;
     const passed = stars > 0;
 
@@ -94,7 +98,7 @@ export class LevelDoneScene extends BaseScene {
       '#c9b98f',
     );
     const title = this.text(
-      passed ? (stars === 3 ? 'Perfect!' : 'Level complete!') : 'Not quite!',
+      passed ? (stars === 3 ? 'Perfect!' : 'Jar filled!') : 'Not quite!',
       cx,
       104,
       50,
@@ -115,72 +119,85 @@ export class LevelDoneScene extends BaseScene {
       );
     }
 
-    // The honey, counting up.
-    const count = this.text('0', cx, 300, 44, '#ffd466', true);
-    const tally = { value: 0 };
-    this.tweens.add({
-      targets: tally,
-      value: honey,
-      delay: 250,
-      duration: 900,
-      ease: 'Cubic.easeOut',
-      onUpdate: () =>
-        count.setText(`${Math.floor(tally.value).toLocaleString('en-US')} honey`),
-    });
-
-    const details: string[] = [];
-    if (bonus > 0) details.push(`+${bonus} sunset bonus`);
-    if (bestCombo > 1) details.push(`best multiplier x${bestCombo}`);
-    if (details.length > 0) this.text(details.join('   ·   '), cx, 342, 18, '#e9dcc0');
-
-    // What the next star needs, so a replay has a number to aim at.
-    const [one, two, three] = level.stars;
-    const next = stars === 0 ? one : stars === 1 ? two : stars === 2 ? three : 0;
-    if (next > 0) {
+    // The headline number: how fast, or how close.
+    if (passed && seconds !== null) {
+      const clock = this.text('0s', cx, 300, 44, '#ffd466', true);
+      const tally = { value: 0 };
+      this.tweens.add({
+        targets: tally,
+        value: seconds,
+        delay: 250,
+        duration: 700,
+        ease: 'Cubic.easeOut',
+        onUpdate: () => clock.setText(`Filled in ${Math.round(tally.value)}s`),
+      });
+    } else {
       this.text(
-        `${stars + 1} star${stars + 1 > 1 ? 's' : ''} at ${next.toLocaleString('en-US')} honey`,
+        `${honey} / ${level.goal} honey`,
         cx,
-        372,
-        18,
-        '#c9b98f',
+        290,
+        40,
+        '#ffd466',
+        true,
+      );
+      this.text(
+        why === 'sunset'
+          ? 'The sun set before the jar was full.'
+          : 'Every flower ran dry before the jar was full.',
+        cx,
+        334,
+        22,
+        '#fff4d6',
       );
     }
 
-    if (prevBest > 0 && honey > prevBest)
+    // What to do differently: the next star's time, or a tip for a miss.
+    const [three, two] = level.starTimes;
+    const hint = passed
+      ? stars === 3
+        ? prevTime > 0 && seconds !== null && seconds < prevTime
+          ? `New best! ${prevTime}s → ${seconds}s`
+          : 'Every star there is.'
+        : `${stars + 1} stars: fill it in ${stars === 1 ? two : three}s or less`
+      : tipFor(level, why);
+    this.text(hint, cx, passed ? 346 : 372, 20, '#c9b98f');
+    this.text(`+${honey.toLocaleString('en-US')} honey to the hive`, cx, 404, 18, '#e9dcc0');
+
+    if (prevTime > 0 && seconds !== null && seconds < prevTime && stars < 3)
       this.time.delayedCall(1400, () => this.stamp('NEW BEST!'));
     else if (stars > prevStars && prevStars > 0)
       this.time.delayedCall(1400, () => this.stamp('NEW STAR!'));
 
     if (passed) this.time.delayedCall(450 + stars * 380, () => this.confetti(stars * 30));
 
-    // What the mist gave up, and where the honey went.
-    const { treasure, foundHoney, bank } = this.done;
+    const { treasure, bank } = this.done;
     if (treasure.total > 0) {
       const all = treasure.found >= treasure.total;
       this.text(
-        `Treasures ${treasure.found}/${treasure.total}` +
-          (foundHoney > 0
-            ? `   ·   +${foundHoney.toLocaleString('en-US')} from exploring`
-            : '') +
-          (all ? '   ·   all found!' : ''),
+        all ? 'You found the Royal Bloom!' : 'A Royal Bloom was hiding in the mist…',
         cx,
-        404,
+        430,
         18,
-        all ? '#b8f0a0' : '#e6c8ff',
+        all ? '#e6c8ff' : '#c9b98f',
       );
     }
 
     this.buildButtons(passed);
 
-    new Button(this, {
-      x: cx,
-      y: 565,
-      width: 380,
-      label: 'Upgrade the hive',
-      sublabel: `${bank.toLocaleString('en-US')} honey in the bank`,
-      tint: 0xb07a1e,
-      onClick: () => void this.leave('hive'),
-    });
+    // The shop opens partway through the first world; before that it would
+    // be a page of skills for a game the player has not learned yet.
+    const save = coerceSave(this.context.save.get<unknown>(SAVE_KEY, null));
+    if (hiveOpen(save.levelStars)) {
+      new Button(this, {
+        x: cx,
+        y: 565,
+        width: 380,
+        label: 'Upgrade the hive',
+        sublabel: `${bank.toLocaleString('en-US')} honey to spend`,
+        tint: 0xb07a1e,
+        onClick: () => void this.leave('hive'),
+      });
+    }
 
     showAchievements(this, this.done.achievements, 2600, () =>
       this.done.sfx.play('fanfare', 0.35),
@@ -410,4 +427,16 @@ export class LevelDoneScene extends BaseScene {
       })
       .setOrigin(0.5);
   }
+}
+
+/** One concrete thing to try after a miss, tuned to what the board is about. */
+function tipFor(level: LevelDef, why: 'filled' | 'sunset' | 'empty'): string {
+  if (why === 'empty') {
+    return level.fog
+      ? 'Tip: more flowers hide in the mist — drag lines into the dark to find them.'
+      : 'Tip: send bees to the biggest flowers first.';
+  }
+  if (level.wave.length > 0) return 'Tip: tap wasps the moment they appear.';
+  if (level.walls) return 'Tip: bend lines round hedges — drag on from a line’s tip.';
+  return 'Tip: use every line — each one carries 8 bees.';
 }

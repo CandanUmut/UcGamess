@@ -378,7 +378,8 @@ export class Field {
     // chosen by how many corridors away it is, and its yield is derived from
     // that. This is the reverse of the old thorn field, where obstacles were
     // placed relative to flowers that already existed.
-    this.maze.generate(Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus));
+    if (features.walls) this.maze.setWalls(features.walls);
+    else this.maze.generate(Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus));
     // The hive's front yard, flattened after generation so the spanning tree
     // has already made every cell reachable and this can only add routes. See
     // `TUNING.maze.yard`.
@@ -398,10 +399,29 @@ export class Field {
     // game changing its mind: you planned around what was there, and then a
     // flower appeared somewhere you had already decided not to go. A day is a
     // board you are given, not a board that keeps being rewritten.
-    for (let i = 0; i < patchCount; i += 1) {
-      const kind: PatchKind =
-        features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
-      this.spawnPatch(kind);
+    if (features.layout) {
+      // Hand-placed: honey is exactly what the level says. A trip brings home
+      // one unit (a Royal Bloom four), with no distance pay on top, so the
+      // number on the flower is the number it adds to the jar.
+      for (const spot of features.layout) {
+        const royal = spot.kind === 'royal';
+        const yieldPer = royal ? TUNING.treasure.royalYieldMultiplier : 1;
+        const patch = new Patch(
+          spot.x,
+          spot.y,
+          Math.max(1, Math.round(spot.honey / yieldPer)),
+          royal ? 'royal' : 'normal',
+        );
+        patch.distanceMultiplier = 1;
+        patch.species = royal ? 1 : this.nextSpecies();
+        this.patches.push(patch);
+      }
+    } else {
+      for (let i = 0; i < patchCount; i += 1) {
+        const kind: PatchKind =
+          features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
+        this.spawnPatch(kind);
+      }
     }
 
     this.fog.clear();
@@ -1127,6 +1147,9 @@ export class Field {
 
   /** The whole tier of the Busy Hive multiplier: what honey is paid at. */
   get comboTier(): number {
+    // Off: playtesters could not tell what the ×-badge meant or why it moved,
+    // and a score that secretly multiplies cannot be read off the jar.
+    if (!TUNING.combo.enabled) return 1;
     return Math.floor(this.combo);
   }
 
@@ -1185,6 +1208,18 @@ export class Field {
     return (
       this.patches.length > 0 && this.patches.every((p) => p.kind === 'night' || !p.alive)
     );
+  }
+
+  /**
+   * True when no more honey can reach the hive: every flower is dry and no
+   * bee is still carrying any home. A level that has not filled its jar by
+   * then has been lost, and saying so at once beats a clock run down for
+   * nothing.
+   */
+  get exhausted(): boolean {
+    if (!this.cleared) return false;
+    if (this.patches.some((p) => p.kind === 'night' && p.alive)) return false;
+    return this.bees.every((b) => b.carrying <= 0);
   }
 
   /** Opens a golden bloom when its time comes. */
