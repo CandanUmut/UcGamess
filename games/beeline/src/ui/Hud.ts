@@ -585,6 +585,12 @@ export class Hud {
     this.alertText.setAlpha(0.72 + 0.28 * Math.abs(Math.sin(this.alertPhase)));
   }
 
+  /** Takes any announcement off the screen at once. */
+  clearBanner(): void {
+    this.scene.tweens.killTweensOf(this.banner);
+    this.banner.setAlpha(0);
+  }
+
   /** One-line announcement: a new day's twist, a bloom, a clear. */
   showBanner(text: string, colour = '#fff4d6'): void {
     this.scene.tweens.killTweensOf(this.banner);

@@ -111,6 +111,8 @@ export interface DayFeatures {
   treasures?: TreasurePlan;
   /** Hand-placed flowers. When present, replaces the random placement. */
   layout?: readonly FlowerSpot[];
+  /** Most honey one find can pay; unset for no limit. */
+  discoveryCap?: number;
   /** Hand-placed hedges. When present, replaces the generated maze. */
   walls?: ReadonlyArray<readonly [col: number, row: number, side: 'L' | 'T']>;
 }

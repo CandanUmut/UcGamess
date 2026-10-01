@@ -209,20 +209,20 @@ const SPECS: readonly Spec[] = [
   },
   {
     name: 'Big Bloom',
-    seconds: 50,
+    seconds: 45,
     flowers: 3,
     lines: 3,
     bees: 24,
     difficulty: 2,
     lesson: 'double',
     lessonPoints: { to: { x: 860, y: 330 } },
-    // Measured: one line takes ~74 s, two ~38 s, three ~27 s.
+    // Measured: one line takes ~58 s (too slow), two ~30 s, three ~22 s.
     goal: 80,
-    starTimes: [31, 42],
+    starTimes: [26, 36],
     layout: [
       { x: 860, y: 330, honey: 110 },
       { x: 470, y: 300, honey: 12 },
-      { x: 520, y: 640, honey: 12 },
+      { x: 520, y: 600, honey: 12 },
     ],
   },
   {
@@ -632,36 +632,36 @@ function treasuresFor(index: number): TreasurePlan {
  * `src/playtest/fit-levels.ts`. Hand-built boards give their own goal.
  */
 export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
-  [25, 21, 28],
-  [50, 23, 30],
-  [70, 44, 58],
-  [90, 29, 38],
+  [25, 17, 22],
+  [50, 18, 24],
+  [70, 35, 46],
+  [90, 24, 32],
   [80, 32, 42],
   [70, 35, 46],
   [100, 35, 46],
   [110, 32, 42],
-  [140, 27, 35],
-  [200, 25, 45],
-  [220, 35, 46],
-  [390, 28, 42],
-  [390, 39, 48],
-  [160, 28, 47],
-  [270, 39, 51],
-  [610, 42, 55],
-  [420, 39, 43],
-  [510, 45, 59],
-  [840, 42, 56],
-  [660, 48, 63],
-  [420, 31, 46],
-  [260, 39, 51],
-  [380, 39, 51],
-  [680, 41, 54],
-  [480, 42, 55],
-  [410, 42, 55],
-  [410, 45, 59],
-  [770, 45, 59],
-  [510, 48, 63],
-  [1100, 45, 57],
+  [140, 24, 31],
+  [200, 21, 29],
+  [180, 35, 42],
+  [390, 35, 46],
+  [390, 39, 51],
+  [220, 27, 51],
+  [280, 39, 48],
+  [670, 42, 55],
+  [420, 32, 36],
+  [490, 45, 53],
+  [950, 44, 59],
+  [740, 48, 60],
+  [410, 35, 46],
+  [310, 39, 49],
+  [390, 39, 49],
+  [690, 42, 55],
+  [520, 42, 55],
+  [450, 42, 55],
+  [450, 45, 59],
+  [600, 41, 45],
+  [550, 48, 63],
+  [1150, 49, 67],
 ];
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
@@ -726,6 +726,9 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     treasures: level.treasures,
     ...(level.layout ? { layout: level.layout } : {}),
     ...(level.walls ? { walls: level.walls } : {}),
+    // A find tops up the jar, but never fills it: one lucky sparkle used to
+    // win a level outright.
+    discoveryCap: Math.max(5, Math.round(level.goal * 0.12)),
   };
 }
 
@@ -741,6 +744,10 @@ export function levelModifiers(level: LevelDef): RunModifiers {
   m.extraBees = level.bees - TUNING.bee.baseCount;
   // No mist: light the whole board at dawn.
   if (!level.fog) m.scoutRadius = 2000;
+  // Quicker wings on campaign boards: a level is short, and the stretch
+  // between laying a line and the honey arriving was the part testers
+  // called watching rather than playing.
+  m.beeSpeedBonus = 0.3;
   return m;
 }
 

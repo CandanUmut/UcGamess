@@ -155,6 +155,8 @@ export class GameScene extends BaseGameplayScene {
   private goalCard: Phaser.GameObjects.Container | null = null;
   /** Throttle for "lines start at the hive" nudges. */
   private lastNudgeAt = -99;
+  /** Words floating over the board, cleared when a new board starts. */
+  private floating = new Set<Phaser.GameObjects.Text>();
   private clearTimer = 0;
 
   // --- the drag --------------------------------------------------------
@@ -258,16 +260,16 @@ export class GameScene extends BaseGameplayScene {
     this.juice = new Juice(this, DEPTH.juice);
     this.hud = new Hud(this, DEPTH.hud);
     this.tutorialText = this.add
-      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 34, '', {
+      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 22, '', {
         fontFamily: FONT,
-        fontSize: '22px',
+        fontSize: '21px',
         fontStyle: 'bold',
         color: '#ffe38a',
         align: 'center',
         stroke: '#2a1d08',
         strokeThickness: 5,
         backgroundColor: 'rgba(42, 33, 20, 0.82)',
-        padding: { x: 18, y: 10 },
+        padding: { x: 16, y: 5 },
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
@@ -398,6 +400,9 @@ export class GameScene extends BaseGameplayScene {
    */
   private beginLevel(level: LevelDef): void {
     this.resetFinds();
+    for (const label of this.floating) label.destroy();
+    this.floating.clear();
+    this.hud.clearBanner();
     this.phase = 'playing';
     this.day = level.difficulty;
     this.scheduleBuzz();
@@ -471,7 +476,7 @@ export class GameScene extends BaseGameplayScene {
       say(-34, `Fill the jar with ${level.goal} honey`, 38, '#ffe38a'),
       say(
         14,
-        (level.timed ? `before the sun sets in ${level.seconds}s` : 'No sunset on this one') +
+        (level.timed ? `before the sun sets in ${level.seconds}s` : 'No time limit') +
           `   ·   ${this.field.stats.routeSlots} lines`,
         22,
         '#fff4d6',
@@ -984,9 +989,19 @@ export class GameScene extends BaseGameplayScene {
 
   /** The leg under the finger, pinning a bend first if it would hit a hedge. */
   private followFinger(x: number, y: number): LinePlan {
-    let plan = this.field.planLine(this.legStart(), x, y);
-    if (plan.contact && this.lastClear && this.legs.length < 5) {
-      const leg = this.field.planLine(this.legStart(), this.lastClear.x, this.lastClear.y);
+    const from = this.legStart();
+    let plan = this.field.planLine(from, x, y);
+    // Pin a bend only where the finger has actually turned. A drag straight
+    // into a hedge is not a bend — it is a line the hedge stops.
+    const clear = this.lastClear;
+    let turned = false;
+    if (clear) {
+      const d =
+        Math.atan2(clear.y - from.y, clear.x - from.x) - Math.atan2(y - clear.y, x - clear.x);
+      turned = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) > 0.45;
+    }
+    if (plan.contact && clear && turned && this.legs.length < 5) {
+      const leg = this.field.planLine(this.legStart(), clear.x, clear.y);
       if (leg.valid && !leg.contact && !leg.target) {
         this.legs.push(leg);
         this.sfx.playVaried('draw', 0.12, 420);
@@ -1003,6 +1018,28 @@ export class GameScene extends BaseGameplayScene {
     if (!first) {
       this.nudge('Too short — drag further', last.start.x, last.start.y);
       return;
+    }
+    // Into a hedge and stopped there: a line that cannot reach anything.
+    // On a lit board that is never what was meant, so say why instead.
+    const stopped = last.contact && !last.target ? last.contact : null;
+    if (stopped && this.level && !this.level.fog) {
+      this.nudge('A hedge is in the way — curve your drag around it', stopped.x, stopped.y);
+      return;
+    }
+    // Every line in use: replace one only if it has nothing left to do.
+    // Taking a working line without asking read as the game stealing it.
+    if (!first.start.route && this.field.routes.length >= this.field.stats.routeSlots) {
+      const spare = this.field.routes.some((r) => !r.target || !r.target.alive);
+      if (!spare) {
+        const tip = last.coords;
+        this.nudge(
+          `All ${this.field.stats.routeSlots} lines are busy — press and hold one to free it`,
+          tip[tip.length - 2] ?? last.start.x,
+          tip[tip.length - 1] ?? last.start.y,
+        );
+        this.hud.flashLines();
+        return;
+      }
     }
     const route = this.layLine(first);
     if (!route) return;
@@ -1028,11 +1065,7 @@ export class GameScene extends BaseGameplayScene {
       return null;
     }
     if (full) {
-      this.nudge(
-        `You have ${this.field.stats.routeSlots} lines — your weakest one moved here`,
-        route.tipX,
-        route.tipY,
-      );
+      this.nudge('An idle line moved here', route.tipX, route.tipY);
     }
     this.routesDrawn += 1;
     if (this.level && !this.clockStarted) this.clockStarted = true;
@@ -1467,6 +1500,8 @@ export class GameScene extends BaseGameplayScene {
       .setOrigin(0.5)
       .setDepth(DEPTH.juice)
       .setScale(0.6);
+    this.floating.add(label);
+    label.once(Phaser.GameObjects.Events.DESTROY, () => this.floating.delete(label));
 
     this.tweens.add({ targets: label, scale: 1, duration: 140, ease: 'Back.easeOut' });
     this.tweens.add({

@@ -121,16 +121,11 @@ export class LevelDoneScene extends BaseScene {
 
     // The headline number: how fast, or how close.
     if (passed && seconds !== null) {
-      const clock = this.text('0s', cx, 300, 44, '#ffd466', true);
-      const tally = { value: 0 };
-      this.tweens.add({
-        targets: tally,
-        value: seconds,
-        delay: 250,
-        duration: 700,
-        ease: 'Cubic.easeOut',
-        onUpdate: () => clock.setText(`Filled in ${Math.round(tally.value)}s`),
-      });
+      // The exact number the stars were scored on, shown at once: a count-up
+      // caught mid-roll once read 58 s on a fill scored at 62.
+      const clock = this.text(`Filled in ${seconds}s`, cx, 300, 44, '#ffd466', true);
+      clock.setScale(0.6);
+      this.tweens.add({ targets: clock, scale: 1, duration: 260, ease: 'Back.easeOut' });
     } else {
       this.text(
         `${honey} / ${level.goal} honey`,
@@ -160,8 +155,8 @@ export class LevelDoneScene extends BaseScene {
           : 'Every star there is.'
         : `${stars + 1} stars: fill it in ${stars === 1 ? two : three}s or less`
       : tipFor(level, why);
-    this.text(hint, cx, passed ? 346 : 372, 20, '#c9b98f');
-    this.text(`+${honey.toLocaleString('en-US')} honey to the hive`, cx, 404, 18, '#e9dcc0');
+    this.text(hint, cx, passed ? 344 : 368, 20, '#c9b98f');
+    this.text(`+${honey.toLocaleString('en-US')} honey to the hive`, cx, passed ? 376 : 398, 18, '#e9dcc0');
 
     if (prevTime > 0 && seconds !== null && seconds < prevTime && stars < 3)
       this.time.delayedCall(1400, () => this.stamp('NEW BEST!'));
@@ -176,7 +171,7 @@ export class LevelDoneScene extends BaseScene {
       this.text(
         all ? 'You found the Royal Bloom!' : 'A Royal Bloom was hiding in the mist…',
         cx,
-        430,
+        passed ? 404 : 424,
         18,
         all ? '#e6c8ff' : '#c9b98f',
       );
@@ -300,7 +295,7 @@ export class LevelDoneScene extends BaseScene {
 
   /** "NEW BEST!" stamped across the card at an angle. */
   private stamp(text: string): void {
-    const label = this.text(text, DESIGN_WIDTH / 2 + 300, 150, 34, '#ff7a5e', true)
+    const label = this.text(text, DESIGN_WIDTH / 2 + 300, 150, 34, '#ffe38a', true)
       .setAngle(-14)
       .setScale(2.2)
       .setAlpha(0);

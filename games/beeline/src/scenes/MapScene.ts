@@ -306,8 +306,12 @@ export class MapScene extends BaseScene {
       }
       // Stars under the number, or a lock.
       if (unlocked) {
+        // On a dark pill: gold stars straight on a honey-gold cell read as
+        // outlines, and the empty dark ones as the filled ones.
+        g.fillStyle(0x2a1d08, 0.85);
+        g.fillRoundedRect(x - 38, y + 15, 76, 22, 11);
         for (let s = 0; s < 3; s += 1) {
-          star(g, x + (s - 1) * 22, y + 26, 9, s < earned ? 0xffd84a : 0x5a4a30);
+          star(g, x + (s - 1) * 22, y + 26, 9, s < earned ? 0xffd84a : 0x6b5a3a);
         }
       } else {
         g.fillStyle(0x8a7a5a, 1);

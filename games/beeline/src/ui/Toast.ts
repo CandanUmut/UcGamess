@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { DESIGN_HEIGHT, DESIGN_WIDTH } from '@ucgames/core';
+import { DESIGN_WIDTH } from '@ucgames/core';
 import type { AchievementDef } from '../game/Achievements.ts';
 import { star } from './Hud.ts';
 
@@ -26,10 +26,12 @@ export function showAchievements(
 function toast(scene: Phaser.Scene, a: AchievementDef): void {
   const width = 460;
   const height = 86;
-  // From the bottom edge, so it never sits on a scene's title.
+  // From the top edge: buttons live in the lower half of every screen, and a
+  // card that slid up over them hid the very thing the player reached for.
   const x = DESIGN_WIDTH / 2;
-  const rest = DESIGN_HEIGHT - 64;
-  const box = scene.add.container(x, DESIGN_HEIGHT + height).setDepth(1000);
+  const rest = 60;
+  const away = -height;
+  const box = scene.add.container(x, away).setDepth(1000);
 
   const g = scene.add.graphics();
   g.fillStyle(0x2a2114, 0.95);
@@ -64,7 +66,7 @@ function toast(scene: Phaser.Scene, a: AchievementDef): void {
     onComplete: () => {
       scene.tweens.add({
         targets: box,
-        y: DESIGN_HEIGHT + height,
+        y: away,
         delay: 1900,
         duration: 320,
         ease: 'Quad.easeIn',

@@ -95,7 +95,7 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'dry':
       return [
         {
-          text: 'Small flowers run dry fast. Big ones last longer',
+          text: 'Small flowers run dry fast — big ones last longer',
           hint: { kind: 'drag-to-flower' },
           done: (s) => s.routesDrawn >= 1,
         },

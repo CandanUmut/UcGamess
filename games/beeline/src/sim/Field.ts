@@ -484,7 +484,12 @@ export class Field {
       const share = royal
         ? TUNING.treasure.royalDiscoveryShare
         : TUNING.treasure.discoveryShare;
-      const bonus = pays ? Math.round(patch.honeyLeft * share) : 0;
+      const bonus = pays
+        ? Math.min(
+            this.features.discoveryCap ?? Number.POSITIVE_INFINITY,
+            Math.round(patch.honeyLeft * share),
+          )
+        : 0;
       if (bonus > 0) {
         this.honey += bonus;
         this.foundHoney += bonus;

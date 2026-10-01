@@ -29,6 +29,12 @@ export interface UpgradeDef {
   starsFor: readonly number[];
   /** Draft item whose icon this skill borrows. */
   icon: ItemId;
+  /**
+   * The campaign level that teaches what this skill improves. It is not for
+   * sale before that level is passed: a skill for wasps means nothing to a
+   * player who has never met one.
+   */
+  opensAfter?: number;
   apply(m: RunModifiers, level: number): void;
 }
 
@@ -36,14 +42,17 @@ export const UPGRADES: readonly UpgradeDef[] = [
   {
     id: 'swarm',
     name: 'Bigger Swarm',
-    perLevel: '+3 bees',
+    // Bees beyond what the lines carry only wait at the hive, so the swarm
+    // grows by a bee per line *and* every line carries one more.
+    perLevel: '+1 bee on every line',
     max: 5,
     baseCost: 250,
     growth: 1.7,
     starsFor: [0, 0, 6, 15, 30],
     icon: 'broodChamber',
     apply: (m, n) => {
-      m.extraBees += 3 * n;
+      m.extraCrew += n;
+      m.extraBees += 4 * n;
     },
   },
   {
@@ -68,6 +77,7 @@ export const UPGRADES: readonly UpgradeDef[] = [
     growth: 1.8,
     starsFor: [0, 3, 12, 25],
     icon: 'scoutBees',
+    opensAfter: 9,
     apply: (m, n) => {
       m.beeSightBonus += 0.2 * n;
       m.hiveSightBonus += 40 * n;
@@ -87,19 +97,6 @@ export const UPGRADES: readonly UpgradeDef[] = [
     },
   },
   {
-    id: 'crews',
-    name: 'Wide Lanes',
-    perLevel: '+1 bee on every line',
-    max: 3,
-    baseCost: 600,
-    growth: 2,
-    starsFor: [5, 18, 35],
-    icon: 'wideLanes',
-    apply: (m, n) => {
-      m.extraCrew += n;
-    },
-  },
-  {
     id: 'stingers',
     name: 'Sharp Stingers',
     perLevel: 'swats hit harder',
@@ -108,6 +105,7 @@ export const UPGRADES: readonly UpgradeDef[] = [
     growth: 2,
     starsFor: [10, 25, 45],
     icon: 'stingers',
+    opensAfter: 8,
     apply: (m, n) => {
       m.beeDamageBonus += n;
     },
@@ -121,6 +119,7 @@ export const UPGRADES: readonly UpgradeDef[] = [
     growth: 2.5,
     starsFor: [12, 40],
     icon: 'moreLines',
+    opensAfter: 10,
     apply: (m, n) => {
       m.extraLines += n;
     },
@@ -140,7 +139,7 @@ export function upgradeCost(def: UpgradeDef, owned: number): number {
 
 export type BuyCheck =
   | { ok: true; cost: number }
-  | { ok: false; reason: 'max' | 'stars' | 'honey'; cost: number; stars: number };
+  | { ok: false; reason: 'max' | 'level' | 'stars' | 'honey'; cost: number; stars: number };
 
 /** Whether the next level of `def` can be bought now, and if not, why not. */
 export function canBuy(
@@ -148,11 +147,14 @@ export function canBuy(
   levels: UpgradeLevels,
   bank: number,
   stars: number,
+  levelStars: readonly number[] = [],
 ): BuyCheck {
   const owned = levels[def.id] ?? 0;
   const cost = upgradeCost(def, owned);
   const needStars = def.starsFor[owned] ?? 0;
   if (owned >= def.max) return { ok: false, reason: 'max', cost, stars: needStars };
+  if (def.opensAfter && (levelStars[def.opensAfter - 1] ?? 0) < 1)
+    return { ok: false, reason: 'level', cost, stars: needStars };
   if (stars < needStars) return { ok: false, reason: 'stars', cost, stars: needStars };
   if (bank < cost) return { ok: false, reason: 'honey', cost, stars: needStars };
   return { ok: true, cost };
