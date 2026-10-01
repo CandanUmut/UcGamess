@@ -25,8 +25,12 @@ export interface LevelDoneData {
   rivalHoney?: number;
   /** Won because the meadow ran dry with the fuller jar, not by filling it. */
   dry?: boolean;
+  /** For a loss: what most decided it, read off the race itself. */
+  tip?: string;
   /** Honey brought home — all of it goes to the bank. */
   honey: number;
+  /** Honey that went to the bank: all of it for a win, half for a loss. */
+  banked: number;
   stars: number;
   /** Stars before this attempt, for "new star". */
   prevStars: number;
@@ -179,12 +183,12 @@ export class LevelDoneScene extends BaseScene {
           ? `New best! ${prevTime}s → ${seconds}s`
           : 'Every star there is.'
         : `${stars + 1} stars: fill it in ${stars === 1 ? two : three}s or less`
-      : tipFor(level, why);
+      : (this.done.tip ?? tipFor(level, why));
     const hintText = this.text(
       this.done.dry && passed
         ? `The meadow ran dry — your jar was fuller (${seconds}s)`
         : !passed && this.done.rivalHoney !== undefined
-          ? `Wasps ${this.done.rivalHoney}  ·  ${tipFor(level, why)}`
+          ? `Wasps ${this.done.rivalHoney}  ·  ${this.done.tip ?? tipFor(level, why)}`
           : hint,
       cx,
       passed ? 344 : 368,
@@ -198,7 +202,7 @@ export class LevelDoneScene extends BaseScene {
     this.text(
       (this.done.rivalHoney !== undefined && passed
         ? `You ${honey} – Wasps ${this.done.rivalHoney}   ·   `
-        : '') + `+${honey.toLocaleString('en-US')} honey to the hive`,
+        : '') + `+${this.done.banked.toLocaleString('en-US')} honey to the hive`,
       cx,
       passed ? 376 : 398,
       18,

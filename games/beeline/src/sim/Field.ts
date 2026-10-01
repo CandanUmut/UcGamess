@@ -9,7 +9,12 @@ import { slideAlongWalls, type WallSlide } from './deflect.ts';
 import { Fog } from './Fog.ts';
 import { coordsLength, type Polyline, type SamplePoint } from './polyline.ts';
 import { deriveStats, type DerivedStats } from '../game/Upgrades.ts';
-import { dayQuota, type DayFeatures, type TreasurePlan } from '../game/DayCycle.ts';
+import {
+  dayQuota,
+  type DayFeatures,
+  type FlowerSpot,
+  type TreasurePlan,
+} from '../game/DayCycle.ts';
 import { noModifiers, type RunModifiers } from '../game/Items.ts';
 
 const scratch: SamplePoint = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -118,6 +123,8 @@ export interface FieldEvents {
   waspDown: Array<{ x: number; y: number; bounty: number }>;
   /** Honey taken by raiders this step. */
   stolen: number;
+  /** Raid trips that came home empty, because the other jar was not fuller. */
+  raidRefused: number;
   /** Wasps that arrived on the board this step. */
   raidLanded: number;
   /** A line was laid, ending here. */
@@ -132,6 +139,8 @@ export interface FieldEvents {
   wilted: Array<{ x: number; y: number; honey: number }>;
   /** Golden blooms that opened this step. */
   bloomed: Array<{ x: number; y: number }>;
+  /** Buds that opened into flowers this step. */
+  sprouted: Array<{ x: number; y: number }>;
   /** Bees driven out of the swarm for the day. */
   beesLost: Array<{ x: number; y: number }>;
   /** Every ordinary flower on the board is dry. The day can end early. */
@@ -154,6 +163,7 @@ function emptyEvents(): FieldEvents {
     struck: [],
     waspDown: [],
     stolen: 0,
+    raidRefused: 0,
     raidLanded: 0,
     lineLaid: [],
     replaced: [],
@@ -161,6 +171,7 @@ function emptyEvents(): FieldEvents {
     fizzled: [],
     wilted: [],
     bloomed: [],
+    sprouted: [],
     beesLost: [],
     cleared: false,
     comboUp: 0,
@@ -306,6 +317,12 @@ export class Field {
   private guardTimer = TUNING.wasp.guardInterval;
 
   private elapsed = 0;
+  /**
+   * Hand-placed flowers still in bud, and the second of the level each opens.
+   * Shown from the start with their countdown, so a board that changes
+   * halfway through is a board you can plan for, not one that changes its mind.
+   */
+  buds: Array<FlowerSpot & { at: number }> = [];
   private patchPool = TUNING.patch.basePool;
   /** Current day, used to widen the field and size flower pools. */
   private day = 1;
@@ -318,6 +335,8 @@ export class Field {
    */
   private seen: Set<Patch> | null = null;
 
+  /** Bees lost to stings at the other colony's nest, this level. */
+  stungCount = 0;
   /** Raiders stung this step, removed once the swarm has finished stepping. */
   private stung: Bee[] = [];
 
@@ -364,6 +383,8 @@ export class Field {
     this.modifiers = modifiers;
     this.honey = 0;
     this.elapsed = 0;
+    this.buds = [];
+    this.stungCount = 0;
     this.jobless.clear();
     this.clearRoutes();
     this.wasps = [];
@@ -496,17 +517,9 @@ export class Field {
       // one unit (a Royal Bloom four), with no distance pay on top, so the
       // number on the flower is the number it adds to the jar.
       for (const spot of features.layout) {
-        const royal = spot.kind === 'royal';
-        const yieldPer = royal ? TUNING.treasure.royalYieldMultiplier : 1;
-        const patch = new Patch(
-          spot.x,
-          spot.y,
-          Math.max(1, Math.round(spot.honey / yieldPer)),
-          royal ? 'royal' : 'normal',
-        );
-        patch.distanceMultiplier = 1;
-        patch.species = royal ? 1 : this.nextSpecies();
-        this.patches.push(patch);
+        // A bud opens later, on its own clock (see `stepBuds`).
+        if (spot.opensAt) this.buds.push({ ...spot, at: spot.opensAt });
+        else this.patches.push(this.layoutPatch(spot));
       }
     } else {
       for (let i = 0; i < patchCount; i += 1) {
@@ -1229,6 +1242,7 @@ export class Field {
 
     this.stepRaid(dt);
     this.stepGolden();
+    this.stepBuds();
 
     for (const route of [...this.routes]) {
       route.step(dt);
@@ -1259,7 +1273,8 @@ export class Field {
     // Golden blooms open on the board's field; a rival sees one the moment it
     // opens, as the player does.
     for (const patch of this.patches) {
-      if (patch.kind === 'night' && patch.alive) this.seen?.add(patch);
+      if ((patch.kind === 'night' || patch.sprouted) && patch.alive)
+        this.seen?.add(patch);
     }
     for (const route of [...this.routes]) {
       route.step(dt);
@@ -1371,6 +1386,7 @@ export class Field {
   get cleared(): boolean {
     return (
       this.patches.length > 0 &&
+      this.buds.length === 0 &&
       this.patches.every((p) => p.kind === 'night' || p.kind === 'nest' || !p.alive)
     );
   }
@@ -1400,17 +1416,76 @@ export class Field {
   private midlineSpot(): { x: number; y: number } {
     const { maze } = this;
     const mid = Math.floor(maze.cols / 2);
-    const spots: Array<{ x: number; y: number }> = [];
-    for (const col of [mid - 1, mid]) {
+    // Room to read it: never on top of a flower or a nest, so the bloom is a
+    // flower of its own and not a mystery bonus on one already worked.
+    const clearance = (c: { x: number; y: number }): number =>
+      Math.min(
+        Number.POSITIVE_INFINITY,
+        ...this.patches
+          .filter((p) => p.alive)
+          .map((p) => Math.hypot(p.x - c.x, p.y - c.y)),
+      );
+    // The middle two columns first; failing room there, one column further
+    // out on either side, so now and then it opens nearer one colony.
+    for (const cols of [
+      [mid - 1, mid],
+      [mid - 2, mid + 1],
+    ]) {
+      const spots: Array<{ x: number; y: number }> = [];
+      for (const col of cols) {
+        for (let row = 0; row < maze.rows; row += 1) {
+          const c = maze.centreOf(col, row);
+          if (clearance(c) > 110) spots.push(c);
+        }
+      }
+      const pick = spots[Math.floor(Math.random() * spots.length)];
+      if (pick) return pick;
+    }
+    // A crowded board: the roomiest cell in the middle half.
+    let best = maze.centreOf(mid, 2);
+    let room = -1;
+    for (let col = mid - 2; col <= mid + 1; col += 1) {
       for (let row = 0; row < maze.rows; row += 1) {
         const c = maze.centreOf(col, row);
-        const clear = this.patches.every(
-          (p) => !p.alive || Math.hypot(p.x - c.x, p.y - c.y) > 130,
-        );
-        if (clear) spots.push(c);
+        const r = clearance(c);
+        if (r > room) {
+          room = r;
+          best = c;
+        }
       }
     }
-    return spots[Math.floor(Math.random() * spots.length)] ?? maze.centreOf(mid, 2);
+    return best;
+  }
+
+  /** A hand-placed flower, honey exactly as the level says. */
+  private layoutPatch(spot: FlowerSpot): Patch {
+    // A trip brings home one unit (a Royal Bloom four), with no distance pay
+    // on top, so the number on the flower is the number it adds to the jar.
+    const royal = spot.kind === 'royal';
+    const yieldPer = royal ? TUNING.treasure.royalYieldMultiplier : 1;
+    const patch = new Patch(
+      spot.x,
+      spot.y,
+      Math.max(1, Math.round(spot.honey / yieldPer)),
+      royal ? 'royal' : 'normal',
+    );
+    patch.distanceMultiplier = 1;
+    patch.species = royal ? 1 : this.nextSpecies();
+    return patch;
+  }
+
+  /** Opens each bud whose time has come: in plain sight, mist or not. */
+  private stepBuds(): void {
+    for (const bud of [...this.buds]) {
+      if (this.elapsed < bud.at) continue;
+      this.buds.splice(this.buds.indexOf(bud), 1);
+      const patch = this.layoutPatch(bud);
+      patch.discovered = true;
+      patch.sprouted = true;
+      this.patches.push(patch);
+      this.fog.reveal(bud.x, bud.y, 70);
+      this.events.sprouted.push({ x: bud.x, y: bud.y });
+    }
   }
 
   /** Opens a golden bloom when its time comes. */
@@ -1565,7 +1640,9 @@ export class Field {
     const downed = wasp.hit(1 + this.modifiers.beeDamageBonus);
     this.events.struck.push({ x: wasp.x, y: wasp.y });
     if (downed) {
-      const bounty = Math.round(this.threatQuota * TUNING.swat.bountyShare);
+      const bounty =
+        this.features.swatBounty ??
+        Math.round(this.threatQuota * TUNING.swat.bountyShare);
       this.honey += bounty;
       this.events.deposited += bounty;
       this.events.waspDown.push({ x: wasp.x, y: wasp.y, bounty });
@@ -2025,14 +2102,28 @@ export class Field {
         const patch = route?.target ?? null;
         if (patch) this.driftAround(bee, patch.x, patch.y, 16, dt);
         if (bee.timer <= 0) {
-          if (patch?.kind === 'nest' && Math.random() < RAID_STING) {
-            // The nest fights back: a raider is stung and does not come home.
-            this.stung.push(bee);
-            this.events.beesLost.push({ x: bee.x, y: bee.y });
-            return;
+          if (patch?.kind === 'nest') {
+            // The nest fights back, and harder the more lines raid it: one
+            // raiding line is a gamble, three is a massacre.
+            const raiders = this.routes.filter((r) => r.target === patch).length;
+            if (Math.random() < RAID_STING * Math.max(1, raiders)) {
+              this.stungCount += 1;
+              this.stung.push(bee);
+              this.events.beesLost.push({ x: bee.x, y: bee.y });
+              return;
+            }
+            // Only a fuller jar can be robbed: a raid is how the side behind
+            // catches up, never how the side ahead runs away with it.
+            if (patch.pool <= this.honey) {
+              this.events.raidRefused += 1;
+              bee.carrying = 0;
+              bee.state = 'inbound';
+              return;
+            }
           }
           if (patch) {
             bee.carrying = patch.drain(TUNING.bee.nectarPerTrip);
+            patch.taken[this.isRival ? 1 : 0] += bee.carrying;
             if (bee.carrying > 0) {
               this.events.collected.push({
                 x: patch.x,

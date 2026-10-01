@@ -28,7 +28,9 @@ function gaussian(mean: number, sd: number): number {
 
 /** One input the bot has decided on, landing after its reaction time. */
 interface Pending {
-  kind: 'line' | 'swat';
+  kind: 'line' | 'swat' | 'cut';
+  /** For a cut: the line to take back. */
+  route?: Route;
   /** Field time the input lands. */
   at: number;
   /** For a line: where the drag starts from. */
@@ -122,6 +124,10 @@ export class Forager {
       if (!field.swatAt(x, y)) this.wasted += 1;
       return;
     }
+    if (p.kind === 'cut') {
+      if (p.route && !p.route.dead) field.killRoute(p.route);
+      return;
+    }
 
     if (!p.start) return;
     // The start may have moved (a line retired) while the finger was on its way.
@@ -175,8 +181,12 @@ export class Forager {
       };
     }
 
-    // 2. A free line and a flower worth working.
-    if (field.routes.length >= field.stats.routeSlots) return null;
+    // 2. Every line busy: take one back if it is plainly wasted — a raid
+    // that no longer pays, or a poor flower while a far richer one sits
+    // unworked. Only a player who reads the board does this.
+    if (field.routes.length >= field.stats.routeSlots) {
+      return sloppy || this.persona.sloppiness > 0.4 ? null : this.replan(field);
+    }
 
     // Lines already on each flower. A rich flower is worth a second or third
     // crew — that is how a big bloom is won — so it stays "open" until it
@@ -192,7 +202,8 @@ export class Forager {
     // A raid is only worth the stings once there is a jar worth robbing.
     const known = field.knownPatches.filter(
       (p) =>
-        (p.kind !== 'nest' || (this.raids && p.honeyLeft >= 15)) &&
+        (p.kind !== 'nest' ||
+          (this.raids && p.honeyLeft >= Math.max(15, field.honey + 10))) &&
         (p.kind !== 'night' || p.windowTotal - p.windowRemaining >= this.goldenDelay),
     );
     const unserved = known.filter((p) => !crews.has(p));
@@ -248,6 +259,49 @@ export class Forager {
     const pending = this.line(field, from, aim);
     pending.target = target;
     return pending;
+  }
+
+  /** Honey a flower is worth to this player per pixel of trip, roughly. */
+  private worth(field: Field, p: Patch): number {
+    const dist = Math.max(
+      Math.hypot(p.x - field.hiveX, p.y - field.hiveY),
+      field.pathDistanceTo(p.x, p.y),
+    );
+    return ((p.kind === 'night' ? 2 : 1) * p.honeyLeft) / (120 + dist);
+  }
+
+  /** A busy line worth taking back, as a 'cut' input, or null. */
+  private replan(field: Field): Pending | null {
+    const at = field.time + this.delay() + 0.6;
+    // A raid on a jar no fuller than ours brings nothing home.
+    const deadRaid = field.routes.find(
+      (r) => r.target?.kind === 'nest' && r.target.honeyLeft <= field.honey,
+    );
+    if (deadRaid) return { kind: 'cut', at, route: deadRaid, x: 0, y: 0 };
+
+    const served = new Set<Patch>();
+    for (const r of field.routes) if (r.target) served.add(r.target);
+    let best = 0;
+    for (const p of field.knownPatches) {
+      if (served.has(p) || p.kind === 'nest' || !p.alive) continue;
+      if (p.kind === 'night' && p.windowTotal - p.windowRemaining < this.goldenDelay)
+        continue;
+      best = Math.max(best, this.worth(field, p));
+    }
+    if (best <= 0) return null;
+    // The poorest flower line, if the gap is wide enough to be worth a redraw.
+    let worst: Route | null = null;
+    let worstValue = Number.POSITIVE_INFINITY;
+    for (const r of field.routes) {
+      if (!r.target || r.target.kind === 'nest' || !r.reachesTarget()) continue;
+      const v = this.worth(field, r.target);
+      if (v < worstValue) {
+        worstValue = v;
+        worst = r;
+      }
+    }
+    if (!worst || best < worstValue * 2.5) return null;
+    return { kind: 'cut', at, route: worst, x: 0, y: 0 };
   }
 
   /** A line with no flower under its tip, still young enough to carry on. */

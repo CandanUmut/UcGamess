@@ -159,6 +159,8 @@ export class GameScene extends BaseGameplayScene {
   private lastNudgeAt = -99;
   /** Words floating over the board, cleared when a new board starts. */
   private floating = new Set<Phaser.GameObjects.Text>();
+  /** When the last "nothing to steal" was said, so it is not said every trip. */
+  private refusedAt = -10;
   private clearTimer = 0;
 
   // --- the drag --------------------------------------------------------
@@ -184,6 +186,11 @@ export class GameScene extends BaseGameplayScene {
   private raidCuts = 0;
   /** Raided honey not yet shown as a floating number, each way. */
   private raidTally = { lost: 0, gained: 0, at: 0 };
+  /**
+   * What happened this race, for the tip on a loss: line-seconds left idle
+   * while a flower waited, and honey the wasps took out of the jar.
+   */
+  private run = { idleLineSeconds: 0, robbed: 0 };
   private holdSeconds = 0;
   private erasedThisGesture = false;
   private swattedThisGesture = false;
@@ -455,12 +462,15 @@ export class GameScene extends BaseGameplayScene {
     this.rival = level.rival ? new Rivalry(level.rival) : null;
     this.rival?.begin(this.field, {
       fog: level.fog,
-      beeSpeedBonus: modifiers.beeSpeedBonus,
+      // The level's own wing speed: Swift Wings is the player's, not the wasps'.
+      beeSpeedBonus: levelModifiers(level).beeSpeedBonus,
     });
     this.rivalRenderer.setNest(level.rival ?? null);
     this.wonDry = false;
     this.raceDry = false;
     this.raidCuts = 0;
+    this.refusedAt = -10;
+    this.run = { idleLineSeconds: 0, robbed: 0 };
     this.raidOutAnnounced = false;
     this.hud.setAlert(null);
     this.finalScore = null;
@@ -552,6 +562,9 @@ export class GameScene extends BaseGameplayScene {
       duration: 260,
       ease: 'Back.easeOut',
     });
+    // Once read, the card thins out so the board under it can be planned —
+    // it used to sit over the very flowers the race starts on.
+    this.tweens.add({ targets: card, alpha: 0.3, delay: 2600, duration: 700 });
     this.goalCard = card;
   }
 
@@ -671,6 +684,11 @@ export class GameScene extends BaseGameplayScene {
     this.phase = 'ended';
     this.cancelDrag();
     this.stopGameplay();
+    // Nothing from the race floats over the result.
+    for (const label of [...this.floating]) {
+      this.tweens.killTweensOf(label);
+      label.destroy();
+    }
     this.sfx.play('dayEnd', 0.45);
 
     this.hud.setAlert(null);
@@ -709,7 +727,10 @@ export class GameScene extends BaseGameplayScene {
       while (this.save.levelExplored.length <= index) this.save.levelExplored.push(0);
       this.save.levelExplored[index] = 1;
     }
-    const unlocked = this.bankDay(honey);
+    // A loss still pays, but half: the shop is for winning, and a bank
+    // that filled as fast from losing made every upgrade a formality.
+    const banked = filled ? honey : Math.floor(honey / 2);
+    const unlocked = this.bankDay(banked);
 
     if (this.tutorial.finished || stars > 0) this.save.tutorialDone = true;
     // The portal's own celebration cue, for a star gained or a world finished —
@@ -721,13 +742,16 @@ export class GameScene extends BaseGameplayScene {
     this.persist();
     this.hud.setVisible(false);
 
+    const tip = filled ? null : this.lossTip(level);
     const data: LevelDoneData = {
       ...(this.rival
         ? { rivalHoney: this.finalScore?.rival ?? Math.floor(this.rival.field.honey) }
         : {}),
       ...(this.raceDry ? { dry: true } : {}),
+      ...(tip ? { tip } : {}),
       level,
       honey: this.finalScore?.me ?? honey,
+      banked,
       stars,
       prevStars,
       seconds,
@@ -1246,6 +1270,7 @@ export class GameScene extends BaseGameplayScene {
         if (level.timed) this.secondsLeft = Math.max(0, this.secondsLeft - dt);
       }
       if (this.rival && this.clockStarted) {
+        this.trackRun(dt);
         this.rival.step(dt);
         const verdict = this.rival.verdict(this.field, level.goal);
         if (verdict) {
@@ -1278,6 +1303,56 @@ export class GameScene extends BaseGameplayScene {
       this.secondsLeft = 0;
       this.endDay(false);
     }
+  }
+
+  /** Counts lines left idle while a flower the player knows sits unworked. */
+  private trackRun(dt: number): void {
+    const worked = new Set(this.field.routes.map((r) => r.target).filter(Boolean));
+    const waiting = this.field.knownPatches.some(
+      (p) => p.alive && p.kind !== 'nest' && !worked.has(p),
+    );
+    if (!waiting) return;
+    const busy = this.field.routes.filter((r) => r.target?.alive).length;
+    this.run.idleLineSeconds += Math.max(0, this.field.stats.routeSlots - busy) * dt;
+  }
+
+  /**
+   * The one thing that most decided a lost race, said plainly — read off
+   * what actually happened, not guessed from the level.
+   */
+  private lossTip(level: LevelDef): string | null {
+    const rival = this.rival;
+    if (!rival) return null;
+    const theirs = Math.max(1, rival.field.honey);
+    if (this.run.robbed >= theirs * 0.2) {
+      return `Tip: the wasps took ${Math.round(this.run.robbed)} from your jar — hold their red line to cut it, and swat raiders.`;
+    }
+    let best: { honey: number; name: string } | null = null;
+    for (const p of this.field.patches) {
+      if (p.kind === 'nest') continue;
+      const name =
+        p.kind === 'royal'
+          ? 'the Royal Bloom'
+          : p.kind === 'night'
+            ? 'a golden bloom'
+            : p.sprouted
+              ? 'a bud that opened'
+              : 'one flower';
+      if (!best || p.taken[1] > best.honey) best = { honey: p.taken[1], name };
+    }
+    if (best && best.honey >= level.goal * 0.25) {
+      return `Tip: the wasps got ${Math.round(best.honey)} from ${best.name} — be there first next time.`;
+    }
+    const share =
+      this.run.idleLineSeconds /
+      Math.max(1, this.field.stats.routeSlots * this.levelClock);
+    if (share >= 0.2) {
+      return `Tip: your lines sat idle ${Math.round(share * 100)}% of the race — keep every line on a flower.`;
+    }
+    if (this.field.stungCount >= 5) {
+      return `Tip: the nest stung ${this.field.stungCount} of your bees — raid with one line, and only while their jar is fuller.`;
+    }
+    return null;
   }
 
   /** The jar is full: the level is won, this instant. */
@@ -1335,7 +1410,9 @@ export class GameScene extends BaseGameplayScene {
 
       if (this.level) {
         this.lesson.update(this.lessonState());
-        this.tutorialText.setText(this.phase === 'playing' ? this.lesson.text : '');
+        this.tutorialText.setText(
+          this.phase === 'playing' && !this.hud.bannerShowing ? this.lesson.text : '',
+        );
       } else {
         this.tutorial.update({
           routesDrawn: this.routesDrawn,
@@ -1380,8 +1457,13 @@ export class GameScene extends BaseGameplayScene {
     const rival = this.rival;
     if (!rival) return;
     this.raidTally.lost += rival.raided.fromPlayer;
+    this.run.robbed += rival.raided.fromPlayer;
     this.raidTally.gained += rival.raided.fromWasps;
     rival.raided = { fromWasps: 0, fromPlayer: 0 };
+    for (const cut of rival.cutLines) {
+      this.floatText(cut.x, cut.y - 40, 'wasps cut your raid!', '#ff8a70', 22);
+    }
+    rival.cutLines = [];
     if (this.field.time - this.raidTally.at < 1.2) return;
     this.raidTally.at = this.field.time;
     if (this.raidTally.lost >= 1) {
@@ -1484,7 +1566,10 @@ export class GameScene extends BaseGameplayScene {
       }
       if (found.royal) {
         this.sfx.play('fanfare', 0.4);
-        this.hud.showBanner('A Royal Bloom! Its honey counts four times', '#e6c8ff');
+        this.hud.showBanner(
+          'A Royal Bloom! Its bees fly honey home four times as fast',
+          '#e6c8ff',
+        );
       } else {
         this.sfx.play('upgrade', 0.26);
       }
@@ -1542,6 +1627,7 @@ export class GameScene extends BaseGameplayScene {
     }
 
     if (events.stolen > 0) {
+      this.run.robbed += events.stolen;
       this.stolenTally += events.stolen;
       this.juice.scatter(this.field.hiveX, this.field.hiveY);
     }
@@ -1580,6 +1666,23 @@ export class GameScene extends BaseGameplayScene {
       for (let i = 0; i < 12; i += 1) this.juice.collect(bloom.x, bloom.y, 4);
       this.sfx.play('sparkle', 0.45);
       this.hud.showBanner('A golden bloom! Quick — it closes soon', '#ffe38a');
+    }
+
+    if (events.raidRefused > 0 && this.rival && this.field.time - this.refusedAt > 3) {
+      this.refusedAt = this.field.time;
+      this.floatText(
+        this.rival.spec.x,
+        this.rival.spec.y - 110,
+        'your jar is fuller — nothing to steal',
+        '#f4f4f8',
+        19,
+      );
+    }
+
+    for (const bud of events.sprouted) {
+      for (let i = 0; i < 8; i += 1) this.juice.collect(bud.x, bud.y, 4);
+      this.sfx.play('sparkle', 0.3);
+      this.floatText(bud.x, bud.y - 44, 'in bloom!', '#d8f5c0', 20);
     }
 
     for (const gone of events.wilted) {

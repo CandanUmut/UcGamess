@@ -166,13 +166,13 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'raid':
       return [
         {
-          text: 'Their jar is honey too: drag a line to the wasp nest to steal it',
+          text: 'Their jar is fuller! Drag a line to the wasp nest to steal from it',
           hint: { kind: 'drag-to', x: 1014, y: 492 },
           when: (s) => s.time > 6,
           done: (s) => s.raiding,
         },
         {
-          text: 'Every raid trip is +1 for you and −1 for them — but the nest stings',
+          text: 'A raid only pays while their jar is fuller — and more raiders, more stings',
           hint: null,
           done: (s, from) => s.time - from.time > 7,
         },

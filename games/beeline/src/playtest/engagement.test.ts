@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CASUAL, EXPERT, NOVICE, type Persona } from './personas.ts';
 import { playLevel, playRun } from './session.ts';
-import { LEVELS, levelStarsForTime } from '../game/Levels.ts';
+import { LEVELS, LEVELS_PER_WORLD, levelStarsForTime } from '../game/Levels.ts';
 import { summarise, type PersonaSummary } from './metrics.ts';
 
 /**
@@ -81,8 +81,21 @@ describe('campaign gate', () => {
   const share = (stars: number[], min: number): number =>
     stars.filter((s) => s >= min).length / Math.max(1, stars.length);
 
-  it('lets a regular player pass most levels', () => {
-    expect(share(casual, 1)).toBeGreaterThan(0.7);
+  /** One world's attempts: three runs per board, boards in order. */
+  const world = (stars: number[], w: number): number[] =>
+    stars.slice(w * LEVELS_PER_WORLD * 3, (w + 1) * LEVELS_PER_WORLD * 3);
+
+  // A curve, not a flat bar: the summer is meant to be hard, and a single
+  // campaign-wide share hid whether the early worlds were too.
+  it('lets a regular player pass most of the first two worlds', () => {
+    expect(share(world(casual, 0), 1)).toBeGreaterThan(0.75);
+    expect(share(world(casual, 1), 1)).toBeGreaterThan(0.7);
+  });
+
+  it('keeps the last world winnable for a regular player, and harder', () => {
+    const summer = share(world(casual, 2), 1);
+    expect(summer).toBeGreaterThan(0.4);
+    expect(summer).toBeLessThanOrEqual(share(world(casual, 0), 1));
   });
 
   it('puts every star inside the daylight, three before two', () => {

@@ -53,6 +53,17 @@ export const RIVAL_SKILL = {
   },
 } as const satisfies Record<string, ForagerSkill>;
 
+/**
+ * Seconds a player's raid line works the wasps' nest before they cut it, the
+ * same press-and-hold the player has. A dozy colony never notices; a sharp
+ * one makes a raid a short, sharp burst rather than a standing order.
+ */
+export const RAID_CUT_DELAY: Record<RivalSpec['skill'], number> = {
+  dozy: Number.POSITIVE_INFINITY,
+  steady: 9,
+  sharp: 5,
+};
+
 export class Rivalry {
   readonly field: Field;
   readonly spec: RivalSpec;
@@ -67,6 +78,10 @@ export class Rivalry {
   raidOutLeft: number | null = null;
   /** Honey raided this step, each way, for the floating numbers. */
   raided = { fromWasps: 0, fromPlayer: 0 };
+  /** Player raid lines the wasps cut this step, where they were. */
+  cutLines: Array<{ x: number; y: number }> = [];
+  /** Seconds each player raid line has been working the nest, by route id. */
+  private raidAge = new Map<number, number>();
 
   constructor(spec: RivalSpec) {
     this.spec = spec;
@@ -99,6 +114,8 @@ export class Rivalry {
     this.field.beginRivalDay(board, m);
     this.board = board;
     this.raidOutLeft = null;
+    this.raidAge.clear();
+    this.cutLines = [];
     // Each hive is a target on the shared board: a line to the other side's
     // hive is a raid on its jar.
     this.waspNest = new Patch(this.spec.x, this.spec.y, 0, 'nest');
@@ -166,6 +183,24 @@ export class Rivalry {
     this.playerNestPool = this.playerNest.pool;
   }
 
+  /** The wasps cut any player raid line that has been robbing them too long. */
+  private cutRaids(board: Field, dt: number): void {
+    this.cutLines = [];
+    const limit = RAID_CUT_DELAY[this.spec.skill];
+    const live = new Set<number>();
+    for (const route of [...board.routes]) {
+      if (route.target !== this.waspNest || !route.reachesTarget()) continue;
+      live.add(route.id);
+      const age = (this.raidAge.get(route.id) ?? 0) + dt;
+      this.raidAge.set(route.id, age);
+      if (age >= limit) {
+        this.cutLines.push({ x: route.tipX, y: route.tipY });
+        board.killRoute(route);
+      }
+    }
+    for (const id of [...this.raidAge.keys()]) if (!live.has(id)) this.raidAge.delete(id);
+  }
+
   private waspNestPool = 0;
   private playerNestPool = 0;
 
@@ -181,6 +216,7 @@ export class Rivalry {
         this.raidOutLeft = Math.max(0, this.raidOutLeft - dt);
       }
     }
+    if (board && this.waspNest) this.cutRaids(board, dt);
     this.ai.step(this.field, dt);
     this.field.step(dt);
     // A flower the wasps are working is no secret: their red line points
