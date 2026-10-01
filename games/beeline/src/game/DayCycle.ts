@@ -111,6 +111,8 @@ export interface DayFeatures {
   treasures?: TreasurePlan;
   /** Hand-placed flowers. When present, replaces the random placement. */
   layout?: readonly FlowerSpot[];
+  /** Honey in each golden bloom; unset to size it from the day. */
+  goldenHoney?: number;
   /** Most honey one find can pay; unset for no limit. */
   discoveryCap?: number;
   /** Hand-placed hedges. When present, replaces the generated maze. */

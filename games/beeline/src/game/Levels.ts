@@ -198,6 +198,7 @@ const SPECS: readonly Spec[] = [
     lines: 3,
     bees: 24,
     difficulty: 2,
+    golden: true,
     lesson: 'sun',
     goal: 90,
     layout: [
@@ -254,6 +255,7 @@ const SPECS: readonly Spec[] = [
     lines: 3,
     bees: 24,
     difficulty: 3,
+    golden: true,
     goal: 100,
     walls: [
       [3, 1, 'T'],
@@ -277,6 +279,7 @@ const SPECS: readonly Spec[] = [
     lines: 3,
     bees: 24,
     difficulty: 4,
+    golden: true,
     lesson: 'wasp',
     goal: 110,
     wave: ['raider'],
@@ -635,33 +638,33 @@ export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
   [25, 17, 22],
   [50, 18, 24],
   [70, 35, 46],
-  [90, 24, 32],
-  [80, 32, 42],
+  [90, 18, 25],
+  [80, 29, 38],
   [70, 35, 46],
-  [100, 35, 46],
+  [100, 32, 45],
   [110, 32, 42],
   [140, 24, 31],
   [200, 21, 29],
-  [180, 35, 42],
-  [390, 35, 46],
+  [180, 35, 43],
+  [370, 35, 46],
   [390, 39, 51],
-  [220, 27, 51],
-  [280, 39, 48],
+  [180, 26, 48],
+  [280, 39, 49],
   [670, 42, 55],
   [420, 32, 36],
   [490, 45, 53],
-  [950, 44, 59],
-  [740, 48, 60],
+  [960, 43, 59],
+  [750, 48, 62],
   [410, 35, 46],
-  [310, 39, 49],
+  [310, 39, 51],
   [390, 39, 49],
   [690, 42, 55],
   [520, 42, 55],
-  [450, 42, 55],
+  [440, 42, 55],
   [450, 45, 59],
-  [600, 41, 45],
+  [590, 40, 44],
   [550, 48, 63],
-  [1150, 49, 67],
+  [1175, 51, 68],
 ];
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
@@ -729,6 +732,9 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     // A find tops up the jar, but never fills it: one lucky sparkle used to
     // win a level outright.
     discoveryCap: Math.max(5, Math.round(level.goal * 0.12)),
+    // Worth chasing, never the whole jar: a bloom that held most of the goal
+    // turned a timed board into waiting for it to open.
+    goldenHoney: Math.max(10, Math.round(level.goal * 0.25)),
   };
 }
 

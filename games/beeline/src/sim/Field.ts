@@ -1246,6 +1246,10 @@ export class Field {
     this.patchPool = Math.max(4, Math.round(pool * poolShare));
     const patch = this.spawnPatch('night');
     this.patchPool = pool;
+    const honey = this.features.goldenHoney;
+    if (honey !== undefined && patch.yieldPerTrip > 0) {
+      patch.pool = patch.maxPool = Math.max(2, Math.round(honey / patch.yieldPerTrip));
+    }
 
     // Always seen: a bonus the player cannot see is not a bonus.
     patch.discovered = true;

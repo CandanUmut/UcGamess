@@ -64,6 +64,14 @@ export interface LessonPoints {
   to?: { x: number; y: number };
 }
 
+/** Taught on the first board that has golden blooms, the moment one opens. */
+const goldenStep: Step = {
+  text: 'A golden bloom! Rich honey, but it closes soon — send a line now!',
+  hint: { kind: 'drag-to-golden' },
+  when: (s) => s.golden,
+  done: (s) => s.goldenServed || !s.golden,
+};
+
 function steps(id: LessonId, p: LessonPoints): Step[] {
   switch (id) {
     case 'drag':
@@ -113,6 +121,7 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
           hint: { kind: 'drag-to-flower' },
           done: (s) => s.routesDrawn >= 1,
         },
+        goldenStep,
       ];
     case 'double': {
       const big = p.to ?? { x: 860, y: 330 };
@@ -173,10 +182,9 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'golden':
       return [
         {
-          text: 'A golden bloom! Lots of honey, but it closes soon — quick!',
-          hint: { kind: 'drag-to-golden' },
-          when: (s) => s.golden,
-          done: (s) => s.goldenServed || !s.golden,
+          text: 'Everything at once! Golden blooms, wasps and mist — fill the jar',
+          hint: null,
+          done: (s) => s.routesDrawn >= 2,
         },
       ];
   }
