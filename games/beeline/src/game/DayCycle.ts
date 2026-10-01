@@ -122,6 +122,8 @@ export interface DayFeatures {
   firstGoldenAt?: number;
   /** Honey in each golden bloom; unset to size it from the day. */
   goldenHoney?: number;
+  /** Honey a swatted wasp pays; unset for the share of the threat quota. */
+  swatBounty?: number;
   /** Most honey one find can pay; unset for no limit. */
   discoveryCap?: number;
   /** Hand-placed hedges. When present, replaces the generated maze. */
@@ -135,6 +137,8 @@ export interface FlowerSpot {
   honey: number;
   /** 'royal' for a Royal Bloom. */
   kind?: 'normal' | 'royal';
+  /** Seconds into the level this flower opens; shown as a bud until then. */
+  opensAt?: number;
 }
 
 export interface TreasurePlan {

@@ -3,6 +3,7 @@ import type { DayFeatures, FlowerSpot, TreasurePlan } from './DayCycle.ts';
 import { noModifiers, type RunModifiers } from './Items.ts';
 import { TUNING } from '../config/tuning.ts';
 import type { LessonPoints } from './Lessons.ts';
+import type { RivalSpec } from './Rival.ts';
 
 /**
  * The campaign: thirty fixed meadows in three worlds.
@@ -18,12 +19,15 @@ import type { LessonPoints } from './Lessons.ts';
  * still varies between attempts is what the player does, the golden blooms'
  * timing and the wasps'.
  *
- * A level is won the moment its jar is full; stars are for how fast. The
- * first world is hand-built, one idea per board. Jars for the generated
- * worlds and every board's star times are **fitted, not chosen**:
- * `src/playtest/fit-levels.ts` plays each level with the three simulated
- * players and writes `LEVEL_GOALS` below, with margins for the fact that
- * people read, aim and hesitate where the bots do not.
+ * A level is won the moment its jar is full; stars are for how fast. Every
+ * board is hand-built: the first world one idea per board, the later two
+ * puzzles of hedges, mist, buds and raids, each side of the board a
+ * different shape. A race's jar is a little over half the board's honey
+ * (`JAR_SHARE`), and no one flower may be worth much of it (`HONEY_RULES`).
+ * Star times are **fitted, not chosen**: `src/playtest/fit-levels.ts` plays
+ * each level with the three simulated players and writes `LEVEL_GOALS`
+ * below, with margins for the fact that people read, aim and hesitate where
+ * the bots do not.
  */
 
 export interface WorldDef {
@@ -100,11 +104,61 @@ export interface LevelDef {
   lesson?: LessonId;
   /** Where the lesson's hand drags, on boards where that is not a flower. */
   lessonPoints?: LessonPoints;
+  /** A rival wasp colony racing the player for the same flowers. */
+  rival?: RivalSpec;
 }
 
 /** Ideas the first world teaches, one per board. */
 export type LessonId =
-  'drag' | 'second' | 'dry' | 'sun' | 'double' | 'hedge' | 'wasp' | 'mist' | 'golden';
+  | 'drag'
+  | 'second'
+  | 'dry'
+  | 'sun'
+  | 'double'
+  | 'hedge'
+  | 'raid'
+  | 'defend'
+  | 'mist'
+  | 'golden';
+
+/**
+ * Flowers in mirrored pairs about the board's centre line (x = 640), so the
+ * player's side and the wasps' side hold the same meadow. A spot on the
+ * centre line is listed once.
+ */
+function mirrored(spots: FlowerSpot[]): FlowerSpot[] {
+  return spots.flatMap((s) =>
+    Math.abs(s.x - 640) < 1 ? [s] : [s, { ...s, x: 1280 - s.x }],
+  );
+}
+
+/**
+ * Hedges, mirrored the same way: a cell's left edge at column c is the
+ * mirror of the left edge at column 8 - c; a top edge at (c, r) mirrors to
+ * (7 - c, r). A hedge on the centre line (left edge of column 4) is its own
+ * mirror.
+ */
+function mirroredWalls(
+  walls: Array<[number, number, 'L' | 'T']>,
+): Array<[number, number, 'L' | 'T']> {
+  const out: Array<[number, number, 'L' | 'T']> = [];
+  const key = new Set<string>();
+  const add = (w: [number, number, 'L' | 'T']): void => {
+    const k = w.join(',');
+    if (!key.has(k)) {
+      key.add(k);
+      out.push(w);
+    }
+  };
+  for (const [c, r, side] of walls) {
+    add([c, r, side]);
+    add(side === 'L' ? [8 - c, r, 'L'] : [7 - c, r, 'T']);
+  }
+  return out;
+}
+
+/** The wasps' nest: the mirror image of the hive. */
+const NEST = { x: 1014, y: 492 } as const;
 
 interface Spec {
   name: string;
@@ -114,6 +168,7 @@ interface Spec {
   walls?: Array<[number, number, 'L' | 'T']>;
   lesson?: LessonId;
   lessonPoints?: LessonPoints;
+  rival?: RivalSpec;
   /**
    * Star times set by hand, for a board whose trick the simulated players do
    * not know (stacking lines on one flower), so fitting cannot place them.
@@ -139,15 +194,18 @@ const H: WaspKind = 'hornet';
 const SPECS: readonly Spec[] = [
   // ---- Spring Meadow: hand-built, one idea per board.
   //
-  // Board geometry: the hive sits at (266, 492). Cells are ~152 x 116 px from
-  // (30, 110): column centres 106, 259, 411, 564, 716, 869, 1021, 1174; row
-  // centres 168, 284, 400, 516, 632. A hedge is the left ('L') or top ('T')
-  // edge of a cell.
+  // The hive sits at (266, 492); from 1-3 the wasps' nest sits at its mirror
+  // image and the whole meadow is mirrored (see `mirrored`), so the race is
+  // fair and the middle is contested. Cells are ~152 x 116 px from (30, 110):
+  // column centres 106, 259, 411, 564, 716, 869, 1021, 1174; row centres
+  // 168, 284, 400, 516, 632. A hedge is the left ('L') or top ('T') edge of
+  // a cell. Jars hold a little over half the honey on the board, so only one
+  // side can fill one; after the first boards a race runs about a minute.
   {
     name: 'First Bloom',
     seconds: 0,
     flowers: 1,
-    lines: 3,
+    lines: 2,
     bees: 16,
     difficulty: 1,
     lesson: 'drag',
@@ -169,408 +227,916 @@ const SPECS: readonly Spec[] = [
     ],
   },
   {
-    name: 'Empty Flowers',
+    name: 'Wasps Next Door',
     seconds: 0,
-    flowers: 5,
-    lines: 2,
-    bees: 16,
+    flowers: 6,
+    lines: 3,
+    bees: 24,
     difficulty: 1,
     lesson: 'dry',
-    goal: 70,
-    layout: [
-      { x: 500, y: 360, honey: 14 },
-      { x: 470, y: 630, honey: 14 },
-      { x: 760, y: 290, honey: 18 },
-      { x: 820, y: 560, honey: 18 },
-      { x: 1040, y: 420, honey: 30 },
-    ],
+    rival: { ...NEST, bees: 16, lines: 2, skill: 'dozy' },
+    layout: mirrored([
+      { x: 480, y: 360, honey: 20 },
+      { x: 480, y: 630, honey: 20 },
+      { x: 640, y: 230, honey: 30 },
+      { x: 640, y: 520, honey: 30 },
+    ]),
   },
   {
-    name: 'Sunset',
-    seconds: 34,
-    flowers: 4,
+    name: 'Golden Race',
+    seconds: 0,
+    flowers: 7,
     lines: 3,
     bees: 24,
     difficulty: 2,
     golden: true,
     lesson: 'sun',
-    goal: 90,
-    layout: [
-      { x: 560, y: 280, honey: 30 },
-      { x: 720, y: 490, honey: 40 },
-      { x: 430, y: 640, honey: 25 },
-      { x: 960, y: 300, honey: 45 },
-    ],
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'dozy' },
+    layout: mirrored([
+      { x: 460, y: 300, honey: 35 },
+      { x: 470, y: 640, honey: 30 },
+      { x: 560, y: 180, honey: 25 },
+      { x: 640, y: 460, honey: 45 },
+    ]),
   },
   {
     name: 'Big Bloom',
-    seconds: 45,
-    flowers: 3,
+    seconds: 0,
+    flowers: 6,
     lines: 3,
     bees: 24,
     difficulty: 2,
     lesson: 'double',
-    lessonPoints: { to: { x: 860, y: 330 } },
-    // Measured: one line takes ~58 s (too slow), two ~30 s, three ~22 s.
-    goal: 80,
-    starTimes: [26, 36],
+    lessonPoints: { to: { x: 480, y: 250 } },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady' },
+    // Not a mirror: the big flower is nearer you, the wasps have two good
+    // ones by their nest. Stack your lines on it and it is yours; spread
+    // them and the wasps come for it.
     layout: [
-      { x: 860, y: 330, honey: 110 },
-      { x: 470, y: 300, honey: 12 },
-      { x: 520, y: 600, honey: 12 },
+      { x: 480, y: 250, honey: 90 },
+      { x: 640, y: 560, honey: 30 },
+      { x: 150, y: 250, honey: 20 },
+      { x: 380, y: 640, honey: 20 },
+      { x: 900, y: 330, honey: 35 },
+      { x: 880, y: 640, honey: 35 },
     ],
   },
   {
     name: 'The Hedge',
-    seconds: 55,
-    flowers: 3,
+    seconds: 0,
+    flowers: 6,
     lines: 3,
     bees: 24,
     difficulty: 3,
     lesson: 'hedge',
-    lessonPoints: { via: { x: 690, y: 650 }, to: { x: 880, y: 400 } },
-    goal: 70,
-    // One long hedge down the middle, open at the top and the bottom.
-    walls: [
-      [4, 1, 'L'],
-      [4, 2, 'L'],
-      [4, 3, 'L'],
-    ],
+    lessonPoints: { via: { x: 400, y: 190 }, to: { x: 640, y: 170 } },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady' },
+    // The rich flowers sit behind hedges, top and bottom: straight lines from
+    // either side run into them, so both colonies must go round.
+    walls: mirroredWalls([
+      [3, 1, 'T'],
+      [2, 4, 'T'],
+      [3, 4, 'T'],
+    ]),
     layout: [
-      { x: 430, y: 330, honey: 25 },
-      { x: 880, y: 400, honey: 60 },
-      { x: 1040, y: 270, honey: 50 },
+      { x: 640, y: 170, honey: 45 },
+      { x: 640, y: 650, honey: 45 },
+      ...mirrored([
+        { x: 430, y: 330, honey: 35 },
+        { x: 560, y: 450, honey: 30 },
+      ]),
     ],
   },
   {
-    name: 'Hedge Row',
-    seconds: 55,
+    name: 'Raid!',
+    seconds: 0,
     flowers: 4,
     lines: 3,
     bees: 24,
     difficulty: 3,
-    golden: true,
-    goal: 100,
-    walls: [
-      [3, 1, 'T'],
-      [4, 1, 'T'],
-      [5, 1, 'T'],
-      [6, 2, 'L'],
-      [6, 3, 'L'],
-      [3, 4, 'L'],
-    ],
+    lesson: 'raid',
+    // The wasps have two flowers on their doorstep to your one: their jar
+    // runs ahead, and a raid only pays on a fuller jar than yours.
+    rival: { ...NEST, bees: 20, lines: 3, skill: 'steady', raidOut: true },
+    walls: mirroredWalls([
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+    ]),
     layout: [
-      { x: 600, y: 170, honey: 45 },
-      { x: 560, y: 420, honey: 30 },
-      { x: 1050, y: 450, honey: 60 },
-      { x: 590, y: 640, honey: 25 },
+      { x: 900, y: 600, honey: 35 },
+      { x: 1130, y: 300, honey: 35 },
+      { x: 380, y: 600, honey: 30 },
+      ...mirrored([{ x: 520, y: 220, honey: 35 }]),
     ],
   },
   {
-    name: 'Wasp!',
-    seconds: 50,
-    flowers: 4,
+    name: 'Hold the Hive',
+    seconds: 0,
+    flowers: 7,
     lines: 3,
     bees: 24,
     difficulty: 4,
     golden: true,
-    lesson: 'wasp',
-    goal: 110,
+    lesson: 'defend',
     wave: ['raider'],
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    // Two corridors either side of a hedge wall down the middle; the richest
+    // flowers wait at their far ends.
+    walls: mirroredWalls([
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+      [4, 3, 'L'],
+      [2, 1, 'T'],
+      [2, 4, 'T'],
+    ]),
     layout: [
-      { x: 560, y: 300, honey: 35 },
-      { x: 700, y: 560, honey: 35 },
-      { x: 880, y: 350, honey: 40 },
-      { x: 1050, y: 560, honey: 40 },
+      { x: 640, y: 170, honey: 60 },
+      { x: 640, y: 640, honey: 60 },
+      ...mirrored([
+        { x: 400, y: 640, honey: 30 },
+        { x: 560, y: 360, honey: 40 },
+        { x: 110, y: 200, honey: 25 },
+      ]),
     ],
   },
   {
     name: 'Into the Mist',
-    seconds: 42,
-    flowers: 5,
+    seconds: 0,
+    flowers: 8,
     lines: 3,
     bees: 24,
     difficulty: 4,
     lesson: 'mist',
-    lessonPoints: { via: { x: 760, y: 300 } },
-    goal: 140,
+    lessonPoints: { via: { x: 600, y: 300 } },
     fog: true,
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    walls: mirroredWalls([
+      [3, 2, 'L'],
+      [3, 3, 'L'],
+      [1, 2, 'T'],
+      [3, 1, 'T'],
+    ]),
     layout: [
-      { x: 520, y: 400, honey: 30 },
-      { x: 820, y: 250, honey: 40 },
-      { x: 900, y: 600, honey: 40 },
-      { x: 1150, y: 400, honey: 120, kind: 'royal' },
-      { x: 640, y: 640, honey: 30 },
+      { x: 640, y: 168, honey: 50, kind: 'royal' },
+      { x: 640, y: 560, honey: 50 },
+      ...mirrored([
+        { x: 430, y: 420, honey: 30 },
+        { x: 470, y: 640, honey: 25 },
+        { x: 110, y: 230, honey: 30 },
+      ]),
     ],
   },
   {
     name: 'Full Bloom',
-    seconds: 40,
-    flowers: 6,
+    seconds: 0,
+    flowers: 9,
     lines: 4,
     bees: 32,
     difficulty: 5,
     lesson: 'golden',
-    goal: 200,
     fog: true,
     golden: true,
     wave: ['raider'],
+    rival: { ...NEST, bees: 32, lines: 4, skill: 'sharp', raids: true, raidOut: true },
+    // A real maze: the centre is walled in and opened only from above and
+    // below, so every rich flower is a route, not a line.
+    walls: mirroredWalls([
+      [3, 1, 'L'],
+      [3, 2, 'L'],
+      [3, 3, 'L'],
+      [3, 1, 'T'],
+      [1, 2, 'T'],
+      [2, 3, 'T'],
+      [2, 4, 'L'],
+    ]),
     layout: [
-      { x: 500, y: 380, honey: 35 },
-      { x: 660, y: 600, honey: 35 },
-      { x: 690, y: 240, honey: 45 },
-      { x: 1000, y: 200, honey: 60 },
-      { x: 1100, y: 520, honey: 100, kind: 'royal' },
-      { x: 300, y: 250, honey: 25 },
+      { x: 640, y: 400, honey: 80, kind: 'royal' },
+      { x: 640, y: 170, honey: 50 },
+      { x: 640, y: 650, honey: 50 },
+      ...mirrored([
+        { x: 440, y: 300, honey: 35 },
+        { x: 420, y: 640, honey: 35 },
+        { x: 110, y: 200, honey: 30 },
+        { x: 110, y: 640, honey: 40, opensAt: 35 },
+      ]),
     ],
   },
 
-  // ---- Bramble Maze: routing in legs
+  // ---- Bramble Maze: hand-built, routing in legs. Every board is a
+  // different shape on each side — a fair fight, never a mirror — and from
+  // 2-2 on, buds open partway through, so the board you plan at the start is
+  // not the board you finish on.
   {
     name: 'First Hedges',
-    seconds: 55,
-    flowers: 5,
+    seconds: 0,
+    fog: false,
+    flowers: 7,
     lines: 3,
     bees: 24,
     difficulty: 4,
-    maze: 0.85,
-    fog: true,
-    intro: 'Drag from the end of a line to steer round hedges',
+    intro: 'Drag on from the end of a line to steer round hedges',
+    rival: { ...NEST, bees: 20, lines: 3, skill: 'dozy', raids: true, raidOut: true },
+    // Your rich flowers wait behind your own hedge; theirs sit in the open.
+    walls: [
+      [2, 1, 'L'],
+      [2, 2, 'L'],
+      [2, 3, 'L'],
+      [5, 3, 'T'],
+      [6, 3, 'T'],
+    ],
+    layout: [
+      { x: 106, y: 200, honey: 25 },
+      { x: 411, y: 284, honey: 45 },
+      { x: 411, y: 530, honey: 40 },
+      { x: 640, y: 400, honey: 45 },
+      { x: 640, y: 640, honey: 30 },
+      { x: 869, y: 284, honey: 35 },
+      { x: 1100, y: 640, honey: 35 },
+    ],
   },
   {
-    name: 'Corners',
-    seconds: 55,
+    name: 'Buds',
+    seconds: 0,
+    fog: false,
     flowers: 6,
     lines: 3,
     bees: 24,
     difficulty: 5,
-    maze: 0.75,
-    fog: true,
-    golden: true,
+    intro: 'Buds open later — have a line free when they do',
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    // An S through the middle; the big honey is still in bud at the start.
+    walls: [
+      [3, 0, 'L'],
+      [3, 1, 'L'],
+      [3, 2, 'L'],
+      [5, 2, 'L'],
+      [5, 3, 'L'],
+      [5, 4, 'L'],
+    ],
+    layout: [
+      { x: 150, y: 250, honey: 30 },
+      { x: 420, y: 640, honey: 35 },
+      { x: 640, y: 560, honey: 40 },
+      { x: 640, y: 170, honey: 30 },
+      { x: 860, y: 200, honey: 35 },
+      { x: 1150, y: 640, honey: 30 },
+      { x: 400, y: 200, honey: 55, opensAt: 25 },
+      { x: 880, y: 640, honey: 55, opensAt: 25 },
+    ],
   },
   {
     name: 'Narrow Rows',
-    seconds: 60,
-    flowers: 6,
+    seconds: 0,
+    flowers: 8,
     lines: 3,
     bees: 24,
     difficulty: 5,
-    maze: 0.65,
     fog: true,
     golden: true,
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    // Three bands of meadow joined by narrow gaps: the middle gap is shared,
+    // the top band is reached only round the far edges — yours on the left.
+    walls: [
+      [0, 3, 'T'],
+      [1, 3, 'T'],
+      [2, 3, 'T'],
+      [5, 3, 'T'],
+      [6, 3, 'T'],
+      [7, 3, 'T'],
+      [1, 1, 'T'],
+      [2, 1, 'T'],
+      [3, 1, 'T'],
+      [4, 1, 'T'],
+      [5, 1, 'T'],
+      [6, 1, 'T'],
+      [7, 1, 'T'],
+    ],
+    layout: [
+      { x: 420, y: 620, honey: 30 },
+      { x: 860, y: 620, honey: 30 },
+      { x: 300, y: 330, honey: 40 },
+      { x: 980, y: 330, honey: 40 },
+      { x: 640, y: 300, honey: 45 },
+      { x: 640, y: 168, honey: 60 },
+      { x: 150, y: 168, honey: 35 },
+      { x: 1130, y: 168, honey: 35 },
+    ],
   },
   {
     name: 'Thorn Garden',
-    seconds: 60,
-    flowers: 7,
+    seconds: 0,
+    flowers: 8,
     lines: 4,
     bees: 32,
     difficulty: 6,
-    maze: 0.6,
     fog: true,
-    golden: true,
-    rich: true,
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    // The Royal Bloom's garden opens toward the wasps; you have a private
+    // pocket top-left, reached only the long way round.
+    walls: [
+      [3, 1, 'T'],
+      [4, 1, 'T'],
+      [3, 1, 'L'],
+      [3, 2, 'L'],
+      [3, 3, 'T'],
+      [4, 3, 'T'],
+      [5, 1, 'L'],
+      [1, 1, 'T'],
+      [2, 1, 'T'],
+      [3, 0, 'L'],
+    ],
+    layout: [
+      { x: 640, y: 340, honey: 60, kind: 'royal' },
+      { x: 259, y: 168, honey: 40 },
+      { x: 411, y: 168, honey: 40 },
+      { x: 411, y: 632, honey: 35 },
+      { x: 640, y: 632, honey: 40 },
+      { x: 1021, y: 200, honey: 35 },
+      { x: 869, y: 632, honey: 30 },
+      { x: 564, y: 516, honey: 50, opensAt: 35 },
+    ],
   },
   {
     name: 'Lost Clover',
-    seconds: 60,
-    flowers: 7,
+    seconds: 0,
+    flowers: 8,
     lines: 3,
     bees: 24,
     difficulty: 6,
-    maze: 0.55,
     fog: true,
     golden: true,
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    // Each colony has a hidden pocket in its own corner, walled off and
+    // entered from the side away from home. Find yours first.
+    walls: [
+      [0, 4, 'T'],
+      [1, 4, 'T'],
+      [6, 1, 'T'],
+      [7, 1, 'T'],
+      [3, 2, 'L'],
+      [5, 2, 'L'],
+    ],
+    layout: [
+      { x: 106, y: 632, honey: 45 },
+      { x: 259, y: 640, honey: 35 },
+      { x: 1021, y: 168, honey: 45 },
+      { x: 1174, y: 168, honey: 35 },
+      { x: 640, y: 284, honey: 40 },
+      { x: 640, y: 560, honey: 40 },
+      { x: 450, y: 330, honey: 25 },
+      { x: 830, y: 420, honey: 25 },
+    ],
   },
   {
     name: 'Hedge Loop',
-    seconds: 65,
-    flowers: 7,
+    seconds: 0,
+    fog: false,
+    flowers: 9,
     lines: 4,
     bees: 32,
     difficulty: 7,
-    maze: 0.5,
-    fog: true,
-    golden: true,
-    rich: true,
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    // A ring of hedge round the middle: you get in at the bottom-left, they
+    // get in at the top-right, and the buds outside open late.
+    walls: [
+      [2, 1, 'T'],
+      [3, 1, 'T'],
+      [4, 1, 'T'],
+      [5, 1, 'T'],
+      [2, 4, 'T'],
+      [3, 4, 'T'],
+      [4, 4, 'T'],
+      [5, 4, 'T'],
+      [2, 1, 'L'],
+      [2, 2, 'L'],
+      [6, 2, 'L'],
+      [6, 3, 'L'],
+    ],
+    layout: [
+      { x: 640, y: 400, honey: 60 },
+      { x: 480, y: 300, honey: 35 },
+      { x: 800, y: 500, honey: 35 },
+      { x: 640, y: 168, honey: 45 },
+      { x: 640, y: 632, honey: 45 },
+      { x: 150, y: 200, honey: 30 },
+      { x: 1130, y: 632, honey: 30 },
+      { x: 411, y: 632, honey: 50, opensAt: 40 },
+      { x: 869, y: 168, honey: 50, opensAt: 40 },
+    ],
   },
   {
     name: 'The Long Way',
-    seconds: 65,
-    flowers: 8,
+    seconds: 0,
+    flowers: 9,
     lines: 4,
     bees: 32,
     difficulty: 8,
-    maze: 0.45,
     fog: true,
     golden: true,
-    rich: true,
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    // A hedge down the middle, open only at the bottom: the far side is a
+    // long trip for either colony, and the bud there is worth making it.
+    walls: [
+      [4, 0, 'L'],
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+      [4, 3, 'L'],
+      [1, 2, 'T'],
+      [2, 2, 'T'],
+      [5, 1, 'T'],
+      [6, 1, 'T'],
+      [7, 1, 'T'],
+    ],
+    layout: [
+      { x: 150, y: 168, honey: 40 },
+      { x: 420, y: 168, honey: 45 },
+      { x: 420, y: 400, honey: 30 },
+      { x: 869, y: 168, honey: 50 },
+      { x: 1130, y: 168, honey: 45 },
+      { x: 869, y: 400, honey: 30 },
+      { x: 640, y: 632, honey: 55 },
+      { x: 150, y: 632, honey: 45, opensAt: 40 },
+      { x: 1130, y: 632, honey: 45, opensAt: 55 },
+    ],
   },
   {
     name: 'Bramble Heart',
-    seconds: 70,
-    flowers: 8,
+    seconds: 0,
+    flowers: 10,
     lines: 4,
     bees: 32,
     difficulty: 8,
-    maze: 0.4,
     fog: true,
     golden: true,
-    rich: true,
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    // The Royal Bloom at the heart has one gate, on the wasps' side of the
+    // bottom; your consolation is a bud in your own corner.
+    walls: [
+      [3, 1, 'T'],
+      [4, 1, 'T'],
+      [3, 1, 'L'],
+      [3, 2, 'L'],
+      [5, 1, 'L'],
+      [5, 2, 'L'],
+      [3, 3, 'T'],
+    ],
+    layout: [
+      { x: 564, y: 284, honey: 70, kind: 'royal' },
+      { x: 716, y: 400, honey: 30 },
+      { x: 150, y: 168, honey: 35 },
+      { x: 411, y: 632, honey: 40 },
+      { x: 640, y: 632, honey: 45 },
+      { x: 869, y: 632, honey: 40 },
+      { x: 1130, y: 168, honey: 35 },
+      { x: 259, y: 284, honey: 30 },
+      { x: 1021, y: 284, honey: 30 },
+      { x: 106, y: 632, honey: 45, opensAt: 40 },
+    ],
   },
   {
     name: 'Five Roads',
-    seconds: 70,
-    flowers: 8,
+    seconds: 0,
+    fog: false,
+    flowers: 12,
     lines: 5,
     bees: 40,
     difficulty: 9,
-    maze: 0.35,
-    fog: true,
-    golden: true,
-    rich: true,
+    rival: { ...NEST, bees: 34, lines: 5, skill: 'steady', raids: true, raidOut: true },
+    // Hedges with gaps in different rows on each side: five roads across,
+    // none of them straight. The two big buds in the middle open together.
+    walls: [
+      [2, 0, 'L'],
+      [2, 1, 'L'],
+      [2, 3, 'L'],
+      [2, 4, 'L'],
+      [4, 0, 'L'],
+      [4, 2, 'L'],
+      [4, 4, 'L'],
+      [6, 0, 'L'],
+      [6, 2, 'L'],
+      [6, 3, 'L'],
+      [6, 4, 'L'],
+    ],
+    layout: [
+      { x: 106, y: 168, honey: 35 },
+      { x: 106, y: 632, honey: 35 },
+      { x: 1174, y: 168, honey: 35 },
+      { x: 1174, y: 632, honey: 35 },
+      { x: 411, y: 168, honey: 40 },
+      { x: 411, y: 632, honey: 40 },
+      { x: 869, y: 168, honey: 40 },
+      { x: 869, y: 632, honey: 40 },
+      { x: 564, y: 400, honey: 45 },
+      { x: 716, y: 400, honey: 45 },
+      { x: 564, y: 168, honey: 65, opensAt: 45 },
+      { x: 716, y: 632, honey: 65, opensAt: 45 },
+    ],
   },
   {
     name: 'The Labyrinth',
-    seconds: 75,
-    flowers: 9,
+    seconds: 0,
+    flowers: 12,
     lines: 5,
     bees: 40,
     difficulty: 10,
-    maze: 0.3,
     fog: true,
     golden: true,
-    rich: true,
+    rival: { ...NEST, bees: 36, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    // A true maze, different on each side: yours winds, theirs is open but
+    // long. The Royal Bloom sits in a dead end that both have to plan for.
+    walls: [
+      [2, 0, 'L'],
+      [2, 1, 'L'],
+      [1, 2, 'T'],
+      [2, 2, 'T'],
+      [3, 1, 'T'],
+      [3, 2, 'L'],
+      [3, 3, 'L'],
+      [4, 0, 'L'],
+      [4, 1, 'L'],
+      [4, 4, 'L'],
+      [5, 2, 'T'],
+      [6, 2, 'T'],
+      [5, 3, 'L'],
+      [6, 1, 'L'],
+    ],
+    layout: [
+      { x: 640, y: 516, honey: 70, kind: 'royal' },
+      { x: 106, y: 168, honey: 40 },
+      { x: 411, y: 200, honey: 40 },
+      { x: 411, y: 400, honey: 35 },
+      { x: 411, y: 640, honey: 40 },
+      { x: 716, y: 200, honey: 40 },
+      { x: 1021, y: 168, honey: 40 },
+      { x: 869, y: 400, honey: 35 },
+      { x: 869, y: 640, honey: 40 },
+      { x: 1174, y: 400, honey: 30 },
+      { x: 259, y: 632, honey: 45, opensAt: 45 },
+      { x: 1021, y: 632, honey: 45, opensAt: 45 },
+    ],
   },
 
-  // ---- Wasp Summer: everything, plus raids
+  // ---- Wasp Summer: the wasps fight back. Raiders fly at your hive, the
+  // colony gets sharper, and every board asks whether to forage, raid or
+  // stand guard.
   {
     name: 'First Raid',
-    seconds: 55,
-    flowers: 6,
+    seconds: 0,
+    fog: false,
+    flowers: 8,
     lines: 3,
     bees: 24,
     difficulty: 5,
-    maze: 0.9,
-    fog: true,
     wave: [R],
-    intro: 'Wasps! Tap them to swat them',
+    intro: 'Raiders! Tap a wasp to swat it before it robs your hive',
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    walls: [
+      [3, 1, 'L'],
+      [3, 2, 'L'],
+      [5, 2, 'L'],
+      [5, 3, 'L'],
+    ],
+    layout: [
+      { x: 150, y: 200, honey: 30 },
+      { x: 411, y: 200, honey: 40 },
+      { x: 420, y: 640, honey: 35 },
+      { x: 640, y: 400, honey: 45 },
+      { x: 869, y: 200, honey: 35 },
+      { x: 869, y: 640, honey: 40 },
+      { x: 1130, y: 200, honey: 30 },
+      { x: 640, y: 640, honey: 50, opensAt: 35 },
+    ],
   },
   {
     name: 'Pair of Pests',
-    seconds: 60,
-    flowers: 6,
+    seconds: 0,
+    flowers: 9,
     lines: 3,
     bees: 24,
     difficulty: 6,
-    maze: 0.8,
     fog: true,
     golden: true,
     wave: [R, R],
+    rival: { ...NEST, bees: 22, lines: 3, skill: 'steady', raids: true, raidOut: true },
+    // Your flowers are near and few; theirs are rich and far. Their jar will
+    // pull ahead — that is when a raid pays.
+    walls: [
+      [2, 2, 'T'],
+      [2, 3, 'L'],
+      [5, 1, 'L'],
+      [5, 2, 'L'],
+      [6, 4, 'T'],
+    ],
+    layout: [
+      { x: 150, y: 330, honey: 30 },
+      { x: 300, y: 640, honey: 30 },
+      { x: 480, y: 450, honey: 35 },
+      { x: 640, y: 200, honey: 40 },
+      { x: 880, y: 330, honey: 45 },
+      { x: 1100, y: 200, honey: 50 },
+      { x: 1100, y: 640, honey: 45 },
+      { x: 640, y: 620, honey: 35 },
+      { x: 420, y: 200, honey: 50, opensAt: 40 },
+    ],
   },
   {
     name: 'Stingers',
-    seconds: 60,
-    flowers: 7,
+    seconds: 0,
+    flowers: 10,
     lines: 4,
     bees: 32,
     difficulty: 6,
-    maze: 0.7,
     fog: true,
     golden: true,
     wave: [R, R, R],
+    rival: { ...NEST, bees: 20, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    // A long hedge across the middle row: top and bottom are two meadows,
+    // and the gap is on the wasps' side.
+    walls: [
+      [0, 2, 'T'],
+      [1, 2, 'T'],
+      [2, 2, 'T'],
+      [3, 2, 'T'],
+      [4, 2, 'T'],
+      [5, 2, 'T'],
+      [7, 2, 'T'],
+      [0, 3, 'T'],
+      [1, 3, 'T'],
+    ],
+    layout: [
+      { x: 150, y: 200, honey: 40 },
+      { x: 420, y: 168, honey: 45 },
+      { x: 640, y: 250, honey: 50 },
+      { x: 869, y: 168, honey: 40 },
+      { x: 1130, y: 200, honey: 35 },
+      { x: 450, y: 600, honey: 35 },
+      { x: 640, y: 520, honey: 40 },
+      { x: 869, y: 600, honey: 35 },
+      { x: 150, y: 640, honey: 30 },
+      { x: 300, y: 290, honey: 50, opensAt: 40 },
+    ],
   },
   {
     name: 'Swarm Season',
-    seconds: 65,
-    flowers: 7,
+    seconds: 0,
+    flowers: 10,
     lines: 4,
     bees: 32,
     difficulty: 7,
-    maze: 0.6,
     fog: true,
     golden: true,
-    rich: true,
     wave: [R, R, R],
+    rival: { ...NEST, bees: 28, lines: 4, skill: 'steady', raids: true, raidOut: true },
+    // Open ground, thick mist, buds on a timer: a board about reading
+    // what is coming and who will get there first.
+    walls: [
+      [3, 0, 'L'],
+      [5, 4, 'L'],
+      [4, 2, 'T'],
+    ],
+    layout: [
+      { x: 150, y: 168, honey: 35 },
+      { x: 420, y: 300, honey: 40 },
+      { x: 450, y: 640, honey: 40 },
+      { x: 640, y: 400, honey: 45 },
+      { x: 830, y: 500, honey: 40 },
+      { x: 860, y: 168, honey: 40 },
+      { x: 1130, y: 330, honey: 35 },
+      { x: 1130, y: 640, honey: 35 },
+      { x: 640, y: 168, honey: 50, opensAt: 30 },
+      { x: 640, y: 640, honey: 50, opensAt: 50 },
+    ],
   },
   {
     name: 'Drone Rush',
-    seconds: 65,
-    flowers: 7,
+    seconds: 0,
+    flowers: 10,
     lines: 4,
     bees: 32,
     difficulty: 8,
-    maze: 0.6,
     fog: true,
     golden: true,
     wave: [D, D, R, R],
     intro: 'Drones are fast — swat them early',
+    rival: { ...NEST, bees: 26, lines: 4, skill: 'sharp', raids: true, raidOut: true },
+    // Your hive sits in a hedged yard with two gates: easy to defend,
+    // slow to leave.
+    walls: [
+      [0, 2, 'T'],
+      [1, 2, 'T'],
+      [2, 3, 'L'],
+      [2, 4, 'L'],
+      [5, 1, 'T'],
+      [6, 1, 'T'],
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+    ],
+    layout: [
+      { x: 106, y: 632, honey: 35 },
+      { x: 150, y: 168, honey: 40 },
+      { x: 411, y: 284, honey: 40 },
+      { x: 480, y: 600, honey: 45 },
+      { x: 716, y: 400, honey: 45 },
+      { x: 869, y: 168, honey: 45 },
+      { x: 869, y: 632, honey: 40 },
+      { x: 1174, y: 168, honey: 35 },
+      { x: 640, y: 168, honey: 50, opensAt: 35 },
+      { x: 300, y: 400, honey: 40, opensAt: 50 },
+    ],
   },
   {
     name: 'Hot Wind',
-    seconds: 65,
-    flowers: 8,
+    seconds: 0,
+    flowers: 11,
     lines: 4,
     bees: 32,
     difficulty: 8,
-    maze: 0.5,
     fog: true,
     golden: true,
-    rich: true,
     wave: [D, D, R, R],
+    rival: { ...NEST, bees: 30, lines: 4, skill: 'sharp', raids: true, raidOut: true },
+    // Diagonal hedges: what is near as the bee flies is far as the line goes.
+    walls: [
+      [1, 1, 'L'],
+      [2, 1, 'T'],
+      [2, 2, 'L'],
+      [3, 2, 'T'],
+      [3, 3, 'L'],
+      [5, 1, 'L'],
+      [5, 2, 'T'],
+      [6, 2, 'L'],
+      [6, 3, 'T'],
+      [4, 4, 'L'],
+    ],
+    layout: [
+      { x: 106, y: 168, honey: 40 },
+      { x: 259, y: 168, honey: 35 },
+      { x: 411, y: 284, honey: 45 },
+      { x: 564, y: 400, honey: 40 },
+      { x: 564, y: 640, honey: 40 },
+      { x: 716, y: 284, honey: 40 },
+      { x: 869, y: 400, honey: 45 },
+      { x: 1174, y: 168, honey: 40 },
+      { x: 1021, y: 640, honey: 35 },
+      { x: 259, y: 640, honey: 45, opensAt: 40 },
+      { x: 1021, y: 168, honey: 45, opensAt: 40 },
+    ],
   },
   {
     name: 'Guarded Grove',
-    seconds: 70,
-    flowers: 8,
+    seconds: 0,
+    flowers: 11,
     lines: 5,
     bees: 40,
     difficulty: 9,
-    maze: 0.45,
     fog: true,
     golden: true,
-    rich: true,
     wave: [D, R, R, R, R],
+    rival: { ...NEST, bees: 28, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    // The grove in the middle is walled on three sides and open to the top;
+    // the Royal Bloom is inside. The far corners hold the rest.
+    walls: [
+      [3, 2, 'L'],
+      [3, 3, 'L'],
+      [5, 2, 'L'],
+      [5, 3, 'L'],
+      [3, 4, 'T'],
+      [4, 4, 'T'],
+    ],
+    layout: [
+      { x: 640, y: 516, honey: 70, kind: 'royal' },
+      { x: 564, y: 300, honey: 35 },
+      { x: 106, y: 168, honey: 40 },
+      { x: 106, y: 632, honey: 40 },
+      { x: 1174, y: 168, honey: 40 },
+      { x: 1174, y: 632, honey: 40 },
+      { x: 411, y: 168, honey: 40 },
+      { x: 869, y: 168, honey: 40 },
+      { x: 400, y: 640, honey: 40 },
+      { x: 880, y: 640, honey: 40 },
+      { x: 716, y: 168, honey: 50, opensAt: 45 },
+    ],
   },
   {
     name: 'Hornet Nest',
-    seconds: 70,
-    flowers: 8,
+    seconds: 0,
+    flowers: 11,
     lines: 5,
     bees: 40,
     difficulty: 10,
-    maze: 0.45,
     fog: true,
     golden: true,
-    rich: true,
     wave: [H, R, R, D],
     intro: 'Hornets take four swats',
+    rival: { ...NEST, bees: 32, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    // Their side is a fortress with one door; yours is open meadow and an
+    // easy target. Raid their jar when it runs ahead, cut their raids when
+    // yours does.
+    walls: [
+      [5, 1, 'L'],
+      [5, 2, 'L'],
+      [5, 4, 'L'],
+      [5, 1, 'T'],
+      [6, 1, 'T'],
+      [7, 1, 'T'],
+    ],
+    layout: [
+      { x: 150, y: 200, honey: 40 },
+      { x: 300, y: 640, honey: 40 },
+      { x: 450, y: 300, honey: 45 },
+      { x: 640, y: 450, honey: 45 },
+      { x: 640, y: 168, honey: 40 },
+      { x: 869, y: 300, honey: 45 },
+      { x: 1021, y: 640, honey: 45 },
+      { x: 1174, y: 300, honey: 40 },
+      { x: 869, y: 168, honey: 40 },
+      { x: 480, y: 640, honey: 50, opensAt: 40 },
+      { x: 1100, y: 168, honey: 50, opensAt: 55 },
+    ],
   },
   {
     name: 'Siege',
-    seconds: 75,
-    flowers: 9,
+    seconds: 0,
+    flowers: 12,
     lines: 5,
     bees: 40,
     difficulty: 11,
-    maze: 0.4,
     fog: true,
     golden: true,
-    rich: true,
     wave: [H, D, D, R, R, R],
+    rival: { ...NEST, bees: 28, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    // A maze down the middle and the buds on their side: you will be behind
+    // at the half, and the raid is how you get back.
+    walls: [
+      [3, 0, 'L'],
+      [3, 1, 'L'],
+      [3, 3, 'L'],
+      [3, 4, 'L'],
+      [4, 1, 'T'],
+      [4, 4, 'T'],
+      [5, 1, 'L'],
+      [5, 2, 'L'],
+      [5, 3, 'L'],
+      [1, 1, 'T'],
+      [6, 4, 'T'],
+    ],
+    layout: [
+      { x: 106, y: 168, honey: 40 },
+      { x: 259, y: 168, honey: 35 },
+      { x: 411, y: 400, honey: 45 },
+      { x: 300, y: 640, honey: 40 },
+      { x: 640, y: 168, honey: 45 },
+      { x: 640, y: 400, honey: 50 },
+      { x: 640, y: 640, honey: 45 },
+      { x: 869, y: 300, honey: 40 },
+      { x: 1174, y: 168, honey: 40 },
+      { x: 1021, y: 640, honey: 40 },
+      { x: 869, y: 640, honey: 55, opensAt: 40 },
+      { x: 1174, y: 400, honey: 55, opensAt: 55 },
+    ],
   },
   {
     name: 'Queen of Summer',
-    seconds: 80,
-    flowers: 9,
+    seconds: 0,
+    flowers: 13,
     lines: 5,
     bees: 40,
     difficulty: 12,
-    maze: 0.35,
     fog: true,
     golden: true,
-    rich: true,
     wave: [H, H, D, D, R, R, R],
+    rival: { ...NEST, bees: 31, lines: 5, skill: 'sharp', raids: true, raidOut: true },
+    // Everything the summer taught: a walled heart with the Royal Bloom,
+    // pockets in the mist, buds in two waves, and a colony as good as you.
+    walls: [
+      [3, 1, 'T'],
+      [4, 1, 'T'],
+      [3, 1, 'L'],
+      [5, 1, 'L'],
+      [5, 2, 'L'],
+      [3, 3, 'T'],
+      [1, 1, 'T'],
+      [0, 4, 'T'],
+      [6, 1, 'T'],
+      [7, 4, 'T'],
+      [2, 3, 'L'],
+      [6, 2, 'L'],
+    ],
+    layout: [
+      { x: 640, y: 340, honey: 80, kind: 'royal' },
+      { x: 106, y: 168, honey: 45 },
+      { x: 106, y: 640, honey: 45 },
+      { x: 1174, y: 168, honey: 45 },
+      { x: 1174, y: 640, honey: 45 },
+      { x: 411, y: 168, honey: 40 },
+      { x: 411, y: 600, honey: 40 },
+      { x: 869, y: 168, honey: 40 },
+      { x: 869, y: 600, honey: 40 },
+      { x: 640, y: 640, honey: 45 },
+      { x: 259, y: 284, honey: 35 },
+      { x: 564, y: 168, honey: 55, opensAt: 35 },
+      { x: 716, y: 516, honey: 55, opensAt: 60 },
+    ],
   },
 ];
 
@@ -621,45 +1187,73 @@ function treasuresFor(index: number): TreasurePlan {
   // Hand-built boards place their Royal Bloom themselves; the generated
   // worlds hide one each. Honey pots and lost swarms are gone: treasure that
   // only showed up on the results card confused more than it rewarded.
-  return { honeyPots: 0, lostBees: 0, royalBloom: index >= LEVELS_PER_WORLD };
+  // Every board is hand-built now and places its own Royal Bloom.
+  void index;
+  return { honeyPots: 0, lostBees: 0, royalBloom: false };
 }
 
 /**
  * [goal, three-star seconds, two-star seconds] per level, fitted by
- * `src/playtest/fit-levels.ts`. Hand-built boards give their own goal.
+ * `src/playtest/fit-levels.ts`. The goal column is the board's own jar,
+ * repeated for reference. 3-3's times are set by hand from a run with the
+ * swarm it ships with.
  */
 export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
   [25, 17, 22],
   [50, 18, 24],
-  [70, 35, 46],
-  [90, 18, 28],
-  [80, 29, 38],
-  [70, 35, 46],
-  [100, 32, 42],
-  [110, 31, 40],
-  [140, 24, 31],
-  [200, 17, 23],
-  [180, 35, 43],
-  [390, 35, 44],
-  [430, 39, 51],
-  [300, 39, 51],
-  [300, 37, 45],
-  [720, 42, 55],
-  [540, 36, 40],
-  [450, 36, 46],
-  [1050, 45, 59],
-  [700, 47, 62],
-  [430, 35, 46],
-  [520, 39, 51],
-  [500, 29, 37],
-  [890, 34, 50],
-  [740, 42, 55],
-  [520, 42, 55],
-  [810, 35, 57],
-  [870, 45, 59],
-  [1000, 41, 57],
-  [540, 20, 32],
+  [75, 23, 32],
+  [115, 27, 37],
+  [120, 26, 37],
+  [115, 43, 64],
+  [90, 43, 56],
+  [160, 39, 52],
+  [140, 59, 123],
+  [240, 48, 87],
+  [135, 38, 52],
+  [160, 63, 101],
+  [165, 48, 88],
+  [170, 69, 115],
+  [150, 60, 64],
+  [200, 67, 89],
+  [200, 78, 85],
+  [210, 65, 78],
+  [270, 87, 111],
+  [260, 67, 106],
+  [160, 57, 94],
+  [185, 46, 79],
+  [210, 110, 150],
+  [215, 49, 67],
+  [215, 62, 85],
+  [235, 60, 81],
+  [245, 40, 102],
+  [250, 47, 82],
+  [275, 66, 102],
+  [315, 54, 102],
 ];
+
+/**
+ * The jar on a board against the wasps: a little over half of all the honey
+ * it will ever hold, buds included. Filling it means out-foraging the wasps
+ * outright, so the third star is there for a clear win — and only one side
+ * can fill it.
+ */
+export const JAR_SHARE = 0.52;
+
+/** Every rule a board's honey has to keep. Checked by `levels.test.ts`. */
+export const HONEY_RULES = {
+  /** No one flower is more than this share of the jar: no single fact wins. */
+  maxFlowerShare: 0.4,
+} as const;
+
+function jarFor(spec: Spec): number | undefined {
+  if (!spec.rival || !spec.layout) return undefined;
+  const total = spec.layout.reduce((sum, f) => sum + f.honey, 0);
+  return Math.round((total * JAR_SHARE) / 5) * 5;
+}
+
+function withRival(rival: RivalSpec | undefined): { rival?: RivalSpec } {
+  return rival ? { rival } : {};
+}
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   id: index + 1,
@@ -683,8 +1277,9 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   wave: spec.wave ?? [],
   ...(spec.intro ? { intro: spec.intro } : {}),
   stars: LEVEL_STARS[index] ?? [60, 110, 160],
-  goal: spec.goal ?? LEVEL_GOALS[index]?.[0] ?? LEVEL_STARS[index]?.[0] ?? 100,
-  timed: spec.seconds > 0,
+  goal: spec.goal ?? jarFor(spec) ?? LEVEL_GOALS[index]?.[0] ?? 100,
+  // Against a rival there is no sunset: the wasps are the clock.
+  timed: spec.seconds > 0 && !spec.rival,
   starTimes: spec.starTimes ?? [
     LEVEL_GOALS[index]?.[1] ?? 20,
     LEVEL_GOALS[index]?.[2] ?? 35,
@@ -693,6 +1288,7 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   ...(spec.walls ? { walls: spec.walls } : {}),
   ...(spec.lesson ? { lesson: spec.lesson } : {}),
   ...(spec.lessonPoints ? { lessonPoints: spec.lessonPoints } : {}),
+  ...withRival(spec.rival),
 }));
 
 /**
@@ -728,16 +1324,23 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     ...(level.walls ? { walls: level.walls } : {}),
     // A find tops up the jar, but never fills it: one lucky sparkle used to
     // win a level outright.
-    discoveryCap: Math.max(5, Math.round(level.goal * 0.12)),
+    // Against the wasps, no find bonus: the jar should be readable from the
+    // flowers alone, and finding a flower first is its own reward.
+    discoveryCap: level.rival ? 0 : Math.max(5, Math.round(level.goal * 0.12)),
     // Worth chasing, never the whole jar: a bloom that held most of the goal
     // turned a timed board into waiting for it to open.
-    goldenHoney: Math.max(10, Math.round(level.goal * 0.25)),
+    goldenHoney: Math.max(10, Math.round(level.goal * 0.15)),
     // Early enough to matter: a bloom that opened as the jar filled, or a
     // wasp that landed at 192 of 200, was scenery.
     firstGoldenAt: 4,
     firstRaidAt: 8,
-    // A raider left alone carries off about a seventh of the jar.
-    threatQuota: level.goal * 3,
+    // What a raider steals is a share of this. Against the wasps a theft
+    // counts twice — out of your jar and into theirs — so it is a third of
+    // what a lone hive's raider takes.
+    threatQuota: level.goal * (level.rival ? 1 : 3),
+    // A swat is defence, not a honey source: a wave of five used to pay more
+    // than half the jar and decided the race on its own.
+    swatBounty: Math.max(1, Math.round(level.goal * 0.02)),
   };
 }
 

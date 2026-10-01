@@ -49,6 +49,8 @@ export class RouteRenderer {
    * crew looked like it was not there; each gets its own lane.
    */
   private lane = 0;
+  /** One colour for every line, instead of each flower's own. A rival's are red. */
+  tint: number | null = null;
 
   constructor(scene: Phaser.Scene, depth: number) {
     this.gfx = scene.add.graphics();
@@ -67,7 +69,7 @@ export class RouteRenderer {
       this.lane = k === 0 ? 0 : (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 9;
       if (this.showGhosts) this.drawGhost(route);
       this.drawLive(route, time);
-      this.drawTip(route, time, routeTint(route));
+      this.drawTip(route, time, this.tint ?? routeTint(route));
     }
   }
 
@@ -116,7 +118,7 @@ export class RouteRenderer {
     // This matters more than it sounds. With three jobs and five slots, "which
     // of my lines is doing what" is the question a player asks most often, and
     // answering it by colour costs no screen furniture at all.
-    const base = routeTint(route);
+    const base = this.tint ?? routeTint(route);
     const colour = strength > 0.02 ? blend(base, 0xfff3c4, strength) : base;
 
     // A soft underlay beneath a mature road, so it reads as packed ground

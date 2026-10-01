@@ -238,12 +238,13 @@ export class FieldRenderer {
     this.plateGfx.clear();
 
     for (const patch of field.patches) {
-      if (!patch.discovered) continue;
+      if (!patch.discovered || patch.kind === 'nest') continue;
       this.drawPatch(g, patch, field.time);
     }
     this.drawFlowers(field, field.time);
     this.drawLabels(field);
     this.drawGlints(field);
+    this.drawBuds(field);
     this.drawWalls(field);
 
     // Where a line can start from. Brightened while dragging, and pulsed
@@ -501,6 +502,65 @@ export class FieldRenderer {
    * that something is out there. A twinkle every few seconds each, drawn over
    * the fog so it reads as light coming through it.
    */
+  /** Labels for buds' countdowns, pooled like the flower labels. */
+  private budLabels: Phaser.GameObjects.Text[] = [];
+
+  /**
+   * Buds: flowers that open later in the level. Drawn over the mist with a
+   * ring that empties as the moment comes and the seconds above, so the
+   * second half of the board is part of the plan from the first second.
+   */
+  private drawBuds(field: Field): void {
+    const g = this.plateGfx;
+    while (this.budLabels.length < field.buds.length) {
+      this.budLabels.push(
+        this.scene.add
+          .text(0, 0, '', {
+            fontFamily:
+              'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+            fontSize: '17px',
+            color: '#d8f5c0',
+            stroke: '#12100a',
+            strokeThickness: 3,
+          })
+          .setOrigin(0.5)
+          .setDepth(this.labelDepth + 1),
+      );
+    }
+    this.budLabels.forEach((label, i) => {
+      const bud = field.buds[i];
+      if (!bud) {
+        label.setVisible(false);
+        return;
+      }
+      const left = Math.max(0, bud.at - field.time);
+      const sway = Math.sin(field.time * 2 + i) * 1.5;
+      g.fillStyle(0x12100a, 0.45);
+      g.fillCircle(bud.x, bud.y, 22);
+      g.fillStyle(0x5f9e45, 1);
+      g.fillCircle(bud.x + sway, bud.y + 2, 10);
+      g.fillStyle(bud.kind === 'royal' ? 0xc89cff : 0xffb3c8, 1);
+      g.fillTriangle(
+        bud.x - 6 + sway,
+        bud.y - 2,
+        bud.x + 6 + sway,
+        bud.y - 2,
+        bud.x + sway,
+        bud.y - 15,
+      );
+      // The ring runs down to the moment it opens.
+      const frac = bud.at > 0 ? left / bud.at : 0;
+      g.lineStyle(3, 0xd8f5c0, 0.85);
+      g.beginPath();
+      g.arc(bud.x, bud.y, 21, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+      g.strokePath();
+      label
+        .setVisible(true)
+        .setPosition(bud.x, bud.y - 36)
+        .setText(`${bud.honey} in ${Math.ceil(left)}s`);
+    });
+  }
+
   private drawGlints(field: Field): void {
     const g = this.plateGfx;
     const time = field.time;
@@ -555,7 +615,7 @@ export class FieldRenderer {
       const patch = field.patches[i];
       if (!flower) continue;
 
-      if (!patch || patch.bloomT <= 0.01 || !patch.discovered) {
+      if (!patch || patch.bloomT <= 0.01 || !patch.discovered || patch.kind === 'nest') {
         flower.setVisible(false);
         continue;
       }
@@ -614,7 +674,13 @@ export class FieldRenderer {
       const patch = field.patches[i];
       if (!label) continue;
 
-      if (!patch || !patch.alive || !patch.discovered || patch.bloomT < 0.5) {
+      if (
+        !patch ||
+        !patch.alive ||
+        !patch.discovered ||
+        patch.bloomT < 0.5 ||
+        patch.kind === 'nest'
+      ) {
         label.setVisible(false);
         continue;
       }
@@ -918,6 +984,8 @@ export class FieldRenderer {
     this.surroundGfx.destroy();
     for (const label of this.labels) label.destroy();
     this.labels = [];
+    for (const label of this.budLabels) label.destroy();
+    this.budLabels = [];
     for (const flower of this.flowers) flower.destroy();
     this.flowers = [];
     this.ground?.destroy();

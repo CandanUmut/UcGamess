@@ -21,8 +21,16 @@ const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export interface LevelDoneData {
   level: LevelDef;
+  /** The wasps' jar when it ended, on boards with a rival. */
+  rivalHoney?: number;
+  /** Won because the meadow ran dry with the fuller jar, not by filling it. */
+  dry?: boolean;
+  /** For a loss: what most decided it, read off the race itself. */
+  tip?: string;
   /** Honey brought home — all of it goes to the bank. */
   honey: number;
+  /** Honey that went to the bank: all of it for a win, half for a loss. */
+  banked: number;
   stars: number;
   /** Stars before this attempt, for "new star". */
   prevStars: number;
@@ -31,7 +39,7 @@ export interface LevelDoneData {
   /** Best fill time before this attempt; 0 for none. */
   prevTime: number;
   /** How it ended. */
-  why: 'filled' | 'sunset' | 'empty';
+  why: 'filled' | 'sunset' | 'empty' | 'beaten';
   /** A world finished for the first time by this level, or null. */
   worldComplete: number | null;
   sfx: Sfx;
@@ -98,7 +106,13 @@ export class LevelDoneScene extends BaseScene {
       '#c9b98f',
     );
     const title = this.text(
-      passed ? (stars === 3 ? 'Perfect!' : 'Jar filled!') : 'Not quite!',
+      passed
+        ? this.done.dry
+          ? 'Fuller jar!'
+          : stars === 3
+            ? 'Perfect!'
+            : 'Jar filled!'
+        : 'Not quite!',
       cx,
       104,
       50,
@@ -108,13 +122,11 @@ export class LevelDoneScene extends BaseScene {
       .setScale(0.5)
       .setAlpha(0);
     // The headline lands after the stars it describes, not before them.
-    this.tweens.add({
-      targets: title,
-      scale: 1,
-      alpha: 1,
-      delay: 450 + stars * 380,
-      duration: 300,
-      ease: 'Back.easeOut',
+    // Sequenced with the scene clock like everything else on the card; a
+    // tween's own `delay` left these invisible.
+    this.time.delayedCall(450 + stars * 380, () => {
+      title.setAlpha(1);
+      this.tweens.add({ targets: title, scale: 1, duration: 300, ease: 'Back.easeOut' });
     });
 
     // Stars: empty sockets first, then each earned one slams in.
@@ -133,15 +145,29 @@ export class LevelDoneScene extends BaseScene {
     if (passed && seconds !== null) {
       // The exact number the stars were scored on, shown at once: a count-up
       // caught mid-roll once read 58 s on a fill scored at 62.
-      const clock = this.text(`Filled in ${seconds}s`, cx, 300, 44, '#ffd466', true);
+      const rival = this.done.rivalHoney;
+      const clock = this.text(
+        this.done.dry && rival !== undefined
+          ? `Won ${honey}–${rival}`
+          : `Filled in ${seconds}s`,
+        cx,
+        300,
+        44,
+        '#ffd466',
+        true,
+      );
       clock.setScale(0.6);
       this.tweens.add({ targets: clock, scale: 1, duration: 260, ease: 'Back.easeOut' });
     } else {
       this.text(`${honey} / ${level.goal} honey`, cx, 290, 40, '#ffd466', true);
       this.text(
-        why === 'sunset'
-          ? 'The sun set before the jar was full.'
-          : 'Every flower ran dry before the jar was full.',
+        why === 'beaten'
+          ? this.done.dry
+            ? 'The meadow ran dry — the wasps’ jar was fuller.'
+            : 'The wasps filled their jar first.'
+          : why === 'sunset'
+            ? 'The sun set before the jar was full.'
+            : 'Every flower ran dry before the jar was full.',
         cx,
         334,
         22,
@@ -157,10 +183,26 @@ export class LevelDoneScene extends BaseScene {
           ? `New best! ${prevTime}s → ${seconds}s`
           : 'Every star there is.'
         : `${stars + 1} stars: fill it in ${stars === 1 ? two : three}s or less`
-      : tipFor(level, why);
-    this.text(hint, cx, passed ? 344 : 368, 20, '#c9b98f');
+      : (this.done.tip ?? tipFor(level, why));
+    const hintText = this.text(
+      this.done.dry && passed
+        ? `The meadow ran dry — your jar was fuller (${seconds}s)`
+        : !passed && this.done.rivalHoney !== undefined
+          ? `Wasps ${this.done.rivalHoney}  ·  ${this.done.tip ?? tipFor(level, why)}`
+          : hint,
+      cx,
+      passed ? 344 : 368,
+      20,
+      '#c9b98f',
+    );
+    // After the stars have landed: a line about stars read before they appear
+    // ("Every star there is." over three empty sockets) reads as a mistake.
+    hintText.setAlpha(0);
+    this.time.delayedCall(450 + stars * 380, () => hintText.setAlpha(1));
     this.text(
-      `+${honey.toLocaleString('en-US')} honey to the hive`,
+      (this.done.rivalHoney !== undefined && passed
+        ? `You ${honey} – Wasps ${this.done.rivalHoney}   ·   `
+        : '') + `+${this.done.banked.toLocaleString('en-US')} honey to the hive`,
       cx,
       passed ? 376 : 398,
       18,
@@ -175,7 +217,7 @@ export class LevelDoneScene extends BaseScene {
     if (passed) this.time.delayedCall(450 + stars * 380, () => this.confetti(stars * 30));
 
     const { treasure, bank } = this.done;
-    if (treasure.total > 0) {
+    if (treasure.total > 0 && passed) {
       const all = treasure.found >= treasure.total;
       this.text(
         all ? 'You found the Royal Bloom!' : 'A Royal Bloom was hiding in the mist…',
@@ -438,8 +480,19 @@ export class LevelDoneScene extends BaseScene {
 }
 
 /** One concrete thing to try after a miss, tuned to what the board is about. */
-function tipFor(level: LevelDef, why: 'filled' | 'sunset' | 'empty'): string {
+function tipFor(level: LevelDef, why: LevelDoneData['why']): string {
   if (level.lesson === 'double') return 'Tip: send all your lines to the big flower.';
+  if (why === 'beaten' && level.golden) {
+    return 'Tip: keep a line free — golden blooms open mid-race and are worth a lot.';
+  }
+  if (why === 'beaten') {
+    if (level.fog) return 'Tip: scout early — the wasps are searching the mist too.';
+    if (level.wave.length > 0)
+      return 'Tip: swat raiders — what they steal goes in the wasps’ jar.';
+    if (level.walls)
+      return 'Tip: curve round the hedges to reach the rich flowers first.';
+    return 'Tip: go for the flowers in the middle first — the wasps want them too.';
+  }
   if (why === 'empty') {
     return level.fog
       ? 'Tip: more flowers hide in the mist — drag lines into the dark to find them.'

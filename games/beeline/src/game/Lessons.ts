@@ -23,7 +23,9 @@ export type LessonHint =
   /** A tap on the nearest wasp. */
   | { kind: 'tap-wasp' }
   /** A drag from the hive to the golden bloom. */
-  | { kind: 'drag-to-golden' };
+  | { kind: 'drag-to-golden' }
+  /** A press and hold on the wasps' raid line into the hive. */
+  | { kind: 'hold-raid' };
 
 /** What the lesson can see of the board, each frame. */
 export interface LessonState {
@@ -45,6 +47,12 @@ export interface LessonState {
   goldenServed: boolean;
   /** Lines that end on a flower. */
   connected: number;
+  /** One of the player's lines is raiding the wasps' nest. */
+  raiding: boolean;
+  /** A wasp line is raiding the player's hive. */
+  underRaid: boolean;
+  /** Wasp raid lines the player has cut. */
+  raidCuts: number;
 }
 
 interface Step {
@@ -103,9 +111,9 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'dry':
       return [
         {
-          text: 'Small flowers run dry fast — big ones last longer',
+          text: 'Wasps! They want the same flowers. Fill your jar before they fill theirs',
           hint: { kind: 'drag-to-flower' },
-          done: (s) => s.routesDrawn >= 1,
+          done: (s) => s.routesDrawn >= 2,
         },
         {
           text: 'That flower is empty! Drag a new line to a fresh one',
@@ -117,7 +125,7 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'sun':
       return [
         {
-          text: 'From now on the sun sets: fill the jar before the clock runs out',
+          text: 'The red bar under your jar is the wasps’. Beat them to the best flowers',
           hint: { kind: 'drag-to-flower' },
           done: (s) => s.routesDrawn >= 1,
         },
@@ -155,10 +163,30 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
         },
       ];
     }
-    case 'wasp':
+    case 'raid':
       return [
         {
-          text: 'A wasp! Tap it to swat it before it robs your hive',
+          text: 'Their jar is fuller! Drag a line to the wasp nest to steal from it',
+          hint: { kind: 'drag-to', x: 1014, y: 492 },
+          when: (s) => s.time > 6,
+          done: (s) => s.raiding,
+        },
+        {
+          text: 'A raid only pays while their jar is fuller — and more raiders, more stings',
+          hint: null,
+          done: (s, from) => s.time - from.time > 7,
+        },
+      ];
+    case 'defend':
+      return [
+        {
+          text: 'The wasps are raiding your jar! Press and hold their red line to cut it',
+          hint: { kind: 'hold-raid' },
+          when: (s) => s.underRaid,
+          done: (s) => s.raidCuts >= 1 || !s.underRaid,
+        },
+        {
+          text: 'A raider! Tap it to swat it before it robs your hive',
           hint: { kind: 'tap-wasp' },
           when: (s) => s.wasps > 0,
           done: (s) => s.waspsDowned >= 1 || s.wasps === 0,

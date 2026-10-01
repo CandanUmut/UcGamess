@@ -2,7 +2,12 @@ import { TUNING } from '../config/tuning.ts';
 
 let nextPatchId = 1;
 
-export type PatchKind = 'normal' | 'rich' | 'night' | 'royal';
+/**
+ * `nest` is a colony's own hive seen as a target: its honey is that colony's
+ * jar, so a line to it is a raid. It is not drawn as a flower and does not
+ * count toward the meadow running dry.
+ */
+export type PatchKind = 'normal' | 'rich' | 'night' | 'royal' | 'nest';
 
 /** A flower patch. Drains as bees work it, wilts when empty, reblooms elsewhere. */
 export class Patch {
@@ -22,6 +27,10 @@ export class Patch {
   discovered = false;
   /** Drives the bloom-in and wilt-out animations. 0..1. */
   bloomT = 0;
+  /** Opened from a bud mid-level, in plain sight of both colonies. */
+  sprouted = false;
+  /** Honey carried off by the player's bees [0] and the wasps' [1]. */
+  taken: [number, number] = [0, 0];
   /**
    * Seconds left before a night-bloom patch closes regardless of its pool.
    * Infinity for patches that do not expire.

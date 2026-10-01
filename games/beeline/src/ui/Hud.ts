@@ -114,11 +114,15 @@ export class Hud {
     this.alertText = text(22, '#ff8a70', true).setOrigin(0.5, 0.5).setAlpha(0);
     this.jarText = text(30, '#fff4d6', true).setOrigin(0.5, 0.5);
     this.starClockText = text(17, '#fff4d6', true).setOrigin(0, 0.5);
+    // On its own dark backing: a banner laid straight over hedges and
+    // flower labels was hard to read.
     this.banner = text(28, '#fff4d6', true)
       .setOrigin(0.5)
       .setAlign('center')
       .setAlpha(0)
-      .setWordWrapWidth(900);
+      .setWordWrapWidth(900)
+      .setBackgroundColor('rgba(29, 22, 12, 0.78)')
+      .setPadding(18, 8, 18, 8);
 
     this.dropIcon = scene.textures.exists('honey-drop')
       ? scene.add.image(0, 0, 'honey-drop').setDisplaySize(30, 30)
@@ -207,7 +211,7 @@ export class Hud {
     const next = kept === 3 ? three : kept === 2 ? two : 0;
     this.starClockText.setText(
       !view.started
-        ? 'Stars for speed — the clock starts with your first line'
+        ? 'Stars for speed'
         : next > 0
           ? `${Math.max(0, Math.ceil(next - view.clock))}s left for ${kept} stars`
           : 'Fill the jar for a star',
@@ -283,6 +287,16 @@ export class Hud {
       g.fillRoundedRect(left + 40, barY + 8, Math.max(16, (w - 52) * fill), 6, 3);
     }
     this.jarGlyph(g, left + 8, top - 6, fill);
+    // The wasps' jar, as a red bar along the bottom of yours: the race at a glance.
+    if (this.jar.rival !== undefined) {
+      const rf = Math.min(1, this.jar.rival / Math.max(1, this.jar.goal));
+      g.fillStyle(0x000000, 0.45);
+      g.fillRoundedRect(left + 34, top + 14, w - 40, 7, 3);
+      if (rf > 0) {
+        g.fillStyle(0xe5533d, 1);
+        g.fillRoundedRect(left + 34, top + 14, Math.max(7, (w - 40) * rf), 7, 3);
+      }
+    }
 
     // Stars for speed, each lit while it can still be had.
     for (let i = 0; i < 3; i += 1) {
@@ -591,6 +605,11 @@ export class Hud {
   }
 
   /** One-line announcement: a new day's twist, a bloom, a clear. */
+  /** A banner is on screen: other words wait, so only one thing talks. */
+  get bannerShowing(): boolean {
+    return this.banner.alpha > 0.05;
+  }
+
   showBanner(text: string, colour = '#fff4d6'): void {
     this.scene.tweens.killTweensOf(this.banner);
     this.banner.setText(text).setColor(colour).setAlpha(0).setScale(0.8);
@@ -641,6 +660,8 @@ export interface JarView {
   started: boolean;
   secondsLeft?: number;
   daySeconds?: number;
+  /** The rival colony's jar, on boards that have one. */
+  rival?: number;
 }
 
 export interface ComboView {
