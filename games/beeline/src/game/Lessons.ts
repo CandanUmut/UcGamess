@@ -103,9 +103,9 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'dry':
       return [
         {
-          text: 'Small flowers run dry fast — big ones last longer',
+          text: 'Wasps! They want the same flowers. Fill your jar before they fill theirs',
           hint: { kind: 'drag-to-flower' },
-          done: (s) => s.routesDrawn >= 1,
+          done: (s) => s.routesDrawn >= 2,
         },
         {
           text: 'That flower is empty! Drag a new line to a fresh one',
@@ -117,7 +117,7 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'sun':
       return [
         {
-          text: 'From now on the sun sets: fill the jar before the clock runs out',
+          text: 'The red bar under your jar is the wasps’. Beat them to the best flowers',
           hint: { kind: 'drag-to-flower' },
           done: (s) => s.routesDrawn >= 1,
         },

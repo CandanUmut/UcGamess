@@ -3,6 +3,7 @@ import type { DayFeatures, FlowerSpot, TreasurePlan } from './DayCycle.ts';
 import { noModifiers, type RunModifiers } from './Items.ts';
 import { TUNING } from '../config/tuning.ts';
 import type { LessonPoints } from './Lessons.ts';
+import type { RivalSpec } from './Rival.ts';
 
 /**
  * The campaign: thirty fixed meadows in three worlds.
@@ -100,6 +101,8 @@ export interface LevelDef {
   lesson?: LessonId;
   /** Where the lesson's hand drags, on boards where that is not a flower. */
   lessonPoints?: LessonPoints;
+  /** A rival wasp colony racing the player for the same flowers. */
+  rival?: RivalSpec;
 }
 
 /** Ideas the first world teaches, one per board. */
@@ -114,6 +117,7 @@ interface Spec {
   walls?: Array<[number, number, 'L' | 'T']>;
   lesson?: LessonId;
   lessonPoints?: LessonPoints;
+  rival?: RivalSpec;
   /**
    * Star times set by hand, for a board whose trick the simulated players do
    * not know (stacking lines on one flower), so fitting cannot place them.
@@ -139,10 +143,13 @@ const H: WaspKind = 'hornet';
 const SPECS: readonly Spec[] = [
   // ---- Spring Meadow: hand-built, one idea per board.
   //
-  // Board geometry: the hive sits at (266, 492). Cells are ~152 x 116 px from
-  // (30, 110): column centres 106, 259, 411, 564, 716, 869, 1021, 1174; row
-  // centres 168, 284, 400, 516, 632. A hedge is the left ('L') or top ('T')
-  // edge of a cell.
+  // Board geometry: the hive sits at (266, 492); from 1-3 a wasp nest sits
+  // at its mirror image, (1014, 492), and the meadow between is laid out
+  // mirrored too, so the race is fair and the middle is contested. Cells are
+  // ~152 x 116 px from (30, 110): column centres 106, 259, 411, 564, 716,
+  // 869, 1021, 1174; row centres 168, 284, 400, 516, 632. A hedge is the left
+  // ('L') or top ('T') edge of a cell. Each jar holds a little over half the
+  // board's honey, so only one side can fill it.
   {
     name: 'First Bloom',
     seconds: 0,
@@ -169,159 +176,182 @@ const SPECS: readonly Spec[] = [
     ],
   },
   {
-    name: 'Empty Flowers',
+    name: 'Wasps Next Door',
     seconds: 0,
-    flowers: 5,
+    flowers: 6,
     lines: 2,
     bees: 16,
     difficulty: 1,
     lesson: 'dry',
-    goal: 70,
+    goal: 60,
+    rival: { x: 1014, y: 492, bees: 12, lines: 2, skill: 'dozy' },
     layout: [
-      { x: 500, y: 360, honey: 14 },
-      { x: 470, y: 630, honey: 14 },
-      { x: 760, y: 290, honey: 18 },
-      { x: 820, y: 560, honey: 18 },
-      { x: 1040, y: 420, honey: 30 },
+      { x: 480, y: 360, honey: 15 },
+      { x: 800, y: 360, honey: 15 },
+      { x: 480, y: 630, honey: 15 },
+      { x: 800, y: 630, honey: 15 },
+      { x: 640, y: 230, honey: 30 },
+      { x: 640, y: 520, honey: 20 },
     ],
   },
   {
-    name: 'Sunset',
-    seconds: 34,
-    flowers: 4,
+    name: 'Golden Race',
+    seconds: 0,
+    flowers: 5,
     lines: 3,
     bees: 24,
     difficulty: 2,
     golden: true,
     lesson: 'sun',
-    goal: 90,
+    goal: 80,
+    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'dozy' },
     layout: [
-      { x: 560, y: 280, honey: 30 },
-      { x: 720, y: 490, honey: 40 },
-      { x: 430, y: 640, honey: 25 },
-      { x: 960, y: 300, honey: 45 },
+      { x: 470, y: 330, honey: 25 },
+      { x: 810, y: 330, honey: 25 },
+      { x: 470, y: 640, honey: 20 },
+      { x: 810, y: 640, honey: 20 },
+      { x: 640, y: 470, honey: 30 },
     ],
   },
   {
     name: 'Big Bloom',
-    seconds: 45,
+    seconds: 0,
     flowers: 3,
     lines: 3,
     bees: 24,
     difficulty: 2,
     lesson: 'double',
-    lessonPoints: { to: { x: 860, y: 330 } },
-    // Measured: one line takes ~58 s (too slow), two ~30 s, three ~22 s.
-    goal: 80,
-    starTimes: [26, 36],
+    lessonPoints: { to: { x: 640, y: 300 } },
+    goal: 75,
+    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'steady' },
     layout: [
-      { x: 860, y: 330, honey: 110 },
-      { x: 470, y: 300, honey: 12 },
-      { x: 520, y: 600, honey: 12 },
+      { x: 640, y: 300, honey: 110 },
+      { x: 440, y: 620, honey: 15 },
+      { x: 840, y: 620, honey: 15 },
     ],
   },
   {
     name: 'The Hedge',
-    seconds: 55,
-    flowers: 3,
+    seconds: 0,
+    flowers: 4,
     lines: 3,
     bees: 24,
     difficulty: 3,
     lesson: 'hedge',
-    lessonPoints: { via: { x: 690, y: 650 }, to: { x: 880, y: 400 } },
+    lessonPoints: { via: { x: 400, y: 190 }, to: { x: 640, y: 170 } },
     goal: 70,
-    // One long hedge down the middle, open at the top and the bottom.
+    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'dozy' },
+    // A hedge over the top flower and one under the bottom one: straight
+    // lines from either side run into them, so both colonies must go round.
     walls: [
-      [4, 1, 'L'],
-      [4, 2, 'L'],
-      [4, 3, 'L'],
+      [3, 1, 'T'],
+      [4, 1, 'T'],
+      [2, 4, 'T'],
+      [3, 4, 'T'],
+      [4, 4, 'T'],
+      [5, 4, 'T'],
     ],
     layout: [
-      { x: 430, y: 330, honey: 25 },
-      { x: 880, y: 400, honey: 60 },
-      { x: 1040, y: 270, honey: 50 },
+      { x: 640, y: 170, honey: 45 },
+      { x: 640, y: 650, honey: 45 },
+      { x: 430, y: 330, honey: 15 },
+      { x: 850, y: 330, honey: 15 },
     ],
   },
   {
     name: 'Hedge Row',
-    seconds: 55,
-    flowers: 4,
+    seconds: 0,
+    flowers: 6,
     lines: 3,
     bees: 24,
     difficulty: 3,
     golden: true,
     goal: 100,
+    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'steady' },
+    // A hedge down the middle: each side has its own flower against it, and
+    // the rich ones at top and bottom are reached round its ends.
     walls: [
-      [3, 1, 'T'],
-      [4, 1, 'T'],
-      [5, 1, 'T'],
-      [6, 2, 'L'],
-      [6, 3, 'L'],
-      [3, 4, 'L'],
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+      [4, 3, 'L'],
+      [2, 4, 'T'],
+      [5, 4, 'T'],
     ],
     layout: [
-      { x: 600, y: 170, honey: 45 },
-      { x: 560, y: 420, honey: 30 },
-      { x: 1050, y: 450, honey: 60 },
-      { x: 590, y: 640, honey: 25 },
+      { x: 560, y: 320, honey: 30 },
+      { x: 720, y: 320, honey: 30 },
+      { x: 640, y: 170, honey: 40 },
+      { x: 640, y: 650, honey: 40 },
+      { x: 420, y: 640, honey: 15 },
+      { x: 860, y: 640, honey: 15 },
     ],
   },
   {
     name: 'Wasp!',
-    seconds: 50,
-    flowers: 4,
+    seconds: 0,
+    flowers: 5,
     lines: 3,
     bees: 24,
     difficulty: 4,
     golden: true,
     lesson: 'wasp',
-    goal: 110,
+    goal: 90,
     wave: ['raider'],
+    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'dozy' },
     layout: [
-      { x: 560, y: 300, honey: 35 },
-      { x: 700, y: 560, honey: 35 },
-      { x: 880, y: 350, honey: 40 },
-      { x: 1050, y: 560, honey: 40 },
+      { x: 480, y: 330, honey: 25 },
+      { x: 800, y: 330, honey: 25 },
+      { x: 500, y: 630, honey: 25 },
+      { x: 780, y: 630, honey: 25 },
+      { x: 640, y: 470, honey: 40 },
     ],
   },
   {
     name: 'Into the Mist',
-    seconds: 42,
-    flowers: 5,
+    seconds: 0,
+    flowers: 6,
     lines: 3,
     bees: 24,
     difficulty: 4,
     lesson: 'mist',
-    lessonPoints: { via: { x: 760, y: 300 } },
-    goal: 140,
+    lessonPoints: { via: { x: 600, y: 300 } },
+    goal: 120,
     fog: true,
+    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'steady' },
     layout: [
-      { x: 520, y: 400, honey: 30 },
-      { x: 820, y: 250, honey: 40 },
-      { x: 900, y: 600, honey: 40 },
-      { x: 1150, y: 400, honey: 120, kind: 'royal' },
-      { x: 640, y: 640, honey: 30 },
+      { x: 470, y: 420, honey: 20 },
+      { x: 810, y: 420, honey: 20 },
+      { x: 560, y: 640, honey: 25 },
+      { x: 720, y: 640, honey: 25 },
+      { x: 640, y: 300, honey: 30 },
+      { x: 640, y: 160, honey: 120, kind: 'royal' },
     ],
   },
   {
     name: 'Full Bloom',
-    seconds: 40,
-    flowers: 6,
+    seconds: 0,
+    flowers: 7,
     lines: 4,
     bees: 32,
     difficulty: 5,
     lesson: 'golden',
-    goal: 200,
+    goal: 160,
     fog: true,
     golden: true,
     wave: ['raider'],
+    rival: { x: 1014, y: 492, bees: 32, lines: 4, skill: 'sharp' },
+    walls: [
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+    ],
     layout: [
-      { x: 500, y: 380, honey: 35 },
-      { x: 660, y: 600, honey: 35 },
-      { x: 690, y: 240, honey: 45 },
-      { x: 1000, y: 200, honey: 60 },
-      { x: 1100, y: 520, honey: 100, kind: 'royal' },
-      { x: 300, y: 250, honey: 25 },
+      { x: 470, y: 300, honey: 30 },
+      { x: 810, y: 300, honey: 30 },
+      { x: 470, y: 640, honey: 25 },
+      { x: 810, y: 640, honey: 25 },
+      { x: 640, y: 470, honey: 40 },
+      { x: 640, y: 170, honey: 35 },
+      { x: 640, y: 650, honey: 100, kind: 'royal' },
     ],
   },
 
@@ -631,35 +661,67 @@ function treasuresFor(index: number): TreasurePlan {
 export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
   [25, 17, 22],
   [50, 18, 24],
-  [70, 35, 46],
-  [90, 18, 28],
-  [80, 29, 38],
-  [70, 35, 46],
-  [100, 32, 42],
-  [110, 31, 40],
-  [140, 24, 31],
-  [200, 17, 23],
-  [180, 35, 43],
-  [390, 35, 44],
-  [430, 39, 51],
-  [300, 39, 51],
-  [300, 37, 45],
-  [720, 42, 55],
-  [540, 36, 40],
-  [450, 36, 46],
-  [1050, 45, 59],
-  [700, 47, 62],
-  [430, 35, 46],
-  [520, 39, 51],
-  [500, 29, 37],
-  [890, 34, 50],
-  [740, 42, 55],
-  [520, 42, 55],
-  [810, 35, 57],
-  [870, 45, 59],
-  [1000, 41, 57],
-  [540, 20, 32],
+  [60, 22, 30],
+  [80, 15, 21],
+  [75, 38, 50],
+  [70, 24, 32],
+  [100, 22, 35],
+  [90, 21, 27],
+  [120, 21, 27],
+  [160, 12, 21],
+  [530, 52, 102],
+  [620, 71, 96],
+  [650, 52, 129],
+  [710, 112, 186],
+  [710, 147, 193],
+  [880, 74, 102],
+  [640, 58, 91],
+  [1025, 162, 166],
+  [1100, 68, 87],
+  [970, 146, 150],
+  [620, 84, 113],
+  [600, 39, 55],
+  [710, 39, 52],
+  [880, 31, 48],
+  [910, 58, 71],
+  [1025, 52, 102],
+  [910, 28, 45],
+  [810, 41, 55],
+  [1325, 65, 130],
+  [1400, 81, 102],
 ];
+
+/**
+ * The wasps on each board: as written for the hand-built first world, and
+ * on every board of the later worlds, growing sharper.
+ */
+/**
+ * Generated boards whose layout came out in the wasps' favour, evened by
+ * giving them a smaller swarm. Measured with `src/playtest/fit-levels.ts`.
+ */
+const RIVAL_EASE: Record<number, number> = { 10: 8, 12: 2, 15: 4, 16: 4, 25: 8, 27: 4 };
+
+function rivalFor(spec: Spec, index: number): RivalSpec | undefined {
+  if (spec.rival || index < LEVELS_PER_WORLD) return spec.rival;
+  return {
+    x: 1014,
+    y: 492,
+    // A smaller swarm than the player's: generated boards are laid out
+    // around the player's hive, not mirrored, so the wasps start nearer
+    // some of the flowers.
+    bees: Math.max(
+      8,
+      Math.round(spec.bees * (index < LEVELS_PER_WORLD * 2 ? 0.6 : 0.75)) -
+        (RIVAL_EASE[index] ?? 0),
+    ),
+    lines: spec.lines,
+    skill: index < LEVELS_PER_WORLD * 2 ? 'dozy' : 'steady',
+  };
+}
+
+function withRival(rival: RivalSpec | undefined): { rival?: RivalSpec } {
+  return rival ? { rival } : {};
+}
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   id: index + 1,
@@ -684,7 +746,8 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   ...(spec.intro ? { intro: spec.intro } : {}),
   stars: LEVEL_STARS[index] ?? [60, 110, 160],
   goal: spec.goal ?? LEVEL_GOALS[index]?.[0] ?? LEVEL_STARS[index]?.[0] ?? 100,
-  timed: spec.seconds > 0,
+  // Against a rival there is no sunset: the wasps are the clock.
+  timed: spec.seconds > 0 && !rivalFor(spec, index),
   starTimes: spec.starTimes ?? [
     LEVEL_GOALS[index]?.[1] ?? 20,
     LEVEL_GOALS[index]?.[2] ?? 35,
@@ -693,6 +756,7 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   ...(spec.walls ? { walls: spec.walls } : {}),
   ...(spec.lesson ? { lesson: spec.lesson } : {}),
   ...(spec.lessonPoints ? { lessonPoints: spec.lessonPoints } : {}),
+  ...withRival(rivalFor(spec, index)),
 }));
 
 /**

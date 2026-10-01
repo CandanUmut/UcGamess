@@ -31,7 +31,7 @@ export interface LevelDoneData {
   /** Best fill time before this attempt; 0 for none. */
   prevTime: number;
   /** How it ended. */
-  why: 'filled' | 'sunset' | 'empty';
+  why: 'filled' | 'sunset' | 'empty' | 'beaten';
   /** A world finished for the first time by this level, or null. */
   worldComplete: number | null;
   sfx: Sfx;
@@ -139,9 +139,11 @@ export class LevelDoneScene extends BaseScene {
     } else {
       this.text(`${honey} / ${level.goal} honey`, cx, 290, 40, '#ffd466', true);
       this.text(
-        why === 'sunset'
-          ? 'The sun set before the jar was full.'
-          : 'Every flower ran dry before the jar was full.',
+        why === 'beaten'
+          ? 'The wasps filled their jar first.'
+          : why === 'sunset'
+            ? 'The sun set before the jar was full.'
+            : 'Every flower ran dry before the jar was full.',
         cx,
         334,
         22,
@@ -175,7 +177,7 @@ export class LevelDoneScene extends BaseScene {
     if (passed) this.time.delayedCall(450 + stars * 380, () => this.confetti(stars * 30));
 
     const { treasure, bank } = this.done;
-    if (treasure.total > 0) {
+    if (treasure.total > 0 && passed) {
       const all = treasure.found >= treasure.total;
       this.text(
         all ? 'You found the Royal Bloom!' : 'A Royal Bloom was hiding in the mist…',
@@ -438,8 +440,16 @@ export class LevelDoneScene extends BaseScene {
 }
 
 /** One concrete thing to try after a miss, tuned to what the board is about. */
-function tipFor(level: LevelDef, why: 'filled' | 'sunset' | 'empty'): string {
+function tipFor(level: LevelDef, why: LevelDoneData['why']): string {
   if (level.lesson === 'double') return 'Tip: send all your lines to the big flower.';
+  if (why === 'beaten') {
+    if (level.fog) return 'Tip: scout early — the wasps are searching the mist too.';
+    if (level.wave.length > 0)
+      return 'Tip: swat raiders — what they steal goes in the wasps’ jar.';
+    if (level.walls)
+      return 'Tip: curve round the hedges to reach the rich flowers first.';
+    return 'Tip: go for the flowers in the middle first — the wasps want them too.';
+  }
   if (why === 'empty') {
     return level.fog
       ? 'Tip: more flowers hide in the mist — drag lines into the dark to find them.'

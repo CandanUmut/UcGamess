@@ -41,6 +41,8 @@ import { applyUpgrades } from '../game/HiveUpgrades.ts';
 import { unlockAchievements, type AchievementDef } from '../game/Achievements.ts';
 import { Tutorial } from '../game/Tutorial.ts';
 import { Lesson, type LessonState } from '../game/Lessons.ts';
+import { clearRival, Rivalry } from '../game/Rival.ts';
+import { RivalRenderer } from '../render/RivalRenderer.ts';
 import { coerceSave, writeSave, SAVE_KEY, type BeelineSave } from '../game/SaveState.ts';
 import type { NightData } from './NightScene.ts';
 import type { LevelDoneData } from './LevelDoneScene.ts';
@@ -187,6 +189,9 @@ export class GameScene extends BaseGameplayScene {
   private stolenTally = 0;
 
   private externallyPaused = false;
+  /** The wasp colony racing for the same flowers, on boards that have one. */
+  private rival: Rivalry | null = null;
+  private rivalRenderer!: RivalRenderer;
 
   // --- first-run teaching ----------------------------------------------
   private hintGfx!: Phaser.GameObjects.Graphics;
@@ -257,6 +262,12 @@ export class GameScene extends BaseGameplayScene {
       DEPTH.fog,
     );
     this.beeRenderer = createBeeRenderer(this, 'sprite', DEPTH.bee);
+    this.rivalRenderer = new RivalRenderer(
+      this,
+      DEPTH.route,
+      DEPTH.bee,
+      DEPTH.boardLabel,
+    );
     this.juice = new Juice(this, DEPTH.juice);
     this.hud = new Hud(this, DEPTH.hud);
     this.tutorialText = this.add
@@ -421,6 +432,13 @@ export class GameScene extends BaseGameplayScene {
 
     // Open already, so the board is readable behind the goal card.
     for (const patch of this.field.patches) patch.bloomT = 1;
+    clearRival(this.field);
+    this.rival = level.rival ? new Rivalry(level.rival) : null;
+    this.rival?.begin(this.field, {
+      fog: level.fog,
+      beeSpeedBonus: modifiers.beeSpeedBonus,
+    });
+    this.rivalRenderer.setNest(level.rival ?? null);
     this.daySeconds = level.seconds;
     this.secondsLeft = level.timed ? level.seconds : 0;
     this.clockStarted = false;
@@ -479,8 +497,11 @@ export class GameScene extends BaseGameplayScene {
       say(-34, `Fill the jar with ${level.goal} honey`, 38, '#ffe38a'),
       say(
         14,
-        (level.timed ? `before the sun sets in ${level.seconds}s` : 'No time limit') +
-          `   ·   ${this.field.stats.routeSlots} lines`,
+        (level.rival
+          ? 'before the wasps fill theirs'
+          : level.timed
+            ? `before the sun sets in ${level.seconds}s`
+            : 'No time limit') + `   ·   ${this.field.stats.routeSlots} lines`,
         22,
         '#fff4d6',
         false,
@@ -520,6 +541,9 @@ export class GameScene extends BaseGameplayScene {
       });
     }
     this.phase = 'playing';
+    // Against a rival the race starts when the card goes, not at the first
+    // line: the wasps do not wait for you.
+    if (this.level?.rival) this.clockStarted = true;
     if (!this.externallyPaused) this.startGameplay();
   }
 
@@ -553,6 +577,7 @@ export class GameScene extends BaseGameplayScene {
           started: this.clockStarted,
           secondsLeft: this.secondsLeft,
           daySeconds: this.daySeconds,
+          ...(this.rival ? { rival: this.rival.field.honey } : {}),
         },
         deltaSeconds,
       );
@@ -613,7 +638,7 @@ export class GameScene extends BaseGameplayScene {
    * from how fast it filled; the honey goes to the bank either way, so even a
    * miss buys something.
    */
-  private endLevel(level: LevelDef, why: 'filled' | 'sunset' | 'empty'): void {
+  private endLevel(level: LevelDef, why: 'filled' | 'sunset' | 'empty' | 'beaten'): void {
     this.phase = 'ended';
     this.cancelDrag();
     this.stopGameplay();
@@ -1048,8 +1073,11 @@ export class GameScene extends BaseGameplayScene {
     // Every line in use: replace one only if it has nothing left to do.
     // Taking a working line without asking read as the game stealing it.
     if (!first.start.route && this.field.routes.length >= this.field.stats.routeSlots) {
-      const spare = this.field.routes.some((r) => !r.target || !r.target.alive);
-      if (!spare) {
+      const spare = this.field.routes.find((r) => !r.target || !r.target.alive);
+      // A line with nothing left to do makes room; a working one is never
+      // taken without asking.
+      if (spare) this.field.killRoute(spare);
+      else {
         const tip = last.coords;
         this.nudge(
           `All ${this.field.stats.routeSlots} lines are busy — press and hold one to free it`,
@@ -1168,6 +1196,13 @@ export class GameScene extends BaseGameplayScene {
         this.levelClock += dt;
         if (level.timed) this.secondsLeft = Math.max(0, this.secondsLeft - dt);
       }
+      if (this.rival && this.clockStarted) {
+        this.rival.step(dt);
+        const verdict = this.rival.verdict(this.field, level.goal);
+        if (verdict === 'won') this.jarFull(this.field.honey < level.goal);
+        else if (verdict === 'beaten') this.endLevel(level, 'beaten');
+        return;
+      }
       if (this.field.honey >= level.goal) {
         this.jarFull();
       } else if (level.timed && this.clockStarted && this.secondsLeft <= 0) {
@@ -1186,12 +1221,19 @@ export class GameScene extends BaseGameplayScene {
   }
 
   /** The jar is full: the level is won, this instant. */
-  private jarFull(): void {
+  private jarFull(byDryMeadow = false): void {
     this.filledAt = this.levelClock;
     this.phase = 'clearing';
     this.clearTimer = CLEAR_PAUSE;
     this.cancelDrag();
-    this.hud.showBanner('The jar is full!', '#ffe38a');
+    this.hud.showBanner(
+      byDryMeadow
+        ? 'The meadow is dry — your jar is fuller!'
+        : this.rival
+          ? 'Your jar filled first!'
+          : 'The jar is full!',
+      '#ffe38a',
+    );
     this.sfx.play('fanfare', 0.55);
     this.cameras.main.flash(260, 255, 230, 150);
   }
@@ -1199,6 +1241,7 @@ export class GameScene extends BaseGameplayScene {
   protected override renderUpdate(alpha: number): void {
     this.beeRenderer.sync(this.field.bees, alpha);
     this.routeRenderer.draw(this.field.routes, this.field.time);
+    this.rivalRenderer.draw(this.rival?.field ?? null, this.level?.goal ?? 0, alpha);
     this.fieldRenderer.draw(this.field, alpha, this.dragStart !== null);
     this.fogRenderer.draw(this.field.fog);
     this.drawPreview();

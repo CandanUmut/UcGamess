@@ -60,14 +60,15 @@ describe('campaign gate', () => {
    * fitted for. Samples three levels per world with two runs each, so it stays fast;
    * `fit-levels.ts` is the full version.
    */
-  const sample = [1, 4, 8, 11, 15, 19, 21, 25, 29];
+  // Every board, three times: with a rival a single race is noisy.
+  const sample = LEVELS.map((l) => l.id);
   const filled = (seconds: number | null): number | null =>
     seconds === null ? null : Math.max(1, Math.ceil(seconds));
   const starsFor = (persona: Persona): number[] =>
     sample.flatMap((id) => {
       const level = LEVELS[id - 1];
       if (!level) return [];
-      return [0, 1].map((run) =>
+      return [0, 1, 2].map((run) =>
         levelStarsForTime(
           level,
           filled(playLevel(persona, level, 9000 + run * 31).filledAt),

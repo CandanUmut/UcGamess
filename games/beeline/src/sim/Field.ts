@@ -201,8 +201,8 @@ const NO_FEATURES: DayFeatures = {
  * not stylistic.
  */
 export class Field {
-  readonly hiveX = TUNING.hive.x;
-  readonly hiveY = TUNING.hive.y;
+  readonly hiveX: number;
+  readonly hiveY: number;
 
   routes: Route[] = [];
   patches: Patch[] = [];
@@ -216,7 +216,7 @@ export class Field {
    * almost every time, so the shape the player draws almost never matters, and
    * that is fatal for a game whose only verb is drawing a shape.
    */
-  readonly maze = new Maze(
+  maze = new Maze(
     MAZE_INSET,
     HUD_MARGIN,
     WORLD_WIDTH - MAZE_INSET * 2,
@@ -304,8 +304,73 @@ export class Field {
   /** Current day, used to widen the field and size flower pools. */
   private day = 1;
 
-  constructor() {
+  /**
+   * A rival colony's own memory of what it has seen. Null for the player's
+   * field, which marks flowers found on the flowers themselves (the board
+   * draws them); a rival shares those flowers and must not find them for the
+   * player, so it remembers its own finds here.
+   */
+  private seen: Set<Patch> | null = null;
+
+  /** Where raiders set out from, when a rival nest is on the board. */
+  raidFrom: { x: number; y: number } | null = null;
+  /** Called with honey a raider carries off, so a rival can bank it. */
+  onStolen: ((honey: number) => void) | null = null;
+
+  constructor(hive: { x: number; y: number } = TUNING.hive) {
+    this.hiveX = hive.x;
+    this.hiveY = hive.y;
     this.applyStats();
+  }
+
+  /** True for a rival colony sharing another field's board. */
+  get isRival(): boolean {
+    return this.seen !== null;
+  }
+
+  /** Whether this colony knows where `patch` is. */
+  knows(patch: Patch): boolean {
+    return this.seen ? this.seen.has(patch) : patch.discovered;
+  }
+
+  /**
+   * Starts a rival colony's day on `board`'s meadow: the same flowers (one
+   * shared pool of honey, so every trip either side makes is a trip the other
+   * cannot) and the same hedges, but its own swarm, lines, mist and jar. The
+   * board's own field steps the flowers, the golden blooms and the raids.
+   */
+  beginRivalDay(board: Field, modifiers: RunModifiers): void {
+    this.seen = new Set();
+    this.features = { ...NO_FEATURES };
+    this.modifiers = modifiers;
+    this.honey = 0;
+    this.elapsed = 0;
+    this.jobless.clear();
+    this.clearRoutes();
+    this.wasps = [];
+    this.treasures = [];
+    this.maze = board.maze;
+    this.patches = board.patches;
+    this.cellSteps = this.maze.distancesFrom(
+      this.maze.colAt(this.hiveX),
+      this.maze.rowAt(this.hiveY),
+    );
+    this.fog.clear();
+    this.fog.reveal(this.hiveX, this.hiveY, TUNING.hive.sightRadius);
+    if (modifiers.scoutRadius > 0)
+      this.fog.reveal(this.hiveX, this.hiveY, modifiers.scoutRadius);
+    this.updateDiscoveries(false);
+    this.applyStats();
+    for (const bee of this.bees) {
+      bee.reset(
+        this.hiveX,
+        this.hiveY,
+        TUNING.bee.lateralSpread,
+        TUNING.bee.speedJitter,
+        TUNING.bee.weaveLength,
+        TUNING.bee.weaveLengthJitter,
+      );
+    }
   }
 
   get time(): number {
@@ -483,8 +548,19 @@ export class Field {
    */
   private updateDiscoveries(pays = true): void {
     for (const patch of this.patches) {
-      if (patch.discovered || !patch.alive) continue;
+      if (this.knows(patch) || !patch.alive) continue;
       if (!this.fog.isDiscovered(patch.x, patch.y)) continue;
+      if (this.seen) {
+        // A rival's find pays it the same bonus, quietly.
+        this.seen.add(patch);
+        if (pays) {
+          this.honey += Math.min(
+            this.features.discoveryCap ?? Number.POSITIVE_INFINITY,
+            Math.round(patch.honeyLeft * TUNING.treasure.discoveryShare),
+          );
+        }
+        continue;
+      }
       patch.discovered = true;
       // Finding a flower pays on the spot: a share of what it holds. Flowers
       // seen from the hive at dawn were not found by anyone, so they do not.
@@ -876,7 +952,7 @@ export class Field {
 
     for (const patch of this.patches) {
       if (!patch.alive) continue;
-      if (requireDiscovered && !patch.discovered) continue;
+      if (requireDiscovered && !this.knows(patch)) continue;
       const dist = Math.hypot(patch.x - x, patch.y - y);
       if (dist < bestDist) {
         bestDist = dist;
@@ -888,7 +964,7 @@ export class Field {
 
   /** Living flowers the player has actually seen. */
   get knownPatches(): Patch[] {
-    return this.patches.filter((p) => p.alive && p.discovered);
+    return this.patches.filter((p) => p.alive && this.knows(p));
   }
 
   // ---------------------------------------------------------------- maze
@@ -1015,20 +1091,15 @@ export class Field {
     if (coordsLength(coords) < TUNING.route.minLength) return null;
 
     if (this.routes.length >= this.stats.routeSlots) {
-      // At the cap, a line with no flower to work goes first; otherwise the
-      // *least worked* one.
+      // At the cap, the *least worked* line is the one that goes.
       //
       // Refusing the drag was the alternative and it is worse: a gesture that
       // does nothing on a touchscreen is indistinguishable from a broken game.
       // Strength is traffic the road has actually carried, so the line the
       // swarm has used least is the one the player would have picked anyway.
       let weakest = this.routes[0];
-      const idle = (r: Route): boolean => !r.target || !r.target.alive;
       for (const route of this.routes) {
-        if (!weakest) break;
-        if (idle(route) !== idle(weakest)) {
-          if (idle(route)) weakest = route;
-        } else if (route.strength < weakest.strength) weakest = route;
+        if (weakest && route.strength < weakest.strength) weakest = route;
       }
       if (weakest) {
         this.events.replaced.push({ x: weakest.tipX, y: weakest.tipY });
@@ -1095,6 +1166,10 @@ export class Field {
 
   step(dt: number): void {
     this.elapsed += dt;
+    if (this.seen) {
+      this.stepRival(dt);
+      return;
+    }
 
     for (const patch of this.patches) {
       const wasAlive = patch.alive;
@@ -1129,6 +1204,28 @@ export class Field {
       this.clearedAnnounced = true;
       this.events.cleared = true;
     }
+  }
+
+  /** A rival's step: its own lines and swarm on the shared board. */
+  private stepRival(dt: number): void {
+    // Golden blooms open on the board's field; a rival sees one the moment it
+    // opens, as the player does.
+    for (const patch of this.patches) {
+      if (patch.kind === 'night' && patch.alive) this.seen?.add(patch);
+    }
+    for (const route of [...this.routes]) {
+      route.step(dt);
+      if (route.dead) {
+        this.killRoute(route);
+        continue;
+      }
+      if (route.target && !route.target.alive) route.target = null;
+      if (!route.target) this.retarget(route);
+      this.retireIfJobless(route, dt);
+    }
+    for (const bee of this.bees) this.stepBee(bee, dt);
+    this.revealFromSwarm();
+    this.updateDiscoveries();
   }
 
   /**
@@ -1484,6 +1581,7 @@ export class Field {
    * entered next door would never touch a wall.
    */
   private pickRaidEntry(): { x: number; y: number } {
+    if (this.raidFrom) return this.raidFrom;
     const hiveCol = this.maze.colAt(this.hiveX);
     const hiveRow = this.maze.rowAt(this.hiveY);
 
@@ -1574,6 +1672,7 @@ export class Field {
         );
         this.honey -= take;
         this.events.stolen += take;
+        this.onStolen?.(take);
 
         const driven = wasp.tickRaid(dt);
         for (let i = 0; i < driven; i += 1) this.loseBee();

@@ -207,7 +207,7 @@ export class Hud {
     const next = kept === 3 ? three : kept === 2 ? two : 0;
     this.starClockText.setText(
       !view.started
-        ? 'Stars for speed — the clock starts with your first line'
+        ? 'Stars for speed'
         : next > 0
           ? `${Math.max(0, Math.ceil(next - view.clock))}s left for ${kept} stars`
           : 'Fill the jar for a star',
@@ -283,6 +283,16 @@ export class Hud {
       g.fillRoundedRect(left + 40, barY + 8, Math.max(16, (w - 52) * fill), 6, 3);
     }
     this.jarGlyph(g, left + 8, top - 6, fill);
+    // The wasps' jar, as a red bar along the bottom of yours: the race at a glance.
+    if (this.jar.rival !== undefined) {
+      const rf = Math.min(1, this.jar.rival / Math.max(1, this.jar.goal));
+      g.fillStyle(0x000000, 0.45);
+      g.fillRoundedRect(left + 34, top + 14, w - 40, 7, 3);
+      if (rf > 0) {
+        g.fillStyle(0xe5533d, 1);
+        g.fillRoundedRect(left + 34, top + 14, Math.max(7, (w - 40) * rf), 7, 3);
+      }
+    }
 
     // Stars for speed, each lit while it can still be had.
     for (let i = 0; i < 3; i += 1) {
@@ -641,6 +651,8 @@ export interface JarView {
   started: boolean;
   secondsLeft?: number;
   daySeconds?: number;
+  /** The rival colony's jar, on boards that have one. */
+  rival?: number;
 }
 
 export interface ComboView {

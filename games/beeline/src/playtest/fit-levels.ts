@@ -14,7 +14,15 @@
  * Prints the table to paste into `LEVEL_GOALS` in `game/Levels.ts`, and then
  * how often each player earns each star count under it.
  */
-import { LEVELS, type LevelDef } from '../game/Levels.ts';
+import {
+  LEVELS,
+  levelFeatures,
+  levelModifiers,
+  withSeed,
+  type LevelDef,
+} from '../game/Levels.ts';
+import { Field } from '../sim/Field.ts';
+import { deriveStats } from '../game/Upgrades.ts';
 import { CASUAL, EXPERT, NOVICE, type Persona } from './personas.ts';
 import { playLevel } from './session.ts';
 
@@ -51,15 +59,71 @@ function fillTimes(persona: Persona, level: LevelDef, goal: number): number[] {
   ).sort((a, b) => a - b);
 }
 
+/**
+ * The jar a steady player fills before the wasps about three times in five.
+ * Races are recorded with no jar at all, then every size is tried against
+ * them: whoever's honey reaches it first would have won.
+ */
+function fairJar(level: LevelDef): number {
+  const races = Array.from(
+    { length: Math.max(runs, 8) },
+    (_, i) => playLevel(CASUAL, level, seedOf(i), Infinity, 120).race,
+  );
+  // A jar between a third and three fifths of the board: big enough that
+  // filling it takes a real share of the meadow, small enough to be reached.
+  const total = boardHoney(level);
+  const lo = Math.round(total * 0.35);
+  const hi = Math.round(total * 0.6);
+  let best = Math.round(total * 0.5);
+  let bestErr = Infinity;
+  for (let jar = lo; jar <= hi; jar += 5) {
+    let wins = 0;
+    let decided = 0;
+    for (const race of races) {
+      const mine = race.findIndex(([p]) => p >= jar);
+      const theirs = race.findIndex(([, r]) => r >= jar);
+      if (mine < 0 && theirs < 0) continue;
+      decided += 1;
+      if (mine >= 0 && (theirs < 0 || mine <= theirs)) wins += 1;
+    }
+    if (decided < races.length * 0.75) continue;
+    // Prefer bigger jars at the same fairness: a longer race is a better one.
+    const err = Math.abs(wins / races.length - 0.6) - jar / 100000;
+    if (err < bestErr) {
+      bestErr = err;
+      best = jar;
+    }
+  }
+  return nice(best);
+}
+
+/** All the honey on a board at dawn, hidden flowers included. */
+function boardHoney(level: LevelDef): number {
+  const field = new Field();
+  const m = levelModifiers(level);
+  field.setStats(deriveStats(m));
+  withSeed(level.seed, () =>
+    field.beginDay(level.difficulty, levelFeatures(level), level.flowers, 1, m),
+  );
+  if (level.rival) for (const p of field.patches) p.distanceMultiplier = 1;
+  return field.patches.reduce((sum, p) => sum + p.honeyLeft, 0);
+}
+
 const table: Array<[number, number, number]> = [];
 const report: string[] = [];
 
 for (const level of LEVELS) {
   const handBuilt = level.layout !== undefined;
   const firstWorld = level.world === 0;
+  // Against a rival the jar holds a little over half the board's honey, so
+  // only one side can fill it; alone, it is what a regular player banks.
   const goal = handBuilt
     ? level.goal
-    : nice(quantile(totals(firstWorld ? NOVICE : CASUAL, level), 0.3) * 0.6);
+    : level.rival
+      ? handBuilt
+        ? level.goal
+        : fairJar(level)
+      : nice(quantile(totals(firstWorld ? NOVICE : CASUAL, level), 0.3) * 0.6);
 
   const novice = fillTimes(NOVICE, level, goal);
   const casual = fillTimes(CASUAL, level, goal);
