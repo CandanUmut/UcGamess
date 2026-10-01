@@ -25,7 +25,16 @@ export interface RivalSpec {
   skill: keyof typeof RIVAL_SKILL;
   /** Whether the wasps raid the player's hive. Off until raiding is taught. */
   raids?: boolean;
+  /**
+   * When the flowers run out, a raid-out instead of an instant ending: a few
+   * seconds in which both sides can only raid each other, then the fuller
+   * jar wins. On once raiding has been taught.
+   */
+  raidOut?: boolean;
 }
+
+/** Seconds of raid-out once the meadow runs dry. */
+export const RAID_OUT_SECONDS = 12;
 
 /**
  * How well the wasps play. Plain human-factors numbers, the same kind the
@@ -54,6 +63,8 @@ export class Rivalry {
   private waspNest: Patch | null = null;
   /** The player's hive as a raid target: its honey is the player's jar. */
   private playerNest: Patch | null = null;
+  /** Seconds left in the raid-out, or null before it starts. */
+  raidOutLeft: number | null = null;
   /** Honey raided this step, each way, for the floating numbers. */
   raided = { fromWasps: 0, fromPlayer: 0 };
 
@@ -63,6 +74,8 @@ export class Rivalry {
     this.ai = new Forager(RIVAL_SKILL[spec.skill], {
       glints: false,
       raids: spec.raids ?? false,
+      // A beat before the wasps react to a golden bloom, as a person needs.
+      goldenDelay: 2,
       contested: () => {
         const worked = new Set<Patch>();
         for (const r of this.board?.routes ?? []) if (r.target) worked.add(r.target);
@@ -85,6 +98,7 @@ export class Rivalry {
     for (const patch of board.patches) patch.distanceMultiplier = 1;
     this.field.beginRivalDay(board, m);
     this.board = board;
+    this.raidOutLeft = null;
     // Each hive is a target on the shared board: a line to the other side's
     // hive is a raid on its jar.
     this.waspNest = new Patch(this.spec.x, this.spec.y, 0, 'nest');
@@ -119,6 +133,9 @@ export class Rivalry {
     // same honey back and forth for ever, so the fuller jar wins then.
     const golden = board.patches.some((p) => p.kind === 'night' && p.alive);
     if (board.cleared && !golden) {
+      if (this.spec.raidOut && (this.raidOutLeft === null || this.raidOutLeft > 0)) {
+        return null;
+      }
       return board.honey >= this.field.honey ? 'won' : 'beaten';
     }
     return null;
@@ -153,8 +170,31 @@ export class Rivalry {
   private playerNestPool = 0;
 
   step(dt: number): void {
+    const board = this.board;
+    if (this.spec.raidOut && board) {
+      const golden = board.patches.some((p) => p.kind === 'night' && p.alive);
+      if (this.raidOutLeft === null && board.cleared && !golden) {
+        this.raidOutLeft = RAID_OUT_SECONDS;
+        // The wasps raid in the raid-out whatever the board's rules were.
+        this.ai.raids = true;
+      } else if (this.raidOutLeft !== null) {
+        this.raidOutLeft = Math.max(0, this.raidOutLeft - dt);
+      }
+    }
     this.ai.step(this.field, dt);
     this.field.step(dt);
+    // A flower the wasps are working is no secret: their red line points
+    // straight at it, so the player sees it too rather than a line into
+    // nothing that looks like cheating.
+    if (board) {
+      for (const route of this.field.routes) {
+        const t = route.target;
+        if (t && !t.discovered && t.kind !== 'nest' && route.reachesTarget()) {
+          board.remember(t);
+          board.fog.reveal(t.x, t.y, 70);
+        }
+      }
+    }
     this.syncNests();
     // Nothing on screen reads a rival's events; drop them so they never pile up.
     this.field.drainEvents();

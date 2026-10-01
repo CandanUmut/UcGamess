@@ -178,6 +178,8 @@ export class GameScene extends BaseGameplayScene {
   private eraseCandidate: Route | null = null;
   /** Whose line the hold would erase: yours, or a wasp raid on your hive. */
   private eraseField: Field | null = null;
+  /** The raid-out banner has been shown this board. */
+  private raidOutAnnounced = false;
   /** Wasp raid lines the player has cut, for the lesson. */
   private raidCuts = 0;
   /** Raided honey not yet shown as a floating number, each way. */
@@ -459,6 +461,8 @@ export class GameScene extends BaseGameplayScene {
     this.wonDry = false;
     this.raceDry = false;
     this.raidCuts = 0;
+    this.raidOutAnnounced = false;
+    this.hud.setAlert(null);
     this.finalScore = null;
     // Against the wasps, your lines are all honey-gold: red is theirs.
     this.routeRenderer.tint = level.rival ? 0xffc93c : null;
@@ -669,6 +673,7 @@ export class GameScene extends BaseGameplayScene {
     this.stopGameplay();
     this.sfx.play('dayEnd', 0.45);
 
+    this.hud.setAlert(null);
     const filled = why === 'filled';
     const seconds = filled
       ? Math.max(1, Math.ceil(this.filledAt ?? this.levelClock))
@@ -1346,14 +1351,25 @@ export class GameScene extends BaseGameplayScene {
       this.hud.setIdle(this.field.idleBees, this.field.routes.length < slots);
 
       const crossing = this.field.wasps.filter((w) => w.state === 'approaching').length;
+      const raidOut = this.rival?.raidOutLeft ?? null;
+      if (raidOut !== null && !this.raidOutAnnounced) {
+        this.raidOutAnnounced = true;
+        this.hud.showBanner(
+          'The meadow is dry — RAID-OUT! Steal their honey, guard yours',
+          '#ffb09c',
+        );
+        this.sfx.play('fanfare', 0.4, -300);
+      }
       this.hud.setAlert(
-        this.field.underAttack
-          ? 'The hive is being robbed — tap the wasps!'
-          : this.field.raidWarningAt
-            ? 'Wasps incoming!'
-            : crossing > 0
-              ? `${crossing} wasp${crossing > 1 ? 's' : ''} — tap to swat`
-              : null,
+        raidOut !== null
+          ? `RAID-OUT  ${Math.ceil(raidOut)}s — the fuller jar wins`
+          : this.field.underAttack
+            ? 'The hive is being robbed — tap the wasps!'
+            : this.field.raidWarningAt
+              ? 'Wasps incoming!'
+              : crossing > 0
+                ? `${crossing} wasp${crossing > 1 ? 's' : ''} — tap to swat`
+                : null,
         seconds,
       );
     }
@@ -1366,7 +1382,7 @@ export class GameScene extends BaseGameplayScene {
     this.raidTally.lost += rival.raided.fromPlayer;
     this.raidTally.gained += rival.raided.fromWasps;
     rival.raided = { fromWasps: 0, fromPlayer: 0 };
-    if (this.field.time - this.raidTally.at < 0.6) return;
+    if (this.field.time - this.raidTally.at < 1.2) return;
     this.raidTally.at = this.field.time;
     if (this.raidTally.lost >= 1) {
       this.floatText(
@@ -1556,7 +1572,7 @@ export class GameScene extends BaseGameplayScene {
     }
 
     for (const spot of events.fizzled) {
-      this.floatText(spot.x, spot.y - 30, 'no flower here — line freed', '#e9dcc0', 20);
+      this.floatText(spot.x, spot.y - 30, 'reached nothing — line freed', '#e9dcc0', 20);
       this.hud.flashLines();
     }
 

@@ -315,7 +315,7 @@ const SPECS: readonly Spec[] = [
     goal: 110,
     // The wasps start on a rich doorstep flower; the meadow alone cannot fill
     // your jar before theirs — their jar can.
-    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady' },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raidOut: true },
     walls: mirroredWalls([
       [4, 1, 'L'],
       [4, 2, 'L'],
@@ -337,7 +337,7 @@ const SPECS: readonly Spec[] = [
     lesson: 'defend',
     goal: 180,
     wave: ['raider'],
-    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true, raidOut: true },
     // Two corridors either side of a hedge wall down the middle; the richest
     // flowers wait at their far ends.
     walls: mirroredWalls([
@@ -368,7 +368,7 @@ const SPECS: readonly Spec[] = [
     lessonPoints: { via: { x: 600, y: 300 } },
     goal: 190,
     fog: true,
-    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true, raidOut: true },
     walls: mirroredWalls([
       [3, 2, 'L'],
       [3, 3, 'L'],
@@ -397,7 +397,7 @@ const SPECS: readonly Spec[] = [
     fog: true,
     golden: true,
     wave: ['raider'],
-    rival: { ...NEST, bees: 32, lines: 4, skill: 'steady', raids: true },
+    rival: { ...NEST, bees: 32, lines: 4, skill: 'sharp', raids: true, raidOut: true },
     // A real maze: the centre is walled in and opened only from above and
     // below, so every rich flower is a route, not a line.
     walls: mirroredWalls([
@@ -731,30 +731,30 @@ export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
   [150, 35, 50],
   [160, 34, 47],
   [150, 39, 65],
-  [110, 29, 52],
-  [180, 33, 50],
-  [190, 76, 127],
-  [260, 44, 71],
-  [460, 52, 102],
-  [640, 129, 168],
+  [110, 45, 52],
+  [180, 33, 54],
+  [190, 98, 140],
+  [260, 46, 84],
+  [460, 52, 239],
+  [650, 109, 158],
   [650, 52, 102],
-  [810, 128, 169],
-  [550, 123, 190],
-  [870, 52, 102],
-  [740, 52, 81],
-  [660, 163, 183],
-  [820, 155, 200],
-  [920, 116, 182],
-  [600, 52, 134],
-  [720, 50, 71],
-  [450, 25, 35],
-  [880, 37, 58],
-  [910, 58, 79],
-  [780, 59, 63],
-  [810, 60, 81],
-  [1175, 58, 102],
-  [1325, 65, 105],
-  [1025, 46, 102],
+  [810, 98, 121],
+  [660, 141, 173],
+  [880, 115, 179],
+  [630, 52, 102],
+  [670, 133, 174],
+  [910, 119, 167],
+  [1025, 115, 189],
+  [650, 52, 102],
+  [430, 38, 45],
+  [540, 42, 102],
+  [880, 35, 57],
+  [580, 30, 38],
+  [840, 59, 80],
+  [1100, 64, 84],
+  [1175, 60, 102],
+  [1125, 34, 88],
+  [1125, 45, 102],
 ];
 
 /**
@@ -783,6 +783,7 @@ function rivalFor(spec: Spec, index: number): RivalSpec | undefined {
     lines: spec.lines,
     skill: index < LEVELS_PER_WORLD * 2 ? 'dozy' : 'steady',
     raids: true,
+    raidOut: true,
   };
 }
 

@@ -102,7 +102,13 @@ export class LevelDoneScene extends BaseScene {
       '#c9b98f',
     );
     const title = this.text(
-      passed ? (stars === 3 ? 'Perfect!' : 'Jar filled!') : 'Not quite!',
+      passed
+        ? this.done.dry
+          ? 'Fuller jar!'
+          : stars === 3
+            ? 'Perfect!'
+            : 'Jar filled!'
+        : 'Not quite!',
       cx,
       104,
       50,
@@ -190,7 +196,9 @@ export class LevelDoneScene extends BaseScene {
     hintText.setAlpha(0);
     this.time.delayedCall(450 + stars * 380, () => hintText.setAlpha(1));
     this.text(
-      `+${honey.toLocaleString('en-US')} honey to the hive`,
+      (this.done.rivalHoney !== undefined && passed
+        ? `You ${honey} – Wasps ${this.done.rivalHoney}   ·   `
+        : '') + `+${honey.toLocaleString('en-US')} honey to the hive`,
       cx,
       passed ? 376 : 398,
       18,
@@ -470,6 +478,9 @@ export class LevelDoneScene extends BaseScene {
 /** One concrete thing to try after a miss, tuned to what the board is about. */
 function tipFor(level: LevelDef, why: LevelDoneData['why']): string {
   if (level.lesson === 'double') return 'Tip: send all your lines to the big flower.';
+  if (why === 'beaten' && level.golden) {
+    return 'Tip: keep a line free — golden blooms open mid-race and are worth a lot.';
+  }
   if (why === 'beaten') {
     if (level.fog) return 'Tip: scout early — the wasps are searching the mist too.';
     if (level.wave.length > 0)

@@ -58,7 +58,10 @@ export class Forager {
   private readonly persona: ForagerSkill;
 
   private readonly glints: boolean;
-  private readonly raids: boolean;
+  /** Whether raiding is on; a rival switches it on for the raid-out. */
+  raids: boolean;
+  /** Seconds a golden bloom must have been open before this one reacts. */
+  private readonly goldenDelay: number;
   private readonly contested: (() => ReadonlySet<Patch>) | null;
 
   /**
@@ -72,11 +75,13 @@ export class Forager {
     opts: {
       glints?: boolean;
       raids?: boolean;
+      goldenDelay?: number;
       contested?: () => ReadonlySet<Patch>;
     } = {},
   ) {
     this.persona = persona;
     this.raids = opts.raids ?? true;
+    this.goldenDelay = opts.goldenDelay ?? 0;
     this.glints = opts.glints ?? true;
     this.contested = opts.contested ?? null;
   }
@@ -186,7 +191,9 @@ export class Forager {
     // spare lines, once nothing else known is worth one.
     // A raid is only worth the stings once there is a jar worth robbing.
     const known = field.knownPatches.filter(
-      (p) => p.kind !== 'nest' || (this.raids && p.honeyLeft >= 15),
+      (p) =>
+        (p.kind !== 'nest' || (this.raids && p.honeyLeft >= 15)) &&
+        (p.kind !== 'night' || p.windowTotal - p.windowRemaining >= this.goldenDelay),
     );
     const unserved = known.filter((p) => !crews.has(p));
     const open =

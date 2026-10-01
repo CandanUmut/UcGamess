@@ -933,7 +933,7 @@ export const TUNING: Tuning = {
     firstAt: 9,
     minGap: 14,
     maxGap: 24,
-    window: 10,
+    window: 13,
     poolShare: 0.5,
   },
 
