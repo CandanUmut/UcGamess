@@ -2418,8 +2418,15 @@ failed drags; the mist untaught and looking like a loading screen.
 | 2     | 5       | 4   | 5          | Bent drags straightened; lessons skipped steps    |
 | 3     | 6       | 4   | 4          | One Royal Bloom find filled the jar; long waits   |
 
-The fourth round tests the golden-bloom spike, the find cap and faster
-campaign bees (+30%).
+Round 4 (after golden blooms on 1-4, the find cap and +30% campaign bee
+speed): clarity 8, fun 4, next level 5. "Nothing ever threatens me": a
+wasp took 3 of 110 honey, blooms opened as the jar filled, the sun always
+had 20 s spare. Wasps and bounties now scale with the jar, wasps land at
+8 s and blooms open at 4 s, and three suns are tighter — not yet re-played.
+
+Still open, and design calls rather than fixes: stacking every line on the
+biggest flower is always right (a per-flower crew cap would make it a
+choice), and the first two boards are mostly watching.
 
 ### Harness
 
