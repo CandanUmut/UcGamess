@@ -2,7 +2,12 @@ import { TUNING } from '../config/tuning.ts';
 
 let nextPatchId = 1;
 
-export type PatchKind = 'normal' | 'rich' | 'night' | 'royal';
+/**
+ * `nest` is a colony's own hive seen as a target: its honey is that colony's
+ * jar, so a line to it is a raid. It is not drawn as a flower and does not
+ * count toward the meadow running dry.
+ */
+export type PatchKind = 'normal' | 'rich' | 'night' | 'royal' | 'nest';
 
 /** A flower patch. Drains as bees work it, wilts when empty, reblooms elsewhere. */
 export class Patch {

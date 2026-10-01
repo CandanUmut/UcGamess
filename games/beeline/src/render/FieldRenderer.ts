@@ -238,7 +238,7 @@ export class FieldRenderer {
     this.plateGfx.clear();
 
     for (const patch of field.patches) {
-      if (!patch.discovered) continue;
+      if (!patch.discovered || patch.kind === 'nest') continue;
       this.drawPatch(g, patch, field.time);
     }
     this.drawFlowers(field, field.time);
@@ -555,7 +555,7 @@ export class FieldRenderer {
       const patch = field.patches[i];
       if (!flower) continue;
 
-      if (!patch || patch.bloomT <= 0.01 || !patch.discovered) {
+      if (!patch || patch.bloomT <= 0.01 || !patch.discovered || patch.kind === 'nest') {
         flower.setVisible(false);
         continue;
       }
@@ -614,7 +614,13 @@ export class FieldRenderer {
       const patch = field.patches[i];
       if (!label) continue;
 
-      if (!patch || !patch.alive || !patch.discovered || patch.bloomT < 0.5) {
+      if (
+        !patch ||
+        !patch.alive ||
+        !patch.discovered ||
+        patch.bloomT < 0.5 ||
+        patch.kind === 'nest'
+      ) {
         label.setVisible(false);
         continue;
       }

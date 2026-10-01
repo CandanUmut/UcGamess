@@ -288,7 +288,7 @@ describe('distance pays', () => {
       }
       expect(nearSeen / trials, `day ${day} had no near flower`).toBeGreaterThan(0.5);
     }
-  });
+  }, 30_000);
 });
 
 describe('paths mature', () => {

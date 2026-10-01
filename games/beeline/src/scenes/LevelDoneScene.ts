@@ -112,13 +112,11 @@ export class LevelDoneScene extends BaseScene {
       .setScale(0.5)
       .setAlpha(0);
     // The headline lands after the stars it describes, not before them.
-    this.tweens.add({
-      targets: title,
-      scale: 1,
-      alpha: 1,
-      delay: 450 + stars * 380,
-      duration: 300,
-      ease: 'Back.easeOut',
+    // Sequenced with the scene clock like everything else on the card; a
+    // tween's own `delay` left these invisible.
+    this.time.delayedCall(450 + stars * 380, () => {
+      title.setAlpha(1);
+      this.tweens.add({ targets: title, scale: 1, duration: 300, ease: 'Back.easeOut' });
     });
 
     // Stars: empty sockets first, then each earned one slams in.
@@ -154,7 +152,9 @@ export class LevelDoneScene extends BaseScene {
       this.text(`${honey} / ${level.goal} honey`, cx, 290, 40, '#ffd466', true);
       this.text(
         why === 'beaten'
-          ? 'The wasps filled their jar first.'
+          ? this.done.dry
+            ? 'The meadow ran dry — the wasps’ jar was fuller.'
+            : 'The wasps filled their jar first.'
           : why === 'sunset'
             ? 'The sun set before the jar was full.'
             : 'Every flower ran dry before the jar was full.',
@@ -188,12 +188,7 @@ export class LevelDoneScene extends BaseScene {
     // After the stars have landed: a line about stars read before they appear
     // ("Every star there is." over three empty sockets) reads as a mistake.
     hintText.setAlpha(0);
-    this.tweens.add({
-      targets: hintText,
-      alpha: 1,
-      delay: 450 + stars * 380,
-      duration: 250,
-    });
+    this.time.delayedCall(450 + stars * 380, () => hintText.setAlpha(1));
     this.text(
       `+${honey.toLocaleString('en-US')} honey to the hive`,
       cx,

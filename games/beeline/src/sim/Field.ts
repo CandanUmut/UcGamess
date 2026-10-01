@@ -56,6 +56,12 @@ const PATCH_JITTER = 0.14;
  * A hive that is badly hurt still has to be a hive that can be played.
  */
 const MIN_SWARM = 4;
+/**
+ * Chance a raider is stung at the nest and lost for the level. A raid trip
+ * swings the race twice — honey into your jar and out of theirs — so it
+ * has to cost something that a trip to a flower does not.
+ */
+const RAID_STING = 0.08;
 
 /**
  * How far from the hive its own dawn light actually *discovers*, not merely
@@ -312,6 +318,9 @@ export class Field {
    */
   private seen: Set<Patch> | null = null;
 
+  /** Raiders stung this step, removed once the swarm has finished stepping. */
+  private stung: Bee[] = [];
+
   /** Where raiders set out from, when a rival nest is on the board. */
   raidFrom: { x: number; y: number } | null = null;
   /** Called with honey a raider carries off, so a rival can bank it. */
@@ -321,6 +330,12 @@ export class Field {
     this.hiveX = hive.x;
     this.hiveY = hive.y;
     this.applyStats();
+  }
+
+  /** Marks a patch as known to this colony (a rival's own memory). */
+  remember(patch: Patch): void {
+    if (this.seen) this.seen.add(patch);
+    else patch.discovered = true;
   }
 
   /** True for a rival colony sharing another field's board. */
@@ -875,8 +890,8 @@ export class Field {
     }
   }
 
-  spawnPatch(kind: PatchKind = 'normal'): Patch {
-    const spot = this.randomPatchPosition(kind);
+  spawnPatch(kind: PatchKind = 'normal', at?: { x: number; y: number }): Patch {
+    const spot = at ?? this.randomPatchPosition(kind);
     const patch = new Patch(spot.x, spot.y, this.patchPool, kind);
     patch.distanceMultiplier = this.distanceMultiplierAt(spot.x, spot.y);
     patch.species = this.nextSpecies();
@@ -957,6 +972,7 @@ export class Field {
     for (const patch of this.patches) {
       if (!patch.alive) continue;
       if (requireDiscovered && !this.knows(patch)) continue;
+      if (this.isOwnNest(patch)) continue;
       const dist = Math.hypot(patch.x - x, patch.y - y);
       if (dist < bestDist) {
         bestDist = dist;
@@ -968,7 +984,7 @@ export class Field {
 
   /** Living flowers the player has actually seen. */
   get knownPatches(): Patch[] {
-    return this.patches.filter((p) => p.alive && this.knows(p));
+    return this.patches.filter((p) => p.alive && this.knows(p) && !this.isOwnNest(p));
   }
 
   // ---------------------------------------------------------------- maze
@@ -1143,6 +1159,7 @@ export class Field {
     let bestDist: number = TUNING.patch.reachRadius;
     for (const patch of this.patches) {
       if (!patch.alive || (requireKnown && !this.knows(patch))) continue;
+      if (this.isOwnNest(patch)) continue;
       const d = Math.hypot(patch.x - x, patch.y - y);
       if (d >= bestDist) continue;
       if (this.pathBlocked(x, y, patch.x, patch.y)) continue;
@@ -1150,6 +1167,13 @@ export class Field {
       bestDist = d;
     }
     return best;
+  }
+
+  /** This colony's own hive, as the board's raid target: never its own target. */
+  isOwnNest(patch: Patch): boolean {
+    return (
+      patch.kind === 'nest' && Math.hypot(patch.x - this.hiveX, patch.y - this.hiveY) < 30
+    );
   }
 
   /**
@@ -1218,6 +1242,7 @@ export class Field {
     }
 
     for (const bee of this.bees) this.stepBee(bee, dt);
+    this.dropStung();
     this.stepCombo(dt);
 
     this.revealFromSwarm();
@@ -1247,6 +1272,7 @@ export class Field {
       this.retireIfJobless(route, dt);
     }
     for (const bee of this.bees) this.stepBee(bee, dt);
+    this.dropStung();
     this.revealFromSwarm();
     this.updateDiscoveries();
   }
@@ -1344,7 +1370,8 @@ export class Field {
    */
   get cleared(): boolean {
     return (
-      this.patches.length > 0 && this.patches.every((p) => p.kind === 'night' || !p.alive)
+      this.patches.length > 0 &&
+      this.patches.every((p) => p.kind === 'night' || p.kind === 'nest' || !p.alive)
     );
   }
 
@@ -1365,6 +1392,27 @@ export class Field {
     return this.features.threatQuota ?? dayQuota(this.day);
   }
 
+  /**
+   * Where a golden bloom opens when a rival colony shares the board: in the
+   * middle band, between the two nests, so it is a race and not a gift to
+   * whichever side it happened to land on.
+   */
+  private midlineSpot(): { x: number; y: number } {
+    const { maze } = this;
+    const mid = Math.floor(maze.cols / 2);
+    const spots: Array<{ x: number; y: number }> = [];
+    for (const col of [mid - 1, mid]) {
+      for (let row = 0; row < maze.rows; row += 1) {
+        const c = maze.centreOf(col, row);
+        const clear = this.patches.every(
+          (p) => !p.alive || Math.hypot(p.x - c.x, p.y - c.y) > 130,
+        );
+        if (clear) spots.push(c);
+      }
+    }
+    return spots[Math.floor(Math.random() * spots.length)] ?? maze.centreOf(mid, 2);
+  }
+
   /** Opens a golden bloom when its time comes. */
   private stepGolden(): void {
     if (this.elapsed < this.nextGoldenAt) return;
@@ -1377,7 +1425,10 @@ export class Field {
 
     const pool = this.patchPool;
     this.patchPool = Math.max(4, Math.round(pool * poolShare));
-    const patch = this.spawnPatch('night');
+    const patch = this.spawnPatch(
+      'night',
+      this.raidFrom ? this.midlineSpot() : undefined,
+    );
     this.patchPool = pool;
     const honey = this.features.goldenHoney;
     if (honey !== undefined && patch.yieldPerTrip > 0) {
@@ -1793,6 +1844,17 @@ export class Field {
     this.beesLost += 1;
   }
 
+  private dropStung(): void {
+    for (const bee of this.stung) {
+      if (this.bees.length > MIN_SWARM) this.dropBee(bee);
+      else {
+        bee.carrying = 0;
+        bee.state = 'inbound';
+      }
+    }
+    this.stung = [];
+  }
+
   /** The nearest wasp worth pointing a route at. */
   nearestWaspTo(x: number, y: number, limit = Number.POSITIVE_INFINITY): Wasp | null {
     let best: Wasp | null = null;
@@ -1963,6 +2025,12 @@ export class Field {
         const patch = route?.target ?? null;
         if (patch) this.driftAround(bee, patch.x, patch.y, 16, dt);
         if (bee.timer <= 0) {
+          if (patch?.kind === 'nest' && Math.random() < RAID_STING) {
+            // The nest fights back: a raider is stung and does not come home.
+            this.stung.push(bee);
+            this.events.beesLost.push({ x: bee.x, y: bee.y });
+            return;
+          }
           if (patch) {
             bee.carrying = patch.drain(TUNING.bee.nectarPerTrip);
             if (bee.carrying > 0) {

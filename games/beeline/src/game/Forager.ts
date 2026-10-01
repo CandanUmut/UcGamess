@@ -57,13 +57,37 @@ export class Forager {
   private dt = 1 / 60;
   private readonly persona: ForagerSkill;
 
-  constructor(persona: ForagerSkill) {
+  private readonly glints: boolean;
+  private readonly raids: boolean;
+  private readonly contested: (() => ReadonlySet<Patch>) | null;
+
+  /**
+   * `glints`: whether it scouts toward a sparkle in the mist (the player's
+   * own bots do; the wasps do not, so they never look like they know where a
+   * hidden flower is). `contested`: flowers someone else is working, which
+   * it prefers a little — the wasps go where you are.
+   */
+  constructor(
+    persona: ForagerSkill,
+    opts: {
+      glints?: boolean;
+      raids?: boolean;
+      contested?: () => ReadonlySet<Patch>;
+    } = {},
+  ) {
     this.persona = persona;
+    this.raids = opts.raids ?? true;
+    this.glints = opts.glints ?? true;
+    this.contested = opts.contested ?? null;
   }
+
+  /** Dark spots already scouted toward, so a dead end is not retried. */
+  private tried: Array<{ x: number; y: number }> = [];
 
   beginDay(): void {
     this.pending = null;
     this.thinkIn = 0.6;
+    this.tried = [];
   }
 
   step(field: Field, dt = 1 / 60): 'acting' | 'idle' {
@@ -156,15 +180,19 @@ export class Forager {
     for (const r of field.routes)
       if (r.target) crews.set(r.target, (crews.get(r.target) ?? 0) + 1);
     const wants = (p: Patch): number =>
-      sloppy ? 1 : p.honeyLeft >= 90 ? 3 : p.honeyLeft >= 45 ? 2 : 1;
+      p.kind === 'nest' || sloppy ? 1 : p.honeyLeft >= 90 ? 3 : p.honeyLeft >= 45 ? 2 : 1;
 
     // Every flower gets a line before any gets a second: stacking is for
     // spare lines, once nothing else known is worth one.
-    const unserved = field.knownPatches.filter((p) => !crews.has(p));
+    // A raid is only worth the stings once there is a jar worth robbing.
+    const known = field.knownPatches.filter(
+      (p) => p.kind !== 'nest' || (this.raids && p.honeyLeft >= 15),
+    );
+    const unserved = known.filter((p) => !crews.has(p));
     const open =
       unserved.length > 0
         ? unserved
-        : field.knownPatches.filter((p) => (crews.get(p) ?? 0) < wants(p));
+        : known.filter((p) => (crews.get(p) ?? 0) < wants(p));
     const partial = this.partialLine(field);
 
     // Scout: push a line into the mist. Everyone does it once nothing known
@@ -180,10 +208,14 @@ export class Forager {
     if ((open.length === 0 || scoutEarly) && !partial) {
       // A glint in the mist is something a person can see; a practised player
       // scouts toward it, a first-timer just pushes into the nearest dark.
-      const glint = this.persona.sloppiness <= 0.4 ? this.nearestGlint(field) : null;
+      const glint =
+        this.glints && this.persona.sloppiness <= 0.4 ? this.nearestGlint(field) : null;
       const dark = glint ?? this.nearestDark(field);
       if (dark) {
-        return this.line(field, { x: field.hiveX, y: field.hiveY, route: null }, dark);
+        this.tried.push(dark);
+        // Into the dark by the corridors, not straight into a hedge.
+        const aim = waypoint(field, field.hiveX, field.hiveY, dark.x, dark.y);
+        return this.line(field, { x: field.hiveX, y: field.hiveY, route: null }, aim);
       }
     }
     if (open.length === 0) return null;
@@ -230,6 +262,7 @@ export class Forager {
   }
 
   private pick(field: Field, open: Patch[], sloppy: boolean): Patch | null {
+    const contested = this.contested?.() ?? null;
     const scored = open.map((p) => {
       const straightLine = Math.hypot(p.x - field.hiveX, p.y - field.hiveY);
       // A player who reads the maze judges distance by the corridors; a
@@ -238,9 +271,10 @@ export class Forager {
         ? straightLine
         : Math.max(straightLine, field.pathDistanceTo(p.x, p.y));
       const golden = p.kind === 'night' ? 4 : 1;
+      const contest = contested?.has(p) ? 1.35 : 1;
       return {
         p,
-        value: sloppy ? -straightLine : (golden * p.honeyLeft) / (120 + dist),
+        value: sloppy ? -straightLine : (contest * golden * p.honeyLeft) / (120 + dist),
       };
     });
     scored.sort((a, b) => b.value - a.value);
@@ -272,6 +306,8 @@ export class Forager {
     for (let y = 140; y < WORLD_HEIGHT - 30; y += 40) {
       for (let x = 40; x < WORLD_WIDTH - 30; x += 40) {
         if (field.fog.isDiscovered(x, y)) continue;
+        if (this.tried.some((t) => Math.hypot(t.x - x, t.y - y) < 120)) continue;
+        // Judged by the corridors: the dark just behind a hedge is far away.
         const d = Math.hypot(x - field.hiveX, y - field.hiveY);
         if (d < bestDist) {
           bestDist = d;

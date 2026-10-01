@@ -176,6 +176,12 @@ export class GameScene extends BaseGameplayScene {
 
   // --- press-and-hold erase ---------------------------------------------
   private eraseCandidate: Route | null = null;
+  /** Whose line the hold would erase: yours, or a wasp raid on your hive. */
+  private eraseField: Field | null = null;
+  /** Wasp raid lines the player has cut, for the lesson. */
+  private raidCuts = 0;
+  /** Raided honey not yet shown as a floating number, each way. */
+  private raidTally = { lost: 0, gained: 0, at: 0 };
   private holdSeconds = 0;
   private erasedThisGesture = false;
   private swattedThisGesture = false;
@@ -191,6 +197,10 @@ export class GameScene extends BaseGameplayScene {
   private externallyPaused = false;
   /** The race was won on the fuller jar when the meadow ran dry. */
   private wonDry = false;
+  /** The race ended because the meadow ran dry (either way). */
+  private raceDry = false;
+  /** Both jars at the moment the race was decided. */
+  private finalScore: { me: number; rival: number } | null = null;
   /** The wasp colony racing for the same flowers, on boards that have one. */
   private rival: Rivalry | null = null;
   private rivalRenderer!: RivalRenderer;
@@ -447,6 +457,9 @@ export class GameScene extends BaseGameplayScene {
     });
     this.rivalRenderer.setNest(level.rival ?? null);
     this.wonDry = false;
+    this.raceDry = false;
+    this.raidCuts = 0;
+    this.finalScore = null;
     // Against the wasps, your lines are all honey-gold: red is theirs.
     this.routeRenderer.tint = level.rival ? 0xffc93c : null;
     // Flowers seen at dawn are not finds; drop the events beginDay raised.
@@ -661,7 +674,8 @@ export class GameScene extends BaseGameplayScene {
       ? Math.max(1, Math.ceil(this.filledAt ?? this.levelClock))
       : null;
     const honey = Math.floor(this.field.honey);
-    const stars = levelStarsForTime(level, seconds);
+    // A dry-meadow win never filled the jar: two stars at most.
+    const stars = Math.min(levelStarsForTime(level, seconds), this.wonDry ? 2 : 3);
     const index = level.id - 1;
     const prevStars = this.save.levelStars[index] ?? 0;
     const prevBest = this.save.levelBest[index] ?? 0;
@@ -703,10 +717,12 @@ export class GameScene extends BaseGameplayScene {
     this.hud.setVisible(false);
 
     const data: LevelDoneData = {
-      ...(this.rival ? { rivalHoney: Math.floor(this.rival.field.honey) } : {}),
-      ...(this.wonDry ? { dry: true } : {}),
+      ...(this.rival
+        ? { rivalHoney: this.finalScore?.rival ?? Math.floor(this.rival.field.honey) }
+        : {}),
+      ...(this.raceDry ? { dry: true } : {}),
       level,
-      honey,
+      honey: this.finalScore?.me ?? honey,
       stars,
       prevStars,
       seconds,
@@ -959,6 +975,16 @@ export class GameScene extends BaseGameplayScene {
 
       // A press on a line might be an erase, if the finger stays put.
       this.eraseCandidate = this.field.routeNear(p.worldX, p.worldY);
+      this.eraseField = this.field;
+      // A wasp raid line into your hive can be cut the same way: press and
+      // hold it. Their flower lines are theirs to keep.
+      if (!this.eraseCandidate && this.rival) {
+        const raid = this.rival.field.routeNear(p.worldX, p.worldY);
+        if (raid?.target?.kind === 'nest') {
+          this.eraseCandidate = raid;
+          this.eraseField = this.rival.field;
+        }
+      }
     });
 
     // A drag that starts away from the hive does nothing — so say why, and
@@ -1165,7 +1191,11 @@ export class GameScene extends BaseGameplayScene {
     this.holdSeconds += dt;
     if (this.holdSeconds < ERASE_HOLD_SECONDS) return;
 
-    this.field.killRoute(route);
+    (this.eraseField ?? this.field).killRoute(route);
+    if (this.eraseField && this.eraseField !== this.field) {
+      this.raidCuts += 1;
+      this.floatText(route.tipX, route.tipY - 40, 'raid cut!', '#b8f0a0', 22);
+    }
     this.sfx.playVaried('deposit', 0.25, 300);
     for (let i = 0; i < 6; i += 1) this.juice.scatter(route.tipX, route.tipY);
 
@@ -1213,7 +1243,18 @@ export class GameScene extends BaseGameplayScene {
       if (this.rival && this.clockStarted) {
         this.rival.step(dt);
         const verdict = this.rival.verdict(this.field, level.goal);
-        if (verdict === 'won') this.jarFull(this.field.honey < level.goal);
+        if (verdict) {
+          // The score at the moment the race was decided. Honey still in
+          // the air keeps landing afterwards and is banked, but a jar shown
+          // at 127 of 100 makes the margin meaningless.
+          this.finalScore = {
+            me: Math.min(level.goal, Math.floor(this.field.honey)),
+            rival: Math.min(level.goal, Math.floor(this.rival.field.honey)),
+          };
+          this.raceDry =
+            this.field.honey < level.goal && this.rival.field.honey < level.goal;
+        }
+        if (verdict === 'won') this.jarFull(this.raceDry);
         else if (verdict === 'beaten') this.endLevel(level, 'beaten');
         return;
       }
@@ -1277,6 +1318,7 @@ export class GameScene extends BaseGameplayScene {
     const seconds = delta / 1000;
     this.juice.update(seconds);
     this.consumeEvents();
+    if (this.phase === 'playing') this.showRaids();
 
     if (this.phase === 'playing' || this.phase === 'clearing') {
       this.refreshHud(seconds);
@@ -1317,6 +1359,37 @@ export class GameScene extends BaseGameplayScene {
     }
   }
 
+  /** Raided honey as floating numbers: red over your hive, gold over theirs. */
+  private showRaids(): void {
+    const rival = this.rival;
+    if (!rival) return;
+    this.raidTally.lost += rival.raided.fromPlayer;
+    this.raidTally.gained += rival.raided.fromWasps;
+    rival.raided = { fromWasps: 0, fromPlayer: 0 };
+    if (this.field.time - this.raidTally.at < 0.6) return;
+    this.raidTally.at = this.field.time;
+    if (this.raidTally.lost >= 1) {
+      this.floatText(
+        this.field.hiveX + 50,
+        this.field.hiveY - 70,
+        `-${Math.floor(this.raidTally.lost)} raided!`,
+        '#ff8a70',
+        22,
+      );
+      this.raidTally.lost -= Math.floor(this.raidTally.lost);
+    }
+    if (this.raidTally.gained >= 1) {
+      this.floatText(
+        rival.spec.x,
+        rival.spec.y - 110,
+        `+${Math.floor(this.raidTally.gained)} stolen`,
+        '#ffd466',
+        22,
+      );
+      this.raidTally.gained -= Math.floor(this.raidTally.gained);
+    }
+  }
+
   /** What the lesson needs to know about the board. */
   private lessonState(): LessonState {
     const golden = this.field.patches.find((p) => p.kind === 'night' && p.alive);
@@ -1339,6 +1412,9 @@ export class GameScene extends BaseGameplayScene {
       golden: golden !== undefined,
       goldenServed,
       connected,
+      raiding: this.field.routes.some((r) => r.target?.kind === 'nest'),
+      underRaid: this.rival?.field.routes.some((r) => r.target?.kind === 'nest') ?? false,
+      raidCuts: this.raidCuts,
     };
   }
 
@@ -1806,7 +1882,9 @@ export class GameScene extends BaseGameplayScene {
       case 'drag-to-flower': {
         const served = new Set(this.field.routes.map((r) => r.target));
         const patch = this.field.knownPatches
-          .filter((p) => !served.has(p) && p.alive && p.kind !== 'night')
+          .filter(
+            (p) => !served.has(p) && p.alive && p.kind !== 'night' && p.kind !== 'nest',
+          )
           .sort(
             (a, b) =>
               Math.hypot(a.x - hive.x, a.y - hive.y) -
@@ -1825,6 +1903,16 @@ export class GameScene extends BaseGameplayScene {
       case 'tap-wasp': {
         const wasp = this.field.wasps[0];
         return wasp ? { from: wasp, to: wasp, tap: true } : null;
+      }
+      case 'hold-raid': {
+        const rival = this.rival;
+        const raid = rival?.field.routes.find((r) => r.target?.kind === 'nest');
+        if (!rival || !raid) return null;
+        const p = {
+          x: (raid.tipX + rival.spec.x) / 2,
+          y: (raid.tipY + rival.spec.y) / 2,
+        };
+        return { from: p, to: p, tap: true };
       }
       case 'drag-to-golden': {
         const bloom = this.field.patches.find((p) => p.kind === 'night' && p.alive);

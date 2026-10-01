@@ -23,12 +23,13 @@ function board(levelId: number): { field: Field; rival: Rivalry } {
 describe('the rival colony', () => {
   it('drinks from the same flowers as the player', () => {
     const { field, rival } = board(3);
-    const before = field.patches.reduce((s, p) => s + p.honeyLeft, 0);
+    const flowers = field.patches.filter((p) => p.kind !== 'nest');
+    const before = flowers.reduce((s, p) => s + p.honeyLeft, 0);
     for (let t = 0; t < 20; t += 1 / 60) {
       field.step(1 / 60);
       rival.step(1 / 60);
     }
-    const after = field.patches.reduce((s, p) => s + p.honeyLeft, 0);
+    const after = flowers.reduce((s, p) => s + p.honeyLeft, 0);
     expect(rival.field.honey).toBeGreaterThan(5);
     expect(before - after).toBeGreaterThan(rival.field.honey * 0.8);
     expect(field.honey).toBe(0);

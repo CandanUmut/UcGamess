@@ -1,4 +1,5 @@
 import { Field } from '../sim/Field.ts';
+import { Patch } from '../sim/Patch.ts';
 import { TUNING } from '../config/tuning.ts';
 import { deriveStats } from './Upgrades.ts';
 import { noModifiers } from './Items.ts';
@@ -22,6 +23,8 @@ export interface RivalSpec {
   bees: number;
   lines: number;
   skill: keyof typeof RIVAL_SKILL;
+  /** Whether the wasps raid the player's hive. Off until raiding is taught. */
+  raids?: boolean;
 }
 
 /**
@@ -46,10 +49,26 @@ export class Rivalry {
   readonly spec: RivalSpec;
   private readonly ai: Forager;
 
+  private board: Field | null = null;
+  /** The wasps' nest as a raid target: its honey is their jar. */
+  private waspNest: Patch | null = null;
+  /** The player's hive as a raid target: its honey is the player's jar. */
+  private playerNest: Patch | null = null;
+  /** Honey raided this step, each way, for the floating numbers. */
+  raided = { fromWasps: 0, fromPlayer: 0 };
+
   constructor(spec: RivalSpec) {
     this.spec = spec;
     this.field = new Field({ x: spec.x, y: spec.y });
-    this.ai = new Forager(RIVAL_SKILL[spec.skill]);
+    this.ai = new Forager(RIVAL_SKILL[spec.skill], {
+      glints: false,
+      raids: spec.raids ?? false,
+      contested: () => {
+        const worked = new Set<Patch>();
+        for (const r of this.board?.routes ?? []) if (r.target) worked.add(r.target);
+        return worked;
+      },
+    });
   }
 
   /** Sets the rival up on `board`, which must have begun its day. */
@@ -65,6 +84,18 @@ export class Rivalry {
     // on the wasps' doorstep.
     for (const patch of board.patches) patch.distanceMultiplier = 1;
     this.field.beginRivalDay(board, m);
+    this.board = board;
+    // Each hive is a target on the shared board: a line to the other side's
+    // hive is a raid on its jar.
+    this.waspNest = new Patch(this.spec.x, this.spec.y, 0, 'nest');
+    this.playerNest = new Patch(board.hiveX, board.hiveY, 0, 'nest');
+    for (const nest of [this.waspNest, this.playerNest]) {
+      nest.discovered = true;
+      nest.bloomT = 1;
+      board.patches.push(nest);
+      this.field.remember(nest);
+    }
+    this.syncNests();
     this.ai.beginDay();
     board.raidFrom = { x: this.spec.x, y: this.spec.y };
     board.onStolen = (honey) => {
@@ -84,15 +115,47 @@ export class Rivalry {
   verdict(board: Field, goal: number): 'won' | 'beaten' | null {
     if (board.honey >= goal) return 'won';
     if (this.field.honey >= goal) return 'beaten';
-    if (board.exhausted && !this.carrying) {
+    // The meadow is dry once every flower is: raids alone could pass the
+    // same honey back and forth for ever, so the fuller jar wins then.
+    const golden = board.patches.some((p) => p.kind === 'night' && p.alive);
+    if (board.cleared && !golden) {
       return board.honey >= this.field.honey ? 'won' : 'beaten';
     }
     return null;
   }
 
+  /**
+   * Settles raids into the jars, then sets each nest's honey to its jar. A
+   * nest's honey is drained by the other side's raiders during their step;
+   * whatever left it, left the jar.
+   */
+  private syncNests(): void {
+    const board = this.board;
+    if (!board || !this.waspNest || !this.playerNest) return;
+    const fromWasps = Math.max(0, this.waspNestPool - this.waspNest.pool);
+    const fromPlayer = Math.max(0, this.playerNestPool - this.playerNest.pool);
+    this.field.honey = Math.max(0, this.field.honey - fromWasps);
+    board.honey = Math.max(0, board.honey - fromPlayer);
+    this.raided = { fromWasps, fromPlayer };
+    for (const [nest, honey] of [
+      [this.waspNest, this.field.honey],
+      [this.playerNest, board.honey],
+    ] as const) {
+      nest.pool = honey;
+      nest.maxPool = Math.max(nest.maxPool, honey);
+      nest.alive = true;
+    }
+    this.waspNestPool = this.waspNest.pool;
+    this.playerNestPool = this.playerNest.pool;
+  }
+
+  private waspNestPool = 0;
+  private playerNestPool = 0;
+
   step(dt: number): void {
     this.ai.step(this.field, dt);
     this.field.step(dt);
+    this.syncNests();
     // Nothing on screen reads a rival's events; drop them so they never pile up.
     this.field.drainEvents();
   }

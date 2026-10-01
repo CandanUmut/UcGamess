@@ -107,7 +107,55 @@ export interface LevelDef {
 
 /** Ideas the first world teaches, one per board. */
 export type LessonId =
-  'drag' | 'second' | 'dry' | 'sun' | 'double' | 'hedge' | 'wasp' | 'mist' | 'golden';
+  | 'drag'
+  | 'second'
+  | 'dry'
+  | 'sun'
+  | 'double'
+  | 'hedge'
+  | 'raid'
+  | 'defend'
+  | 'mist'
+  | 'golden';
+
+/**
+ * Flowers in mirrored pairs about the board's centre line (x = 640), so the
+ * player's side and the wasps' side hold the same meadow. A spot on the
+ * centre line is listed once.
+ */
+function mirrored(spots: FlowerSpot[]): FlowerSpot[] {
+  return spots.flatMap((s) =>
+    Math.abs(s.x - 640) < 1 ? [s] : [s, { ...s, x: 1280 - s.x }],
+  );
+}
+
+/**
+ * Hedges, mirrored the same way: a cell's left edge at column c is the
+ * mirror of the left edge at column 8 - c; a top edge at (c, r) mirrors to
+ * (7 - c, r). A hedge on the centre line (left edge of column 4) is its own
+ * mirror.
+ */
+function mirroredWalls(
+  walls: Array<[number, number, 'L' | 'T']>,
+): Array<[number, number, 'L' | 'T']> {
+  const out: Array<[number, number, 'L' | 'T']> = [];
+  const key = new Set<string>();
+  const add = (w: [number, number, 'L' | 'T']): void => {
+    const k = w.join(',');
+    if (!key.has(k)) {
+      key.add(k);
+      out.push(w);
+    }
+  };
+  for (const [c, r, side] of walls) {
+    add([c, r, side]);
+    add(side === 'L' ? [8 - c, r, 'L'] : [7 - c, r, 'T']);
+  }
+  return out;
+}
+
+/** The wasps' nest: the mirror image of the hive. */
+const NEST = { x: 1014, y: 492 } as const;
 
 interface Spec {
   name: string;
@@ -143,18 +191,18 @@ const H: WaspKind = 'hornet';
 const SPECS: readonly Spec[] = [
   // ---- Spring Meadow: hand-built, one idea per board.
   //
-  // Board geometry: the hive sits at (266, 492); from 1-3 a wasp nest sits
-  // at its mirror image, (1014, 492), and the meadow between is laid out
-  // mirrored too, so the race is fair and the middle is contested. Cells are
-  // ~152 x 116 px from (30, 110): column centres 106, 259, 411, 564, 716,
-  // 869, 1021, 1174; row centres 168, 284, 400, 516, 632. A hedge is the left
-  // ('L') or top ('T') edge of a cell. Each jar holds a little over half the
-  // board's honey, so only one side can fill it.
+  // The hive sits at (266, 492); from 1-3 the wasps' nest sits at its mirror
+  // image and the whole meadow is mirrored (see `mirrored`), so the race is
+  // fair and the middle is contested. Cells are ~152 x 116 px from (30, 110):
+  // column centres 106, 259, 411, 564, 716, 869, 1021, 1174; row centres
+  // 168, 284, 400, 516, 632. A hedge is the left ('L') or top ('T') edge of
+  // a cell. Jars hold a little over half the honey on the board, so only one
+  // side can fill one; after the first boards a race runs about a minute.
   {
     name: 'First Bloom',
     seconds: 0,
     flowers: 1,
-    lines: 3,
+    lines: 2,
     bees: 16,
     difficulty: 1,
     lesson: 'drag',
@@ -179,179 +227,197 @@ const SPECS: readonly Spec[] = [
     name: 'Wasps Next Door',
     seconds: 0,
     flowers: 6,
-    lines: 2,
-    bees: 16,
+    lines: 3,
+    bees: 24,
     difficulty: 1,
     lesson: 'dry',
-    goal: 60,
-    rival: { x: 1014, y: 492, bees: 12, lines: 2, skill: 'dozy' },
-    layout: [
-      { x: 480, y: 360, honey: 15 },
-      { x: 800, y: 360, honey: 15 },
-      { x: 480, y: 630, honey: 15 },
-      { x: 800, y: 630, honey: 15 },
-      { x: 640, y: 230, honey: 30 },
-      { x: 640, y: 520, honey: 20 },
-    ],
+    goal: 90,
+    rival: { ...NEST, bees: 16, lines: 2, skill: 'dozy' },
+    layout: mirrored([
+      { x: 480, y: 360, honey: 20 },
+      { x: 480, y: 630, honey: 20 },
+      { x: 640, y: 230, honey: 45 },
+      { x: 640, y: 520, honey: 30 },
+    ]),
   },
   {
     name: 'Golden Race',
     seconds: 0,
-    flowers: 5,
+    flowers: 7,
     lines: 3,
     bees: 24,
     difficulty: 2,
     golden: true,
     lesson: 'sun',
-    goal: 80,
-    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'dozy' },
-    layout: [
-      { x: 470, y: 330, honey: 25 },
-      { x: 810, y: 330, honey: 25 },
-      { x: 470, y: 640, honey: 20 },
-      { x: 810, y: 640, honey: 20 },
-      { x: 640, y: 470, honey: 30 },
-    ],
+    goal: 150,
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'dozy' },
+    layout: mirrored([
+      { x: 460, y: 300, honey: 35 },
+      { x: 470, y: 640, honey: 30 },
+      { x: 560, y: 180, honey: 25 },
+      { x: 640, y: 460, honey: 60 },
+    ]),
   },
   {
     name: 'Big Bloom',
     seconds: 0,
-    flowers: 3,
+    flowers: 5,
     lines: 3,
     bees: 24,
     difficulty: 2,
     lesson: 'double',
     lessonPoints: { to: { x: 640, y: 300 } },
-    goal: 75,
-    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'steady' },
+    goal: 160,
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady' },
     layout: [
-      { x: 640, y: 300, honey: 110 },
-      { x: 440, y: 620, honey: 15 },
-      { x: 840, y: 620, honey: 15 },
+      { x: 640, y: 300, honey: 160 },
+      ...mirrored([
+        { x: 440, y: 620, honey: 30 },
+        { x: 560, y: 520, honey: 25 },
+      ]),
     ],
   },
   {
     name: 'The Hedge',
     seconds: 0,
-    flowers: 4,
+    flowers: 6,
     lines: 3,
     bees: 24,
     difficulty: 3,
     lesson: 'hedge',
     lessonPoints: { via: { x: 400, y: 190 }, to: { x: 640, y: 170 } },
-    goal: 70,
-    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'steady' },
-    // A hedge over the top flower and one under the bottom one: straight
-    // lines from either side run into them, so both colonies must go round.
-    walls: [
+    goal: 150,
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady' },
+    // The rich flowers sit behind hedges, top and bottom: straight lines from
+    // either side run into them, so both colonies must go round.
+    walls: mirroredWalls([
       [3, 1, 'T'],
-      [4, 1, 'T'],
       [2, 4, 'T'],
       [3, 4, 'T'],
-      [4, 4, 'T'],
-      [5, 4, 'T'],
-    ],
+    ]),
     layout: [
-      { x: 640, y: 170, honey: 45 },
-      { x: 640, y: 650, honey: 45 },
-      { x: 430, y: 330, honey: 15 },
-      { x: 850, y: 330, honey: 15 },
+      { x: 640, y: 170, honey: 70 },
+      { x: 640, y: 650, honey: 70 },
+      ...mirrored([
+        { x: 430, y: 330, honey: 25 },
+        { x: 560, y: 450, honey: 20 },
+      ]),
     ],
   },
   {
-    name: 'Hedge Row',
+    name: 'Raid!',
     seconds: 0,
-    flowers: 6,
+    flowers: 4,
     lines: 3,
     bees: 24,
     difficulty: 3,
-    golden: true,
-    goal: 100,
-    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'steady' },
-    // A hedge down the middle: each side has its own flower against it, and
-    // the rich ones at top and bottom are reached round its ends.
-    walls: [
+    lesson: 'raid',
+    goal: 110,
+    // The wasps start on a rich doorstep flower; the meadow alone cannot fill
+    // your jar before theirs — their jar can.
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady' },
+    walls: mirroredWalls([
       [4, 1, 'L'],
       [4, 2, 'L'],
-      [4, 3, 'L'],
-      [2, 4, 'T'],
-      [5, 4, 'T'],
-    ],
+    ]),
     layout: [
-      { x: 560, y: 320, honey: 30 },
-      { x: 720, y: 320, honey: 30 },
-      { x: 640, y: 170, honey: 40 },
-      { x: 640, y: 650, honey: 40 },
-      { x: 420, y: 640, honey: 15 },
-      { x: 860, y: 640, honey: 15 },
+      { x: 900, y: 600, honey: 70 },
+      { x: 380, y: 600, honey: 30 },
+      ...mirrored([{ x: 520, y: 220, honey: 35 }]),
     ],
   },
   {
-    name: 'Wasp!',
+    name: 'Hold the Hive',
     seconds: 0,
-    flowers: 5,
+    flowers: 7,
     lines: 3,
     bees: 24,
     difficulty: 4,
     golden: true,
-    lesson: 'wasp',
-    goal: 90,
+    lesson: 'defend',
+    goal: 180,
     wave: ['raider'],
-    rival: { x: 1014, y: 492, bees: 24, lines: 3, skill: 'dozy' },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true },
+    // Two corridors either side of a hedge wall down the middle; the richest
+    // flowers wait at their far ends.
+    walls: mirroredWalls([
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+      [4, 3, 'L'],
+      [2, 1, 'T'],
+      [2, 4, 'T'],
+    ]),
     layout: [
-      { x: 480, y: 330, honey: 25 },
-      { x: 800, y: 330, honey: 25 },
-      { x: 500, y: 630, honey: 25 },
-      { x: 780, y: 630, honey: 25 },
-      { x: 640, y: 470, honey: 40 },
+      { x: 640, y: 170, honey: 60 },
+      { x: 640, y: 640, honey: 60 },
+      ...mirrored([
+        { x: 400, y: 640, honey: 30 },
+        { x: 560, y: 360, honey: 40 },
+        { x: 110, y: 200, honey: 25 },
+      ]),
     ],
   },
   {
     name: 'Into the Mist',
     seconds: 0,
-    flowers: 6,
+    flowers: 8,
     lines: 3,
     bees: 24,
     difficulty: 4,
     lesson: 'mist',
     lessonPoints: { via: { x: 600, y: 300 } },
-    goal: 140,
+    goal: 190,
     fog: true,
-    rival: { x: 1014, y: 492, bees: 20, lines: 3, skill: 'steady' },
+    rival: { ...NEST, bees: 24, lines: 3, skill: 'steady', raids: true },
+    walls: mirroredWalls([
+      [3, 2, 'L'],
+      [3, 3, 'L'],
+      [1, 2, 'T'],
+      [3, 1, 'T'],
+    ]),
     layout: [
-      { x: 470, y: 420, honey: 20 },
-      { x: 810, y: 420, honey: 20 },
-      { x: 560, y: 640, honey: 25 },
-      { x: 720, y: 640, honey: 25 },
-      { x: 640, y: 300, honey: 30 },
-      { x: 640, y: 200, honey: 120, kind: 'royal' },
+      { x: 640, y: 200, honey: 80, kind: 'royal' },
+      { x: 640, y: 560, honey: 50 },
+      ...mirrored([
+        { x: 470, y: 420, honey: 30 },
+        { x: 470, y: 640, honey: 25 },
+        { x: 110, y: 230, honey: 30 },
+      ]),
     ],
   },
   {
     name: 'Full Bloom',
     seconds: 0,
-    flowers: 7,
+    flowers: 9,
     lines: 4,
     bees: 32,
     difficulty: 5,
     lesson: 'golden',
-    goal: 160,
+    goal: 260,
     fog: true,
     golden: true,
     wave: ['raider'],
-    rival: { x: 1014, y: 492, bees: 32, lines: 4, skill: 'steady' },
-    walls: [
-      [4, 1, 'L'],
-      [4, 2, 'L'],
-    ],
+    rival: { ...NEST, bees: 32, lines: 4, skill: 'steady', raids: true },
+    // A real maze: the centre is walled in and opened only from above and
+    // below, so every rich flower is a route, not a line.
+    walls: mirroredWalls([
+      [3, 1, 'L'],
+      [3, 2, 'L'],
+      [3, 3, 'L'],
+      [3, 1, 'T'],
+      [1, 2, 'T'],
+      [2, 3, 'T'],
+      [2, 4, 'L'],
+    ]),
     layout: [
-      { x: 470, y: 300, honey: 30 },
-      { x: 810, y: 300, honey: 30 },
-      { x: 470, y: 640, honey: 25 },
-      { x: 810, y: 640, honey: 25 },
-      { x: 640, y: 470, honey: 40 },
-      { x: 640, y: 170, honey: 35 },
-      { x: 640, y: 650, honey: 100, kind: 'royal' },
+      { x: 640, y: 400, honey: 120, kind: 'royal' },
+      { x: 640, y: 170, honey: 50 },
+      { x: 640, y: 650, honey: 50 },
+      ...mirrored([
+        { x: 440, y: 300, honey: 35 },
+        { x: 420, y: 640, honey: 35 },
+        { x: 110, y: 200, honey: 30 },
+      ]),
     ],
   },
 
@@ -661,34 +727,34 @@ function treasuresFor(index: number): TreasurePlan {
 export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
   [25, 17, 22],
   [50, 18, 24],
-  [60, 22, 30],
-  [80, 15, 21],
-  [75, 25, 34],
-  [70, 32, 47],
-  [100, 25, 40],
-  [90, 21, 27],
-  [140, 35, 47],
-  [160, 19, 35],
-  [500, 52, 102],
-  [650, 96, 134],
-  [650, 52, 103],
-  [810, 103, 147],
-  [660, 135, 158],
-  [880, 52, 91],
-  [1000, 52, 102],
-  [840, 123, 151],
-  [1100, 88, 122],
-  [990, 120, 161],
-  [630, 52, 133],
-  [720, 48, 71],
-  [460, 25, 48],
-  [880, 37, 57],
-  [910, 55, 74],
-  [910, 60, 80],
-  [740, 56, 86],
-  [720, 40, 50],
-  [1125, 35, 100],
-  [1400, 68, 102],
+  [90, 24, 33],
+  [150, 35, 50],
+  [160, 34, 47],
+  [150, 39, 65],
+  [110, 29, 52],
+  [180, 33, 50],
+  [190, 76, 127],
+  [260, 44, 71],
+  [460, 52, 102],
+  [640, 129, 168],
+  [650, 52, 102],
+  [810, 128, 169],
+  [550, 123, 190],
+  [870, 52, 102],
+  [740, 52, 81],
+  [660, 163, 183],
+  [820, 155, 200],
+  [920, 116, 182],
+  [600, 52, 134],
+  [720, 50, 71],
+  [450, 25, 35],
+  [880, 37, 58],
+  [910, 58, 79],
+  [780, 59, 63],
+  [810, 60, 81],
+  [1175, 58, 102],
+  [1325, 65, 105],
+  [1025, 46, 102],
 ];
 
 /**
@@ -716,6 +782,7 @@ function rivalFor(spec: Spec, index: number): RivalSpec | undefined {
     ),
     lines: spec.lines,
     skill: index < LEVELS_PER_WORLD * 2 ? 'dozy' : 'steady',
+    raids: true,
   };
 }
 
