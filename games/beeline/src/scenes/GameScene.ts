@@ -189,6 +189,8 @@ export class GameScene extends BaseGameplayScene {
   private stolenTally = 0;
 
   private externallyPaused = false;
+  /** The race was won on the fuller jar when the meadow ran dry. */
+  private wonDry = false;
   /** The wasp colony racing for the same flowers, on boards that have one. */
   private rival: Rivalry | null = null;
   private rivalRenderer!: RivalRenderer;
@@ -368,6 +370,11 @@ export class GameScene extends BaseGameplayScene {
     this.phase = 'playing';
     this.day = this.save.day;
     this.scheduleBuzz();
+    // Endless has no rival colony.
+    this.rival = null;
+    clearRival(this.field);
+    this.rivalRenderer.setNest(null);
+    this.routeRenderer.tint = null;
     this.resetFinds();
 
     const modifiers = applyUpgrades(modifiersFor(this.save.items), this.save.upgrades);
@@ -439,6 +446,11 @@ export class GameScene extends BaseGameplayScene {
       beeSpeedBonus: modifiers.beeSpeedBonus,
     });
     this.rivalRenderer.setNest(level.rival ?? null);
+    this.wonDry = false;
+    // Against the wasps, your lines are all honey-gold: red is theirs.
+    this.routeRenderer.tint = level.rival ? 0xffc93c : null;
+    // Flowers seen at dawn are not finds; drop the events beginDay raised.
+    this.field.drainEvents();
     this.daySeconds = level.seconds;
     this.secondsLeft = level.timed ? level.seconds : 0;
     this.clockStarted = false;
@@ -691,6 +703,8 @@ export class GameScene extends BaseGameplayScene {
     this.hud.setVisible(false);
 
     const data: LevelDoneData = {
+      ...(this.rival ? { rivalHoney: Math.floor(this.rival.field.honey) } : {}),
+      ...(this.wonDry ? { dry: true } : {}),
       level,
       honey,
       stars,
@@ -1223,6 +1237,7 @@ export class GameScene extends BaseGameplayScene {
   /** The jar is full: the level is won, this instant. */
   private jarFull(byDryMeadow = false): void {
     this.filledAt = this.levelClock;
+    this.wonDry = byDryMeadow;
     this.phase = 'clearing';
     this.clearTimer = CLEAR_PAUSE;
     this.cancelDrag();
@@ -1377,7 +1392,6 @@ export class GameScene extends BaseGameplayScene {
       }
       if (found.royal) {
         this.sfx.play('fanfare', 0.4);
-        this.cameras.main.flash(220, 200, 160, 255);
         this.hud.showBanner('A Royal Bloom! Its honey counts four times', '#e6c8ff');
       } else {
         this.sfx.play('upgrade', 0.26);

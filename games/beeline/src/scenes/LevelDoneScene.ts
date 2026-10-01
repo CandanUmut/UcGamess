@@ -21,6 +21,10 @@ const FONT = 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export interface LevelDoneData {
   level: LevelDef;
+  /** The wasps' jar when it ended, on boards with a rival. */
+  rivalHoney?: number;
+  /** Won because the meadow ran dry with the fuller jar, not by filling it. */
+  dry?: boolean;
   /** Honey brought home — all of it goes to the bank. */
   honey: number;
   stars: number;
@@ -133,7 +137,17 @@ export class LevelDoneScene extends BaseScene {
     if (passed && seconds !== null) {
       // The exact number the stars were scored on, shown at once: a count-up
       // caught mid-roll once read 58 s on a fill scored at 62.
-      const clock = this.text(`Filled in ${seconds}s`, cx, 300, 44, '#ffd466', true);
+      const rival = this.done.rivalHoney;
+      const clock = this.text(
+        this.done.dry && rival !== undefined
+          ? `Won ${honey}–${rival}`
+          : `Filled in ${seconds}s`,
+        cx,
+        300,
+        44,
+        '#ffd466',
+        true,
+      );
       clock.setScale(0.6);
       this.tweens.add({ targets: clock, scale: 1, duration: 260, ease: 'Back.easeOut' });
     } else {
@@ -160,7 +174,26 @@ export class LevelDoneScene extends BaseScene {
           : 'Every star there is.'
         : `${stars + 1} stars: fill it in ${stars === 1 ? two : three}s or less`
       : tipFor(level, why);
-    this.text(hint, cx, passed ? 344 : 368, 20, '#c9b98f');
+    const hintText = this.text(
+      this.done.dry && passed
+        ? `The meadow ran dry — your jar was fuller (${seconds}s)`
+        : !passed && this.done.rivalHoney !== undefined
+          ? `Wasps ${this.done.rivalHoney}  ·  ${tipFor(level, why)}`
+          : hint,
+      cx,
+      passed ? 344 : 368,
+      20,
+      '#c9b98f',
+    );
+    // After the stars have landed: a line about stars read before they appear
+    // ("Every star there is." over three empty sockets) reads as a mistake.
+    hintText.setAlpha(0);
+    this.tweens.add({
+      targets: hintText,
+      alpha: 1,
+      delay: 450 + stars * 380,
+      duration: 250,
+    });
     this.text(
       `+${honey.toLocaleString('en-US')} honey to the hive`,
       cx,

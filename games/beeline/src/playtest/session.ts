@@ -205,7 +205,7 @@ export interface LevelPlay {
 }
 
 /** How long a simulated player keeps at an untimed board. */
-const UNTIMED_CAP = 150;
+const UNTIMED_CAP = 300;
 
 /**
  * Plays one campaign level once, the way `persona` would: until the jar is

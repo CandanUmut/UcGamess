@@ -149,10 +149,22 @@ export class Forager {
     // 2. A free line and a flower worth working.
     if (field.routes.length >= field.stats.routeSlots) return null;
 
-    const served = new Set<Patch>();
-    for (const r of field.routes) if (r.target) served.add(r.target);
+    // Lines already on each flower. A rich flower is worth a second or third
+    // crew — that is how a big bloom is won — so it stays "open" until it
+    // has as many lines as its honey is worth.
+    const crews = new Map<Patch, number>();
+    for (const r of field.routes)
+      if (r.target) crews.set(r.target, (crews.get(r.target) ?? 0) + 1);
+    const wants = (p: Patch): number =>
+      sloppy ? 1 : p.honeyLeft >= 90 ? 3 : p.honeyLeft >= 45 ? 2 : 1;
 
-    const open = field.knownPatches.filter((p) => !served.has(p));
+    // Every flower gets a line before any gets a second: stacking is for
+    // spare lines, once nothing else known is worth one.
+    const unserved = field.knownPatches.filter((p) => !crews.has(p));
+    const open =
+      unserved.length > 0
+        ? unserved
+        : field.knownPatches.filter((p) => (crews.get(p) ?? 0) < wants(p));
     const partial = this.partialLine(field);
 
     // Scout: push a line into the mist. Everyone does it once nothing known

@@ -341,7 +341,11 @@ export class Field {
    */
   beginRivalDay(board: Field, modifiers: RunModifiers): void {
     this.seen = new Set();
-    this.features = { ...NO_FEATURES };
+    // The board's own rules for finds, so neither side is paid differently.
+    this.features =
+      board.features.discoveryCap !== undefined
+        ? { ...NO_FEATURES, discoveryCap: board.features.discoveryCap }
+        : { ...NO_FEATURES };
     this.modifiers = modifiers;
     this.honey = 0;
     this.elapsed = 0;
@@ -1125,8 +1129,27 @@ export class Field {
    * no flower under its tip now says so by retiring itself.
    */
   retarget(route: Route): void {
-    route.target = this.nearestPatchTo(route.tipX, route.tipY, TUNING.patch.reachRadius);
+    route.target = this.reachableFrom(route.tipX, route.tipY, false);
     if (route.target) route.hadTarget = true;
+  }
+
+  /**
+   * The flower a line ending at (x, y) works: the nearest within reach that
+   * is not on the far side of a hedge. Used for the preview and the real
+   * line alike, so a line that looks connected is connected.
+   */
+  reachableFrom(x: number, y: number, requireKnown: boolean): Patch | null {
+    let best: Patch | null = null;
+    let bestDist: number = TUNING.patch.reachRadius;
+    for (const patch of this.patches) {
+      if (!patch.alive || (requireKnown && !this.knows(patch))) continue;
+      const d = Math.hypot(patch.x - x, patch.y - y);
+      if (d >= bestDist) continue;
+      if (this.pathBlocked(x, y, patch.x, patch.y)) continue;
+      best = patch;
+      bestDist = d;
+    }
+    return best;
   }
 
   /**
@@ -1428,7 +1451,7 @@ export class Field {
     const coords = slid.coords;
     const tipX = coords[coords.length - 2] ?? start.x;
     const tipY = coords[coords.length - 1] ?? start.y;
-    const target = this.nearestPatchTo(tipX, tipY, TUNING.patch.reachRadius, true);
+    const target = this.reachableFrom(tipX, tipY, true);
 
     return {
       start,
