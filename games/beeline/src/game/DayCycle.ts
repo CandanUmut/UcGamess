@@ -111,6 +111,15 @@ export interface DayFeatures {
   treasures?: TreasurePlan;
   /** Hand-placed flowers. When present, replaces the random placement. */
   layout?: readonly FlowerSpot[];
+  /**
+   * The honey a wasp's steal and a swat's bounty are measured against; unset
+   * for the day's quota. A campaign level measures them against its jar.
+   */
+  threatQuota?: number;
+  /** Seconds into the board the first wasps land; unset for the default. */
+  firstRaidAt?: number;
+  /** Seconds into the board the first golden bloom opens. */
+  firstGoldenAt?: number;
   /** Honey in each golden bloom; unset to size it from the day. */
   goldenHoney?: number;
   /** Most honey one find can pay; unset for no limit. */

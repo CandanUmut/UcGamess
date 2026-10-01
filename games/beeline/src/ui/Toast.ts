@@ -28,7 +28,8 @@ function toast(scene: Phaser.Scene, a: AchievementDef): void {
   const height = 86;
   // From the top edge: buttons live in the lower half of every screen, and a
   // card that slid up over them hid the very thing the player reached for.
-  const x = DESIGN_WIDTH / 2;
+  // Top-right, clear of every scene's centred title and of the buttons.
+  const x = DESIGN_WIDTH - width / 2 - 20;
   const rest = 60;
   const away = -height;
   const box = scene.add.container(x, away).setDepth(1000);

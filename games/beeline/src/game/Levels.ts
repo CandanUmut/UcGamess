@@ -187,7 +187,7 @@ const SPECS: readonly Spec[] = [
   },
   {
     name: 'Sunset',
-    seconds: 45,
+    seconds: 34,
     flowers: 4,
     lines: 3,
     bees: 24,
@@ -286,7 +286,7 @@ const SPECS: readonly Spec[] = [
   },
   {
     name: 'Into the Mist',
-    seconds: 60,
+    seconds: 42,
     flowers: 5,
     lines: 3,
     bees: 24,
@@ -305,7 +305,7 @@ const SPECS: readonly Spec[] = [
   },
   {
     name: 'Full Bloom',
-    seconds: 65,
+    seconds: 40,
     flowers: 6,
     lines: 4,
     bees: 32,
@@ -632,33 +632,33 @@ export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
   [25, 17, 22],
   [50, 18, 24],
   [70, 35, 46],
-  [90, 18, 25],
+  [90, 18, 28],
   [80, 29, 38],
   [70, 35, 46],
-  [100, 32, 45],
-  [110, 32, 42],
+  [100, 32, 42],
+  [110, 31, 40],
   [140, 24, 31],
-  [200, 21, 29],
+  [200, 17, 23],
   [180, 35, 43],
-  [370, 35, 46],
-  [390, 39, 51],
-  [180, 26, 48],
-  [280, 39, 49],
-  [670, 42, 55],
-  [420, 32, 36],
-  [490, 45, 53],
-  [960, 43, 59],
-  [750, 48, 62],
-  [410, 35, 46],
-  [310, 39, 51],
-  [390, 39, 49],
-  [690, 42, 55],
+  [390, 35, 44],
+  [430, 39, 51],
+  [300, 39, 51],
+  [300, 37, 45],
+  [720, 42, 55],
+  [540, 36, 40],
+  [450, 36, 46],
+  [1050, 45, 59],
+  [700, 47, 62],
+  [430, 35, 46],
+  [520, 39, 51],
+  [500, 29, 37],
+  [890, 34, 50],
+  [740, 42, 55],
   [520, 42, 55],
-  [440, 42, 55],
-  [450, 45, 59],
-  [590, 40, 44],
-  [550, 48, 63],
-  [1175, 51, 68],
+  [810, 35, 57],
+  [870, 45, 59],
+  [1000, 41, 57],
+  [540, 20, 32],
 ];
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
@@ -732,6 +732,12 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     // Worth chasing, never the whole jar: a bloom that held most of the goal
     // turned a timed board into waiting for it to open.
     goldenHoney: Math.max(10, Math.round(level.goal * 0.25)),
+    // Early enough to matter: a bloom that opened as the jar filled, or a
+    // wasp that landed at 192 of 200, was scenery.
+    firstGoldenAt: 4,
+    firstRaidAt: 8,
+    // A raider left alone carries off about a seventh of the jar.
+    threatQuota: level.goal * 3,
   };
 }
 

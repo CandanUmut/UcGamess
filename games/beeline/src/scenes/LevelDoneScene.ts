@@ -104,8 +104,18 @@ export class LevelDoneScene extends BaseScene {
       50,
       passed ? '#ffe38a' : '#ff9b80',
       true,
-    ).setScale(0.5);
-    this.tweens.add({ targets: title, scale: 1, duration: 300, ease: 'Back.easeOut' });
+    )
+      .setScale(0.5)
+      .setAlpha(0);
+    // The headline lands after the stars it describes, not before them.
+    this.tweens.add({
+      targets: title,
+      scale: 1,
+      alpha: 1,
+      delay: 450 + stars * 380,
+      duration: 300,
+      ease: 'Back.easeOut',
+    });
 
     // Stars: empty sockets first, then each earned one slams in.
     const starY = 200;
@@ -198,7 +208,7 @@ export class LevelDoneScene extends BaseScene {
     );
 
     if (this.done.worldComplete !== null) {
-      this.time.delayedCall(2000, () => this.worldCard(this.done.worldComplete ?? 0));
+      this.time.delayedCall(3600, () => this.worldCard(this.done.worldComplete ?? 0));
     }
   }
 
@@ -254,7 +264,11 @@ export class LevelDoneScene extends BaseScene {
       return;
     }
     // The player chose to keep playing: the portal decides whether an ad plays.
-    await this.context.portal.commercialBreak();
+    // Not signalled on a retry (straight back into the board they just lost)
+    // nor in the first few minutes of a new player's first world.
+    if (where === 'next' && this.done.level.id >= 3) {
+      await this.context.portal.commercialBreak();
+    }
     if (where === 'next') this.done.onNext();
     else this.done.onRetry();
   }

@@ -41,7 +41,12 @@ export class RaidClock {
    * item sells exactly what it says — more time to react — rather than quietly
    * making raids rarer as well.
    */
-  begin(size: number, extraWarning = 0, random: () => number = Math.random): void {
+  begin(
+    size: number,
+    extraWarning = 0,
+    random: () => number = Math.random,
+    firstAt?: number,
+  ): void {
     this.size = Math.max(0, Math.floor(size));
     this.extraWarning = Math.max(0, extraWarning);
     this.random = random;
@@ -55,7 +60,7 @@ export class RaidClock {
     // The opening is deliberately quiet. A raid landing in the first few
     // seconds would arrive before the player has a single route earning, and
     // "you lost honey you never had" teaches nothing.
-    const first = Math.max(TUNING.raid.firstRaidEarliest, this.sampleGap());
+    const first = firstAt ?? Math.max(TUNING.raid.firstRaidEarliest, this.sampleGap());
     this.timer = Math.max(0, first - this.warningWindow);
   }
 

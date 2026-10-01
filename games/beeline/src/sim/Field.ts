@@ -356,7 +356,7 @@ export class Field {
     this.bestCombo = 1;
     this.waiting = 0;
     this.nextGoldenAt = features.nightBloom
-      ? TUNING.golden.firstAt
+      ? (features.firstGoldenAt ?? TUNING.golden.firstAt)
       : Number.POSITIVE_INFINITY;
     this.day = day;
 
@@ -368,7 +368,12 @@ export class Field {
     this.beesLost = 0;
     this.waspsDowned = 0;
     this.raidEntry = null;
-    this.raid.begin(features.raidSize, modifiers.extraWarningSeconds);
+    this.raid.begin(
+      features.raidSize,
+      modifiers.extraWarningSeconds,
+      Math.random,
+      features.firstRaidAt,
+    );
 
     this.patchPool = Math.round(
       (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
@@ -1235,6 +1240,11 @@ export class Field {
     return this.bees.every((b) => b.carrying <= 0);
   }
 
+  /** What a wasp's steal and a swat's bounty are a share of. */
+  private get threatQuota(): number {
+    return this.features.threatQuota ?? dayQuota(this.day);
+  }
+
   /** Opens a golden bloom when its time comes. */
   private stepGolden(): void {
     if (this.elapsed < this.nextGoldenAt) return;
@@ -1328,7 +1338,9 @@ export class Field {
       coords,
       target,
       contact: slid.contact,
-      valid: coordsLength(coords) >= TUNING.route.minLength,
+      valid:
+        coordsLength(coords) >=
+        (target ? TUNING.route.minLength : TUNING.route.minOpenLength),
     };
   }
 
@@ -1382,7 +1394,7 @@ export class Field {
     const downed = wasp.hit(1 + this.modifiers.beeDamageBonus);
     this.events.struck.push({ x: wasp.x, y: wasp.y });
     if (downed) {
-      const bounty = Math.round(dayQuota(this.day) * TUNING.swat.bountyShare);
+      const bounty = Math.round(this.threatQuota * TUNING.swat.bountyShare);
       this.honey += bounty;
       this.events.deposited += bounty;
       this.events.waspDown.push({ x: wasp.x, y: wasp.y, bounty });
@@ -1558,7 +1570,7 @@ export class Field {
         // fifteen, which is why letting one in felt like nothing happened.
         const take = Math.min(
           this.honey,
-          wasp.stealRate(dayQuota(this.day)) * this.modifiers.stealResist * dt,
+          wasp.stealRate(this.threatQuota) * this.modifiers.stealResist * dt,
         );
         this.honey -= take;
         this.events.stolen += take;

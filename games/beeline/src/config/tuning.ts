@@ -124,6 +124,11 @@ export interface RouteTuning {
   decaySpeed: number;
   /** Below this live length the route dies. */
   minLength: number;
+  /**
+   * Shortest line laid that ends on no flower. Longer than `minLength`: a
+   * brush of the hive was laying invisible stubs that started the clock.
+   */
+  minOpenLength: number;
   /** A drag starting within this of a live end extends that route. */
   refreshSnapRadius: number;
   /** Resample distance when capturing the drag. */
@@ -571,7 +576,8 @@ export const TUNING: Tuning = {
     strengthKeptOnRedraw: 0.5,
     holdSeconds: 12.0,
     decaySpeed: 26,
-    minLength: 70,
+    minLength: 40,
+    minOpenLength: 70,
     refreshSnapRadius: 160,
     pointSpacing: 12,
     // The board is twice as deep now the hive sits in a corner.
