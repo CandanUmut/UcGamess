@@ -11,7 +11,7 @@ function newDay(day = 1): Field {
   return field;
 }
 
-/** A line from the hive to a point, cleared of the walls in the way. */
+/** A line from the hive to a point, stopped at the first hedge in the way. */
 function lineTo(field: Field, x: number, y: number): number[] {
   const coords: number[] = [];
   const n = 24;
@@ -21,7 +21,7 @@ function lineTo(field: Field, x: number, y: number): number[] {
       field.hiveY + ((y - field.hiveY) * i) / n,
     );
   }
-  return field.slidePath(coords).coords;
+  return field.clipPath(coords).coords;
 }
 
 describe('lines are the budget', () => {

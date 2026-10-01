@@ -65,6 +65,12 @@ export class Forager {
   /** Seconds a golden bloom must have been open before this one reacts. */
   private readonly goldenDelay: number;
   private readonly contested: (() => ReadonlySet<Patch>) | null;
+  /**
+   * Always routes round hedges, however sloppy otherwise. The wasps play
+   * slowly when dozy, not blindly: a colony that jammed its lines on every
+   * hedge would be no opponent at all.
+   */
+  private readonly readsMaze: boolean;
 
   /**
    * `glints`: whether it scouts toward a sparkle in the mist (the player's
@@ -79,6 +85,7 @@ export class Forager {
       raids?: boolean;
       goldenDelay?: number;
       contested?: () => ReadonlySet<Patch>;
+      readsMaze?: boolean;
     } = {},
   ) {
     this.persona = persona;
@@ -86,6 +93,7 @@ export class Forager {
     this.goldenDelay = opts.goldenDelay ?? 0;
     this.glints = opts.glints ?? true;
     this.contested = opts.contested ?? null;
+    this.readsMaze = opts.readsMaze ?? false;
   }
 
   /** Dark spots already scouted toward, so a dead end is not retried. */
@@ -138,7 +146,7 @@ export class Forager {
     }
     let plan = field.planLine(start, x, y);
     // A person watches the preview while dragging. If it has snapped onto
-    // some other flower — the line slid along a hedge — they steer to the
+    // some other flower — the line ended at a hedge near it — they steer to the
     // corridor corner instead of letting go on the wrong thing. Only a player
     // who reads the maze does this; a first-timer lets go regardless.
     if (
@@ -253,7 +261,8 @@ export class Forager {
     // the corridor corner — and a first-timer does not know to do even that.
     const straightPlan = field.planLine(from, target.x, target.y);
     const aim =
-      sloppy || this.persona.sloppiness > 0.4 || straightPlan.target === target
+      straightPlan.target === target ||
+      (!this.readsMaze && (sloppy || this.persona.sloppiness > 0.4))
         ? { x: target.x, y: target.y }
         : waypoint(field, from.x, from.y, target.x, target.y);
     const pending = this.line(field, from, aim);
@@ -368,6 +377,14 @@ export class Forager {
       for (let x = 40; x < WORLD_WIDTH - 30; x += 40) {
         if (field.fog.isDiscovered(x, y)) continue;
         if (this.tried.some((t) => Math.hypot(t.x - x, t.y - y) < 120)) continue;
+        // Not into the other colony's hive: a scout that lands there is a raid.
+        if (
+          !this.raids &&
+          field.patches.some(
+            (p) => p.kind === 'nest' && Math.hypot(p.x - x, p.y - y) < 140,
+          )
+        )
+          continue;
         // Judged by the corridors: the dark just behind a hedge is far away.
         const d = Math.hypot(x - field.hiveX, y - field.hiveY);
         if (d < bestDist) {
