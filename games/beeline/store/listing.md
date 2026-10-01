@@ -12,30 +12,35 @@ Beeline
 
 ## Short description (one line, ≤ 120 characters)
 
-Send your swarm into the mist to find hidden flowers and treasure, bank the
-honey, and grow a stronger hive.
+Drag lines from the hive, send your bees to the flowers, and fill the honey
+jar before the sun sets.
 
 ## Description
 
 Every bee in the hive is waiting for you to point the way.
 
-Drag a line from the hive and a crew of bees flies it. Most of the meadow is
-hidden in mist — push lines into the dark to find flowers, honey pots, lost
-swarms and the rare Royal Bloom. Every find pays on the spot.
+Drag a line from the hive to a flower and a crew of bees flies it, bringing
+honey home. Fill the jar to win — the faster you fill it, the more stars you
+earn.
+
+Each level of the Spring Meadow teaches one new idea with a hand that shows
+you how: stack lines on a big flower, bend a line around a hedge, swat a wasp
+before it robs the hive, catch a golden bloom before it closes, and scout into
+the mist for hidden flowers and the rare Royal Bloom.
 
 All the honey you bring home goes into the hive's bank. Spend it on skills —
-a bigger swarm, swifter wings, keener eyes for the mist — and come back to
-beat the levels that beat you.
+a bigger swarm, swifter wings, keener eyes for the mist — and come back for
+the stars you missed.
 
 - **30 levels in three worlds.** Spring Meadow, Bramble Maze with hedges to
-  steer around, and Wasp Summer with raiders after your honey.
-- **Explore.** Only what your bees have seen is on the map. Glints in the
-  mist show where treasure still hides.
-- **Grow your hive.** Seven skills, bought with honey, unlocked further with
-  stars.
-- **Stars and awards.** Up to three stars a level, and 17 awards to chase.
-- **Keep the hive busy** and the multiplier climbs to ×5.
-- **Endless mode**: how many days can your hive last?
+  route around, and Wasp Summer with raiders after your honey.
+- **Learn by playing.** One new idea per level, shown, never a wall of text.
+- **Explore.** Mist hides flowers, and finding one tops up your jar.
+- **Grow your hive.** Six skills, bought with honey, each opening once you
+  have met what it improves.
+- **Stars and awards.** Three stars a level for speed, and 17 awards to chase.
+- **Endless mode** opens once the first world is done: how many days can your
+  hive last?
 
 No sign-up, no downloads. Progress saves automatically.
 
@@ -44,7 +49,8 @@ No sign-up, no downloads. Progress saves automatically.
 | Action                     | Mouse                            | Touch                    |
 | -------------------------- | -------------------------------- | ------------------------ |
 | Send bees to a flower      | Drag from the hive to the flower | Drag from the hive       |
-| Route around a hedge       | Drag on from the end of a line   | Same                     |
+| Route around a hedge       | Curve the drag around it         | Same                     |
+| Extend a line              | Drag on from the end of a line   | Same                     |
 | Swat a wasp                | Click it                         | Tap it                   |
 | Recall a line              | Press and hold on the line       | Press and hold           |
 | Pause, retry, sound on/off | Pause button (top right) or `P`  | Pause button (top right) |
@@ -60,7 +66,7 @@ No sign-up, no downloads. Progress saves automatically.
 - HTML5 (Phaser), 16:9, scales to any window; landscape on phones (portrait
   shows a "turn your phone" prompt).
 - Works with mouse, touch and keyboard (`P` pauses).
-- About 1 MB download (under 1 MB compressed on first load).
+- About 2 MB download (under 1 MB compressed on first load).
 - Saves progress through the portal's save system, or in the browser elsewhere.
 - Sound: its own synthesized effects plus one CC0 music track; mutes during ads.
 - Age rating: suitable for everyone (PEGI 3 content; no violence beyond

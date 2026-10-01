@@ -37,8 +37,9 @@ function nice(value: number): number {
 
 /** Honey banked over the whole level, with no jar to stop it. */
 function totals(persona: Persona, level: LevelDef): number[] {
-  return Array.from({ length: runs }, (_, i) =>
-    playLevel(persona, level, seedOf(i), Infinity).honey,
+  return Array.from(
+    { length: runs },
+    (_, i) => playLevel(persona, level, seedOf(i), Infinity).honey,
   ).sort((a, b) => a - b);
 }
 

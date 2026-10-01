@@ -277,13 +277,7 @@ export class Hud {
     g.fillRoundedRect(left + 34, barY + 4, w - 40, barH - 8, 14);
     if (fill > 0) {
       g.fillStyle(fill >= 1 ? GOOD : HONEY, 1);
-      g.fillRoundedRect(
-        left + 34,
-        barY + 4,
-        Math.max(28, (w - 40) * fill),
-        barH - 8,
-        14,
-      );
+      g.fillRoundedRect(left + 34, barY + 4, Math.max(28, (w - 40) * fill), barH - 8, 14);
       // A highlight along the top, so it reads as honey rather than a bar.
       g.fillStyle(0xffffff, 0.22);
       g.fillRoundedRect(left + 40, barY + 8, Math.max(16, (w - 52) * fill), 6, 3);
@@ -318,7 +312,12 @@ export class Hud {
   }
 
   /** A little honey jar, filled to `fill`. */
-  private jarGlyph(g: Phaser.GameObjects.Graphics, cx: number, cy: number, fill: number): void {
+  private jarGlyph(
+    g: Phaser.GameObjects.Graphics,
+    cx: number,
+    cy: number,
+    fill: number,
+  ): void {
     const w = 34;
     const h = 40;
     g.fillStyle(0xfff4d6, 0.25);

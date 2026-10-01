@@ -269,24 +269,24 @@ export class MenuScene extends BaseScene {
 
     // Where honey goes: the hive's skills.
     if (hive) {
-    new Button(this, {
-      x: cx - 345,
-      y: 300,
-      width: 140,
-      label: 'Hive',
-      sublabel: `${Math.floor(this.save.honeyBank).toLocaleString('en-US')} honey`,
-      tint: 0xb07a1e,
-      onClick: () => this.scene.start('Hive', { back: 'Menu' }),
-    });
-    new Button(this, {
-      x: cx + 345,
-      y: 410,
-      width: 140,
-      label: 'Awards',
-      sublabel: `${this.save.achievements.length} / ${ACHIEVEMENTS.length}`,
-      tint: 0x7a5aa8,
-      onClick: () => this.scene.start('Awards'),
-    });
+      new Button(this, {
+        x: cx - 345,
+        y: 300,
+        width: 140,
+        label: 'Hive',
+        sublabel: `${Math.floor(this.save.honeyBank).toLocaleString('en-US')} honey`,
+        tint: 0xb07a1e,
+        onClick: () => this.scene.start('Hive', { back: 'Menu' }),
+      });
+      new Button(this, {
+        x: cx + 345,
+        y: 410,
+        width: 140,
+        label: 'Awards',
+        sublabel: `${this.save.achievements.length} / ${ACHIEVEMENTS.length}`,
+        tint: 0x7a5aa8,
+        onClick: () => this.scene.start('Awards'),
+      });
     }
 
     if (!endless) {

@@ -68,7 +68,10 @@ describe('campaign gate', () => {
       const level = LEVELS[id - 1];
       if (!level) return [];
       return [0, 1].map((run) =>
-        levelStarsForTime(level, filled(playLevel(persona, level, 9000 + run * 31).filledAt)),
+        levelStarsForTime(
+          level,
+          filled(playLevel(persona, level, 9000 + run * 31).filledAt),
+        ),
       );
     });
   const casual = starsFor(CASUAL);

@@ -127,14 +127,7 @@ export class LevelDoneScene extends BaseScene {
       clock.setScale(0.6);
       this.tweens.add({ targets: clock, scale: 1, duration: 260, ease: 'Back.easeOut' });
     } else {
-      this.text(
-        `${honey} / ${level.goal} honey`,
-        cx,
-        290,
-        40,
-        '#ffd466',
-        true,
-      );
+      this.text(`${honey} / ${level.goal} honey`, cx, 290, 40, '#ffd466', true);
       this.text(
         why === 'sunset'
           ? 'The sun set before the jar was full.'
@@ -156,7 +149,13 @@ export class LevelDoneScene extends BaseScene {
         : `${stars + 1} stars: fill it in ${stars === 1 ? two : three}s or less`
       : tipFor(level, why);
     this.text(hint, cx, passed ? 344 : 368, 20, '#c9b98f');
-    this.text(`+${honey.toLocaleString('en-US')} honey to the hive`, cx, passed ? 376 : 398, 18, '#e9dcc0');
+    this.text(
+      `+${honey.toLocaleString('en-US')} honey to the hive`,
+      cx,
+      passed ? 376 : 398,
+      18,
+      '#e9dcc0',
+    );
 
     if (prevTime > 0 && seconds !== null && seconds < prevTime && stars < 3)
       this.time.delayedCall(1400, () => this.stamp('NEW BEST!'));

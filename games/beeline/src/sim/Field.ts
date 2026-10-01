@@ -379,7 +379,10 @@ export class Field {
     // that. This is the reverse of the old thorn field, where obstacles were
     // placed relative to flowers that already existed.
     if (features.walls) this.maze.setWalls(features.walls);
-    else this.maze.generate(Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus));
+    else
+      this.maze.generate(
+        Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus),
+      );
     // The hive's front yard, flattened after generation so the spanning tree
     // has already made every cell reachable and this can only add routes. See
     // `TUNING.maze.yard`.

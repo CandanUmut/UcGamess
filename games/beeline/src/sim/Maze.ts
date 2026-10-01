@@ -182,7 +182,9 @@ export class Maze {
    * ('L') or the top ('T') edge of a cell. For hand-made boards, where a hedge
    * is placed to pose one specific question.
    */
-  setWalls(walls: ReadonlyArray<readonly [col: number, row: number, side: 'L' | 'T']>): void {
+  setWalls(
+    walls: ReadonlyArray<readonly [col: number, row: number, side: 'L' | 'T']>,
+  ): void {
     this.vertical.fill(0);
     this.horizontal.fill(0);
     // The outer boundary always stands.

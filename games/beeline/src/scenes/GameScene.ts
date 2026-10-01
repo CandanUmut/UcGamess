@@ -451,7 +451,10 @@ export class GameScene extends BaseGameplayScene {
     this.goalCard?.destroy();
     const cx = DESIGN_WIDTH / 2;
     const cy = DESIGN_HEIGHT / 2 - 10;
-    const card = this.add.container(cx, cy).setScrollFactor(0).setDepth(DEPTH.hud + 5);
+    const card = this.add
+      .container(cx, cy)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.hud + 5);
     const g = this.add.graphics();
     g.fillStyle(0x2a2114, 0.94);
     g.fillRoundedRect(-300, -120, 600, 240, 26);
@@ -492,7 +495,13 @@ export class GameScene extends BaseGameplayScene {
       say(96, 'Tap to start', 20, '#a8f0b4'),
     ]);
     card.setScale(0.8).setAlpha(0);
-    this.tweens.add({ targets: card, scale: 1, alpha: 1, duration: 260, ease: 'Back.easeOut' });
+    this.tweens.add({
+      targets: card,
+      scale: 1,
+      alpha: 1,
+      duration: 260,
+      ease: 'Back.easeOut',
+    });
     this.goalCard = card;
   }
 
@@ -611,7 +620,9 @@ export class GameScene extends BaseGameplayScene {
     this.sfx.play('dayEnd', 0.45);
 
     const filled = why === 'filled';
-    const seconds = filled ? Math.max(1, Math.ceil(this.filledAt ?? this.levelClock)) : null;
+    const seconds = filled
+      ? Math.max(1, Math.ceil(this.filledAt ?? this.levelClock))
+      : null;
     const honey = Math.floor(this.field.honey);
     const stars = levelStarsForTime(level, seconds);
     const index = level.id - 1;
@@ -696,7 +707,8 @@ export class GameScene extends BaseGameplayScene {
    * pause, and the result screens have their own way out.
    */
   private openPause(): void {
-    if ((this.phase !== 'playing' && this.phase !== 'intro') || this.externallyPaused) return;
+    if ((this.phase !== 'playing' && this.phase !== 'intro') || this.externallyPaused)
+      return;
     if (!this.scene.isActive() || this.scene.isActive('Pause')) return;
     this.cancelDrag();
     this.sfx.stopHumOnly();
@@ -916,7 +928,8 @@ export class GameScene extends BaseGameplayScene {
       if (this.phase !== 'playing' || !p.isDown || this.dragStart || this.eraseCandidate)
         return;
       if (this.swattedThisGesture || this.erasedThisGesture) return;
-      if (Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY) < TAP_SLOP * 1.5) return;
+      if (Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY) < TAP_SLOP * 1.5)
+        return;
       this.nudge('Lines start at the hive — drag from there', this.pressX, this.pressY);
     });
 
@@ -979,7 +992,8 @@ export class GameScene extends BaseGameplayScene {
   /** Where the next leg of the drag begins. */
   private legStart(): LineStart {
     const leg = this.legs[this.legs.length - 1];
-    if (!leg) return this.dragStart ?? { x: this.field.hiveX, y: this.field.hiveY, route: null };
+    if (!leg)
+      return this.dragStart ?? { x: this.field.hiveX, y: this.field.hiveY, route: null };
     return {
       x: leg.coords[leg.coords.length - 2] ?? 0,
       y: leg.coords[leg.coords.length - 1] ?? 0,
@@ -997,7 +1011,8 @@ export class GameScene extends BaseGameplayScene {
     let turned = false;
     if (clear) {
       const d =
-        Math.atan2(clear.y - from.y, clear.x - from.x) - Math.atan2(y - clear.y, x - clear.x);
+        Math.atan2(clear.y - from.y, clear.x - from.x) -
+        Math.atan2(y - clear.y, x - clear.x);
       turned = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) > 0.45;
     }
     if (plan.contact && clear && turned && this.legs.length < 5) {
@@ -1023,7 +1038,11 @@ export class GameScene extends BaseGameplayScene {
     // On a lit board that is never what was meant, so say why instead.
     const stopped = last.contact && !last.target ? last.contact : null;
     if (stopped && this.level && !this.level.fog) {
-      this.nudge('A hedge is in the way — curve your drag around it', stopped.x, stopped.y);
+      this.nudge(
+        'A hedge is in the way — curve your drag around it',
+        stopped.x,
+        stopped.y,
+      );
       return;
     }
     // Every line in use: replace one only if it has nothing left to do.
@@ -1058,7 +1077,8 @@ export class GameScene extends BaseGameplayScene {
   }
 
   private layLine(plan: LinePlan): Route | null {
-    const full = !plan.start.route && this.field.routes.length >= this.field.stats.routeSlots;
+    const full =
+      !plan.start.route && this.field.routes.length >= this.field.stats.routeSlots;
     const route = this.field.commitLine(plan);
     if (!route) {
       this.nudge('Too short — drag further', plan.start.x, plan.start.y);
@@ -1732,7 +1752,8 @@ export class GameScene extends BaseGameplayScene {
           .filter((p) => !served.has(p) && p.alive && p.kind !== 'night')
           .sort(
             (a, b) =>
-              Math.hypot(a.x - hive.x, a.y - hive.y) - Math.hypot(b.x - hive.x, b.y - hive.y),
+              Math.hypot(a.x - hive.x, a.y - hive.y) -
+              Math.hypot(b.x - hive.x, b.y - hive.y),
           )[0];
         return patch ? { from: hive, to: patch } : null;
       }

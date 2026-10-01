@@ -2367,6 +2367,69 @@ What the bots cannot tell us: whether a person _enjoys_ the mist. That is the
 first thing to watch in a real playtest — do players push lines into the dark
 because the glints make them curious, or only when they run out?
 
+## 37. Fill the jar: a game a stranger can read
+
+### The report
+
+Friends played it and said they did not understand anything — what to do, or
+why. The builder did not want to play it either. A fresh-eyes critic agent
+then played it cold in a browser and scored clarity 3/10, naming the causes:
+the clock ran before the first touch and under menus; level 1-1's goal was
+more honey than the board held, reachable only through a hidden multiplier
+and a sunset bonus; scoring that showed up only on the results card; silent
+failed drags; the mist untaught and looking like a loading screen.
+
+### What changed
+
+- **One goal: fill the jar.** Each level has a honey jar, top centre, that
+  fills live. The level is won the instant it is full. No multiplier (off
+  everywhere, `TUNING.combo.enabled`), no sunset bonus, no honey pots or lost
+  swarms. A find still tops up the jar, capped at 12% of it, and the Royal
+  Bloom stays.
+- **Stars are speed.** Three stars under the jar, each going out when its time
+  passes ("12s left for 3 stars"). The goal card states the times up front.
+  The clock starts with the first line and never runs under a card.
+- **The sun sets only from 1-4.** 1-1 to 1-3 cannot be failed by time.
+- **A hand-built first world, one idea per board**, each shown by a hand that
+  does it (`game/Lessons.ts`, stepped by evidence, never blocking): drag →
+  a second flower → flowers run dry → sunset and golden blooms → stack lines
+  on a big flower → bend around a hedge → hedge practice → swat a wasp →
+  scout the mist → everything at once.
+- **A drag bends.** One continuous drag around a hedge is laid as legs,
+  pinned where the finger turned. A straight drag into a hedge is refused with
+  "A hedge is in the way — curve your drag around it".
+- **Every failed gesture says why**: drag from a flower, a tap on a flower,
+  too short, all lines busy ("press and hold one to free it"), a line freed
+  because its flower ran dry.
+- **Title screen first**, with one Play button. The Hive opens after 1-5,
+  Endless after the first world, and each shop skill only after the level
+  that teaches what it improves.
+- **Look**: dusk-blue mist instead of white haze; flowers sized by their
+  honey; hedges drawn as one piece; wasps bigger with a red glow; lines that
+  share a flower drawn in separate lanes.
+- **Golden blooms are the mid-level spike** from 1-4, each holding a quarter
+  of the jar: worth a quick re-route, never the whole goal.
+
+### Critic rounds
+
+| Round | Clarity | Fun | Next level | Biggest finding                                   |
+| ----- | ------- | --- | ---------- | ------------------------------------------------- |
+| 1     | 3       | —   | —          | Goals unreachable, scoring hidden, nothing taught |
+| 2     | 5       | 4   | 5          | Bent drags straightened; lessons skipped steps    |
+| 3     | 6       | 4   | 4          | One Royal Bloom find filled the jar; long waits   |
+
+The fourth round tests the golden-bloom spike, the find cap and faster
+campaign bees (+30%).
+
+### Harness
+
+`playLevel` now plays to a full jar and reports the time from the first line;
+`fit-levels.ts` fits the generated worlds' jars and every board's star times,
+with margins for human reaction (three stars at 1.3× an expert bot's median,
+two at 1.7× a regular's, inside the daylight). The expert bot now decides at
+1.4 a second: at 3 it re-laid lines it had just laid and did worse than the
+regular player, which is a harness artifact and not a skill ceiling.
+
 ## 25. Success criteria
 
 Not submission-ready until all of these hold:

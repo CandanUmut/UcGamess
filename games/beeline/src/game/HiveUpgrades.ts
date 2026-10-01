@@ -139,7 +139,12 @@ export function upgradeCost(def: UpgradeDef, owned: number): number {
 
 export type BuyCheck =
   | { ok: true; cost: number }
-  | { ok: false; reason: 'max' | 'level' | 'stars' | 'honey'; cost: number; stars: number };
+  | {
+      ok: false;
+      reason: 'max' | 'level' | 'stars' | 'honey';
+      cost: number;
+      stars: number;
+    };
 
 /** Whether the next level of `def` can be bought now, and if not, why not. */
 export function canBuy(

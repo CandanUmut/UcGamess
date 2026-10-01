@@ -18,10 +18,12 @@ import type { LessonPoints } from './Lessons.ts';
  * still varies between attempts is what the player does, the golden blooms'
  * timing and the wasps'.
  *
- * Star thresholds are **fitted, not chosen**: `src/playtest/fit-levels.ts`
- * plays every level with the three simulated players and writes the table in
- * `LEVEL_STARS` below. One star is meant for a first-timer on world one and a
- * regular after that; three stars needs the Busy Hive multiplier kept high.
+ * A level is won the moment its jar is full; stars are for how fast. The
+ * first world is hand-built, one idea per board. Jars for the generated
+ * worlds and every board's star times are **fitted, not chosen**:
+ * `src/playtest/fit-levels.ts` plays each level with the three simulated
+ * players and writes `LEVEL_GOALS` below, with margins for the fact that
+ * people read, aim and hesitate where the bots do not.
  */
 
 export interface WorldDef {
@@ -102,15 +104,7 @@ export interface LevelDef {
 
 /** Ideas the first world teaches, one per board. */
 export type LessonId =
-  | 'drag'
-  | 'second'
-  | 'dry'
-  | 'sun'
-  | 'double'
-  | 'hedge'
-  | 'wasp'
-  | 'mist'
-  | 'golden';
+  'drag' | 'second' | 'dry' | 'sun' | 'double' | 'hedge' | 'wasp' | 'mist' | 'golden';
 
 interface Spec {
   name: string;
@@ -691,7 +685,10 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   stars: LEVEL_STARS[index] ?? [60, 110, 160],
   goal: spec.goal ?? LEVEL_GOALS[index]?.[0] ?? LEVEL_STARS[index]?.[0] ?? 100,
   timed: spec.seconds > 0,
-  starTimes: spec.starTimes ?? [LEVEL_GOALS[index]?.[1] ?? 20, LEVEL_GOALS[index]?.[2] ?? 35],
+  starTimes: spec.starTimes ?? [
+    LEVEL_GOALS[index]?.[1] ?? 20,
+    LEVEL_GOALS[index]?.[2] ?? 35,
+  ],
   ...(spec.layout ? { layout: spec.layout } : {}),
   ...(spec.walls ? { walls: spec.walls } : {}),
   ...(spec.lesson ? { lesson: spec.lesson } : {}),

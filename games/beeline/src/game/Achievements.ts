@@ -35,9 +35,9 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
   },
   {
     id: 'honey-hunter',
-    name: 'Honey Hunter',
-    goal: 'Find 10 honey pots',
-    done: (s) => s.tally.pots >= 10,
+    name: 'Flower Hunter',
+    goal: 'Find 25 hidden flowers',
+    done: (s) => s.tally.flowersFound >= 25,
   },
   {
     id: 'royal-discovery',
@@ -77,9 +77,9 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
   },
   {
     id: 'busy-hive',
-    name: 'Busy Hive',
-    goal: 'Reach the ×5 multiplier',
-    done: (s) => s.tally.bestCombo >= 5,
+    name: 'Quick Wings',
+    goal: 'Earn three stars on 10 levels',
+    done: (s) => s.levelStars.filter((n) => n >= 3).length >= 10,
   },
   {
     id: 'growing-hive',
