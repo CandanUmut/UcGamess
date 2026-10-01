@@ -14,13 +14,13 @@ const TEXTURE_KEY = 'fog-grid';
  * all — `FieldRenderer` skips it — so the mist marks *where you have not been*
  * rather than concealing what is there, and it can be tuned purely on looks.
  *
- * Near-opaque washed the whole board to flat white, which is the failure mode
- * a light theme has and a dark one does not: black over green still reads as
- * ground, white over green reads as paper. This leaves the grass just visible
- * under the haze, so the unexplored field is somewhere you have not been rather
- * than somewhere that is not there.
+ * It used to be a warm white haze. Players read that as the screen still
+ * loading, not as somewhere to go: white over green says "paper". A deep
+ * dusk blue says "dark, unexplored" the way fog of war always has, and it
+ * leaves the grass just visible underneath, so the board still reads as one
+ * place.
  */
-const MIST_ALPHA = 198;
+const MIST_ALPHA = 214;
 
 /**
  * Draws the unexplored board as low morning mist.
@@ -78,11 +78,10 @@ export class FogRenderer {
     for (let i = 0; i < fog.cells.length; i += 1) {
       const revealed = fog.cells[i] ?? 0;
       const offset = i * 4;
-      // Warm white rather than grey: grey over green reads as a dead screen,
-      // where a faintly warm white reads as sun through haze.
-      data[offset] = 250;
-      data[offset + 1] = 251;
-      data[offset + 2] = 242;
+      // Dusk blue: unexplored, not unloaded.
+      data[offset] = 38;
+      data[offset + 1] = 44;
+      data[offset + 2] = 70;
       // Stops short of opaque. Unexplored ground should be *unreadable*, not
       // absent — a hint of the field under the mist is what makes the board
       // feel like one continuous place rather than a hole cut in a curtain,

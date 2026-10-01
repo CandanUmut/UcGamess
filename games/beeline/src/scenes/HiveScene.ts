@@ -23,7 +23,7 @@ export interface HiveData {
 /**
  * The hive's skill shop: where banked honey is spent.
  *
- * Seven skills, each a few levels deep. A level costs honey; the higher ones
+ * Six skills, each a few levels deep. A level costs honey; the higher ones
  * also need stars, so the top of the tree is earned by playing well, not only
  * by playing long. Buying is instant and saved at once.
  */
@@ -80,7 +80,7 @@ export class HiveScene extends BaseScene {
 
     const cardW = 280;
     const cardH = 250;
-    const rows = [UPGRADES.slice(0, 4), UPGRADES.slice(4)];
+    const rows = [UPGRADES.slice(0, 3), UPGRADES.slice(3)];
     rows.forEach((row, r) => {
       const y = 290 + r * 275;
       const startX = DESIGN_WIDTH / 2 - ((row.length - 1) * (cardW + 16)) / 2;
@@ -90,7 +90,13 @@ export class HiveScene extends BaseScene {
 
   private card(def: UpgradeDef, x: number, y: number, w: number, h: number): void {
     const owned = this.save.upgrades[def.id] ?? 0;
-    const check = canBuy(def, this.save.upgrades, this.save.honeyBank, this.stars());
+    const check = canBuy(
+      def,
+      this.save.upgrades,
+      this.save.honeyBank,
+      this.stars(),
+      this.save.levelStars,
+    );
 
     const g = this.add.graphics();
     g.fillStyle(0x2a2114, 0.9);
@@ -120,6 +126,8 @@ export class HiveScene extends BaseScene {
     let sub: string | undefined;
     if (!check.ok && check.reason === 'max') {
       label = 'Maxed';
+    } else if (!check.ok && check.reason === 'level') {
+      label = `Opens after 1-${def.opensAfter ?? 1}`;
     } else if (!check.ok && check.reason === 'stars') {
       label = `Needs ★ ${check.stars}`;
       sub = `${check.cost.toLocaleString('en-US')} honey`;
@@ -146,7 +154,13 @@ export class HiveScene extends BaseScene {
   }
 
   private buy(def: UpgradeDef): void {
-    const check = canBuy(def, this.save.upgrades, this.save.honeyBank, this.stars());
+    const check = canBuy(
+      def,
+      this.save.upgrades,
+      this.save.honeyBank,
+      this.stars(),
+      this.save.levelStars,
+    );
     if (!check.ok) return;
     this.save.honeyBank -= check.cost;
     this.save.upgrades[def.id] = (this.save.upgrades[def.id] ?? 0) + 1;

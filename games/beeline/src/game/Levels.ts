@@ -1,7 +1,8 @@
 import type { WaspKind } from '../sim/Wasp.ts';
-import type { DayFeatures, TreasurePlan } from './DayCycle.ts';
+import type { DayFeatures, FlowerSpot, TreasurePlan } from './DayCycle.ts';
 import { noModifiers, type RunModifiers } from './Items.ts';
 import { TUNING } from '../config/tuning.ts';
+import type { LessonPoints } from './Lessons.ts';
 
 /**
  * The campaign: thirty fixed meadows in three worlds.
@@ -17,10 +18,12 @@ import { TUNING } from '../config/tuning.ts';
  * still varies between attempts is what the player does, the golden blooms'
  * timing and the wasps'.
  *
- * Star thresholds are **fitted, not chosen**: `src/playtest/fit-levels.ts`
- * plays every level with the three simulated players and writes the table in
- * `LEVEL_STARS` below. One star is meant for a first-timer on world one and a
- * regular after that; three stars needs the Busy Hive multiplier kept high.
+ * A level is won the moment its jar is full; stars are for how fast. The
+ * first world is hand-built, one idea per board. Jars for the generated
+ * worlds and every board's star times are **fitted, not chosen**:
+ * `src/playtest/fit-levels.ts` plays each level with the three simulated
+ * players and writes `LEVEL_GOALS` below, with margins for the fact that
+ * people read, aim and hesitate where the bots do not.
  */
 
 export interface WorldDef {
@@ -79,12 +82,43 @@ export interface LevelDef {
   wave: WaspKind[];
   /** One line said as the level opens, if it introduces something. */
   intro?: string;
-  /** Honey for one, two and three stars. */
+  /** Honey for one, two and three stars. (Legacy; stars now come from time.) */
   stars: readonly [number, number, number];
+  /** Honey that fills the jar: the level is won the moment it is reached. */
+  goal: number;
+  /**
+   * Seconds of daylight, or 0 for no sunset at all. The clock only starts
+   * once the first line is laid, and never runs under a card.
+   */
+  timed: boolean;
+  /** Seconds to fill the jar for three stars, and for two. */
+  starTimes: readonly [three: number, two: number];
+  /** Hand-placed flowers and hedges, for the boards that teach. */
+  layout?: readonly FlowerSpot[];
+  walls?: ReadonlyArray<readonly [number, number, 'L' | 'T']>;
+  /** The idea this board teaches, if any. */
+  lesson?: LessonId;
+  /** Where the lesson's hand drags, on boards where that is not a flower. */
+  lessonPoints?: LessonPoints;
 }
+
+/** Ideas the first world teaches, one per board. */
+export type LessonId =
+  'drag' | 'second' | 'dry' | 'sun' | 'double' | 'hedge' | 'wasp' | 'mist' | 'golden';
 
 interface Spec {
   name: string;
+  /** Honey to fill the jar. Omitted for generated boards: fitted, see LEVEL_GOALS. */
+  goal?: number;
+  layout?: FlowerSpot[];
+  walls?: Array<[number, number, 'L' | 'T']>;
+  lesson?: LessonId;
+  lessonPoints?: LessonPoints;
+  /**
+   * Star times set by hand, for a board whose trick the simulated players do
+   * not know (stacking lines on one flower), so fitting cannot place them.
+   */
+  starTimes?: [three: number, two: number];
   seconds: number;
   flowers: number;
   lines: number;
@@ -103,105 +137,192 @@ const D: WaspKind = 'drone';
 const H: WaspKind = 'hornet';
 
 const SPECS: readonly Spec[] = [
-  // ---- Spring Meadow: the verb, the crew, the multiplier, the mist
+  // ---- Spring Meadow: hand-built, one idea per board.
+  //
+  // Board geometry: the hive sits at (266, 492). Cells are ~152 x 116 px from
+  // (30, 110): column centres 106, 259, 411, 564, 716, 869, 1021, 1174; row
+  // centres 168, 284, 400, 516, 632. A hedge is the left ('L') or top ('T')
+  // edge of a cell.
   {
-    name: 'First Blooms',
-    seconds: 40,
-    flowers: 3,
+    name: 'First Bloom',
+    seconds: 0,
+    flowers: 1,
     lines: 3,
-    bees: 24,
+    bees: 16,
     difficulty: 1,
-    intro: 'Drag from the hive to a flower',
+    lesson: 'drag',
+    goal: 25,
+    layout: [{ x: 640, y: 420, honey: 40 }],
   },
   {
-    name: 'Two Crews',
-    seconds: 40,
-    flowers: 4,
+    name: 'Two Flowers',
+    seconds: 0,
+    flowers: 2,
     lines: 2,
     bees: 16,
     difficulty: 1,
-    intro: 'A line carries 8 bees — re-lay it when a flower runs dry',
+    lesson: 'second',
+    goal: 50,
+    layout: [
+      { x: 560, y: 290, honey: 35 },
+      { x: 660, y: 600, honey: 35 },
+    ],
   },
   {
-    name: 'Busy Hive',
-    seconds: 45,
+    name: 'Empty Flowers',
+    seconds: 0,
     flowers: 5,
-    lines: 3,
-    bees: 24,
-    difficulty: 2,
-    intro: 'Mist! Drag a line into the dark to find hidden flowers',
+    lines: 2,
+    bees: 16,
+    difficulty: 1,
+    lesson: 'dry',
+    goal: 70,
+    layout: [
+      { x: 500, y: 360, honey: 14 },
+      { x: 470, y: 630, honey: 14 },
+      { x: 760, y: 290, honey: 18 },
+      { x: 820, y: 560, honey: 18 },
+      { x: 1040, y: 420, honey: 30 },
+    ],
   },
   {
-    name: 'Golden Hour',
-    seconds: 45,
-    flowers: 5,
+    name: 'Sunset',
+    seconds: 34,
+    flowers: 4,
     lines: 3,
     bees: 24,
     difficulty: 2,
     golden: true,
-    intro: 'Honey pots hide in the mist. Golden blooms are brief — be quick',
+    lesson: 'sun',
+    goal: 90,
+    layout: [
+      { x: 560, y: 280, honey: 30 },
+      { x: 720, y: 490, honey: 40 },
+      { x: 430, y: 640, honey: 25 },
+      { x: 960, y: 300, honey: 45 },
+    ],
   },
   {
-    name: 'Wide Field',
-    seconds: 50,
-    flowers: 6,
+    name: 'Big Bloom',
+    seconds: 45,
+    flowers: 3,
+    lines: 3,
+    bees: 24,
+    difficulty: 2,
+    lesson: 'double',
+    lessonPoints: { to: { x: 860, y: 330 } },
+    // Measured: one line takes ~58 s (too slow), two ~30 s, three ~22 s.
+    goal: 80,
+    starTimes: [26, 36],
+    layout: [
+      { x: 860, y: 330, honey: 110 },
+      { x: 470, y: 300, honey: 12 },
+      { x: 520, y: 600, honey: 12 },
+    ],
+  },
+  {
+    name: 'The Hedge',
+    seconds: 55,
+    flowers: 3,
+    lines: 3,
+    bees: 24,
+    difficulty: 3,
+    lesson: 'hedge',
+    lessonPoints: { via: { x: 690, y: 650 }, to: { x: 880, y: 400 } },
+    goal: 70,
+    // One long hedge down the middle, open at the top and the bottom.
+    walls: [
+      [4, 1, 'L'],
+      [4, 2, 'L'],
+      [4, 3, 'L'],
+    ],
+    layout: [
+      { x: 430, y: 330, honey: 25 },
+      { x: 880, y: 400, honey: 60 },
+      { x: 1040, y: 270, honey: 50 },
+    ],
+  },
+  {
+    name: 'Hedge Row',
+    seconds: 55,
+    flowers: 4,
     lines: 3,
     bees: 24,
     difficulty: 3,
     golden: true,
+    goal: 100,
+    walls: [
+      [3, 1, 'T'],
+      [4, 1, 'T'],
+      [5, 1, 'T'],
+      [6, 2, 'L'],
+      [6, 3, 'L'],
+      [3, 4, 'L'],
+    ],
+    layout: [
+      { x: 600, y: 170, honey: 45 },
+      { x: 560, y: 420, honey: 30 },
+      { x: 1050, y: 450, honey: 60 },
+      { x: 590, y: 640, honey: 25 },
+    ],
   },
   {
-    name: 'Morning Mist',
+    name: 'Wasp!',
     seconds: 50,
-    flowers: 6,
-    lines: 3,
-    bees: 24,
-    difficulty: 3,
-    fog: true,
-    intro: 'A Royal Bloom hides out there, and a lost swarm. Find them!',
-  },
-  {
-    name: 'Far Petals',
-    seconds: 55,
-    flowers: 6,
+    flowers: 4,
     lines: 3,
     bees: 24,
     difficulty: 4,
-    fog: true,
     golden: true,
-    rich: true,
+    lesson: 'wasp',
+    goal: 110,
+    wave: ['raider'],
+    layout: [
+      { x: 560, y: 300, honey: 35 },
+      { x: 700, y: 560, honey: 35 },
+      { x: 880, y: 350, honey: 40 },
+      { x: 1050, y: 560, honey: 40 },
+    ],
   },
   {
-    name: 'Four Lines',
-    seconds: 55,
-    flowers: 7,
-    lines: 4,
-    bees: 32,
+    name: 'Into the Mist',
+    seconds: 42,
+    flowers: 5,
+    lines: 3,
+    bees: 24,
     difficulty: 4,
+    lesson: 'mist',
+    lessonPoints: { via: { x: 760, y: 300 } },
+    goal: 140,
     fog: true,
-    golden: true,
-  },
-  {
-    name: 'Sweet Spot',
-    seconds: 55,
-    flowers: 7,
-    lines: 4,
-    bees: 32,
-    difficulty: 5,
-    fog: true,
-    golden: true,
-    rich: true,
+    layout: [
+      { x: 520, y: 400, honey: 30 },
+      { x: 820, y: 250, honey: 40 },
+      { x: 900, y: 600, honey: 40 },
+      { x: 1150, y: 400, honey: 120, kind: 'royal' },
+      { x: 640, y: 640, honey: 30 },
+    ],
   },
   {
     name: 'Full Bloom',
-    seconds: 60,
-    flowers: 8,
+    seconds: 40,
+    flowers: 6,
     lines: 4,
     bees: 32,
-    difficulty: 6,
+    difficulty: 5,
+    lesson: 'golden',
+    goal: 200,
     fog: true,
     golden: true,
-    rich: true,
+    wave: ['raider'],
+    layout: [
+      { x: 500, y: 380, honey: 35 },
+      { x: 660, y: 600, honey: 35 },
+      { x: 690, y: 240, honey: 45 },
+      { x: 1000, y: 200, honey: 60 },
+      { x: 1100, y: 520, honey: 100, kind: 'royal' },
+      { x: 300, y: 250, honey: 25 },
+    ],
   },
 
   // ---- Bramble Maze: routing in legs
@@ -497,11 +618,48 @@ export const LEVEL_STARS: ReadonlyArray<readonly [number, number, number]> = [
  * lost swarm and a Royal Bloom from the sixth board, and a second pot after.
  */
 function treasuresFor(index: number): TreasurePlan {
-  const id = index + 1;
-  if (id < 3) return { honeyPots: 0, lostBees: 0, royalBloom: false };
-  if (id < 6) return { honeyPots: 1, lostBees: 0, royalBloom: false };
-  return { honeyPots: id >= 8 ? 2 : 1, lostBees: 1, royalBloom: true };
+  // Hand-built boards place their Royal Bloom themselves; the generated
+  // worlds hide one each. Honey pots and lost swarms are gone: treasure that
+  // only showed up on the results card confused more than it rewarded.
+  return { honeyPots: 0, lostBees: 0, royalBloom: index >= LEVELS_PER_WORLD };
 }
+
+/**
+ * [goal, three-star seconds, two-star seconds] per level, fitted by
+ * `src/playtest/fit-levels.ts`. Hand-built boards give their own goal.
+ */
+export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
+  [25, 17, 22],
+  [50, 18, 24],
+  [70, 35, 46],
+  [90, 18, 28],
+  [80, 29, 38],
+  [70, 35, 46],
+  [100, 32, 42],
+  [110, 31, 40],
+  [140, 24, 31],
+  [200, 17, 23],
+  [180, 35, 43],
+  [390, 35, 44],
+  [430, 39, 51],
+  [300, 39, 51],
+  [300, 37, 45],
+  [720, 42, 55],
+  [540, 36, 40],
+  [450, 36, 46],
+  [1050, 45, 59],
+  [700, 47, 62],
+  [430, 35, 46],
+  [520, 39, 51],
+  [500, 29, 37],
+  [890, 34, 50],
+  [740, 42, 55],
+  [520, 42, 55],
+  [810, 35, 57],
+  [870, 45, 59],
+  [1000, 41, 57],
+  [540, 20, 32],
+];
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   id: index + 1,
@@ -516,14 +674,42 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   difficulty: spec.difficulty,
   mazeOpenness: spec.maze ?? 1,
   // Mist from the third board on: the first two teach the drag in the open.
-  fog: spec.fog ?? index >= 2,
+  // The first world is lit unless a board says otherwise; the mist is taught
+  // on its own board. The worlds after keep it.
+  fog: spec.fog ?? index >= LEVELS_PER_WORLD,
   treasures: treasuresFor(index),
   golden: spec.golden ?? false,
   rich: spec.rich ?? false,
   wave: spec.wave ?? [],
   ...(spec.intro ? { intro: spec.intro } : {}),
   stars: LEVEL_STARS[index] ?? [60, 110, 160],
+  goal: spec.goal ?? LEVEL_GOALS[index]?.[0] ?? LEVEL_STARS[index]?.[0] ?? 100,
+  timed: spec.seconds > 0,
+  starTimes: spec.starTimes ?? [
+    LEVEL_GOALS[index]?.[1] ?? 20,
+    LEVEL_GOALS[index]?.[2] ?? 35,
+  ],
+  ...(spec.layout ? { layout: spec.layout } : {}),
+  ...(spec.walls ? { walls: spec.walls } : {}),
+  ...(spec.lesson ? { lesson: spec.lesson } : {}),
+  ...(spec.lessonPoints ? { lessonPoints: spec.lessonPoints } : {}),
 }));
+
+/**
+ * The hive's shop opens once this level is passed. Before that there is one
+ * thing to learn — the drag — and a shop full of skills is a menu of words
+ * that mean nothing yet.
+ */
+export const HIVE_OPENS_AFTER = 5;
+
+export function hiveOpen(levelStars: readonly number[]): boolean {
+  return (levelStars[HIVE_OPENS_AFTER - 1] ?? 0) >= 1;
+}
+
+/** Endless mode opens with the first world finished. */
+export function endlessOpen(levelStars: readonly number[]): boolean {
+  return (levelStars[LEVELS_PER_WORLD - 1] ?? 0) >= 1;
+}
 
 export function levelById(id: number): LevelDef | undefined {
   return LEVELS[id - 1];
@@ -538,6 +724,20 @@ export function levelFeatures(level: LevelDef): DayFeatures {
     richPatches: level.rich,
     nightBloom: level.golden,
     treasures: level.treasures,
+    ...(level.layout ? { layout: level.layout } : {}),
+    ...(level.walls ? { walls: level.walls } : {}),
+    // A find tops up the jar, but never fills it: one lucky sparkle used to
+    // win a level outright.
+    discoveryCap: Math.max(5, Math.round(level.goal * 0.12)),
+    // Worth chasing, never the whole jar: a bloom that held most of the goal
+    // turned a timed board into waiting for it to open.
+    goldenHoney: Math.max(10, Math.round(level.goal * 0.25)),
+    // Early enough to matter: a bloom that opened as the jar filled, or a
+    // wasp that landed at 192 of 200, was scenery.
+    firstGoldenAt: 4,
+    firstRaidAt: 8,
+    // A raider left alone carries off about a seventh of the jar.
+    threatQuota: level.goal * 3,
   };
 }
 
@@ -553,6 +753,10 @@ export function levelModifiers(level: LevelDef): RunModifiers {
   m.extraBees = level.bees - TUNING.bee.baseCount;
   // No mist: light the whole board at dawn.
   if (!level.fog) m.scoutRadius = 2000;
+  // Quicker wings on campaign boards: a level is short, and the stretch
+  // between laying a line and the honey arriving was the part testers
+  // called watching rather than playing.
+  m.beeSpeedBonus = 0.3;
   return m;
 }
 
@@ -566,7 +770,19 @@ export function levelSunsetBonus(level: LevelDef, secondsLeft: number): number {
   );
 }
 
-/** Stars a score earns on a level, 0-3. */
+/**
+ * Stars for filling the jar in `seconds`: one for filling it at all, two and
+ * three for filling it fast. Not filling it is no stars.
+ */
+export function levelStarsForTime(level: LevelDef, seconds: number | null): number {
+  if (seconds === null) return 0;
+  const [three, two] = level.starTimes;
+  if (seconds <= three) return 3;
+  if (seconds <= two) return 2;
+  return 1;
+}
+
+/** Stars a score earns on a level, 0-3. (Legacy honey thresholds.) */
 export function levelStarsFor(level: LevelDef, honey: number): number {
   const [one, two, three] = level.stars;
   if (honey >= three) return 3;

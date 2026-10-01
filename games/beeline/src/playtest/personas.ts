@@ -54,7 +54,10 @@ export const EXPERT: Persona = {
   reaction: 0.23,
   reactionSd: 0.04,
   aimSd: 9,
-  thinkRate: 3,
+  // Not faster than this: at three decisions a second the bot re-laid lines
+  // it had just laid and lost more to the churn than it gained, which no
+  // practised human does.
+  thinkRate: 1.4,
   sloppiness: 0.04,
   nightSeconds: 5,
 };

@@ -163,6 +163,11 @@ export class Route {
    * bloomed further out. That is the cheap gesture worth finding, because it
    * keeps the traffic the road has already earned.
    */
+  /** The path as it stands, as flat [x, y, ...] coordinates. */
+  coords(): number[] {
+    return truncateCoords(this.poly, this.liveLength);
+  }
+
   extendWith(appended: readonly number[]): void {
     const kept = truncateCoords(this.poly, this.liveLength);
     const merged = kept.concat(appended as number[]);

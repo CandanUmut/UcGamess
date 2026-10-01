@@ -356,7 +356,7 @@ export class Field {
     this.bestCombo = 1;
     this.waiting = 0;
     this.nextGoldenAt = features.nightBloom
-      ? TUNING.golden.firstAt
+      ? (features.firstGoldenAt ?? TUNING.golden.firstAt)
       : Number.POSITIVE_INFINITY;
     this.day = day;
 
@@ -368,7 +368,12 @@ export class Field {
     this.beesLost = 0;
     this.waspsDowned = 0;
     this.raidEntry = null;
-    this.raid.begin(features.raidSize, modifiers.extraWarningSeconds);
+    this.raid.begin(
+      features.raidSize,
+      modifiers.extraWarningSeconds,
+      Math.random,
+      features.firstRaidAt,
+    );
 
     this.patchPool = Math.round(
       (TUNING.patch.basePool + (day - 1) * TUNING.patch.poolPerDay) * modifiers.patchPool,
@@ -378,7 +383,11 @@ export class Field {
     // chosen by how many corridors away it is, and its yield is derived from
     // that. This is the reverse of the old thorn field, where obstacles were
     // placed relative to flowers that already existed.
-    this.maze.generate(Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus));
+    if (features.walls) this.maze.setWalls(features.walls);
+    else
+      this.maze.generate(
+        Math.min(1, features.mazeOpenness + modifiers.mazeOpennessBonus),
+      );
     // The hive's front yard, flattened after generation so the spanning tree
     // has already made every cell reachable and this can only add routes. See
     // `TUNING.maze.yard`.
@@ -398,10 +407,29 @@ export class Field {
     // game changing its mind: you planned around what was there, and then a
     // flower appeared somewhere you had already decided not to go. A day is a
     // board you are given, not a board that keeps being rewritten.
-    for (let i = 0; i < patchCount; i += 1) {
-      const kind: PatchKind =
-        features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
-      this.spawnPatch(kind);
+    if (features.layout) {
+      // Hand-placed: honey is exactly what the level says. A trip brings home
+      // one unit (a Royal Bloom four), with no distance pay on top, so the
+      // number on the flower is the number it adds to the jar.
+      for (const spot of features.layout) {
+        const royal = spot.kind === 'royal';
+        const yieldPer = royal ? TUNING.treasure.royalYieldMultiplier : 1;
+        const patch = new Patch(
+          spot.x,
+          spot.y,
+          Math.max(1, Math.round(spot.honey / yieldPer)),
+          royal ? 'royal' : 'normal',
+        );
+        patch.distanceMultiplier = 1;
+        patch.species = royal ? 1 : this.nextSpecies();
+        this.patches.push(patch);
+      }
+    } else {
+      for (let i = 0; i < patchCount; i += 1) {
+        const kind: PatchKind =
+          features.richPatches && i === patchCount - 1 ? 'rich' : 'normal';
+        this.spawnPatch(kind);
+      }
     }
 
     this.fog.clear();
@@ -464,7 +492,12 @@ export class Field {
       const share = royal
         ? TUNING.treasure.royalDiscoveryShare
         : TUNING.treasure.discoveryShare;
-      const bonus = pays ? Math.round(patch.honeyLeft * share) : 0;
+      const bonus = pays
+        ? Math.min(
+            this.features.discoveryCap ?? Number.POSITIVE_INFINITY,
+            Math.round(patch.honeyLeft * share),
+          )
+        : 0;
       if (bonus > 0) {
         this.honey += bonus;
         this.foundHoney += bonus;
@@ -982,15 +1015,20 @@ export class Field {
     if (coordsLength(coords) < TUNING.route.minLength) return null;
 
     if (this.routes.length >= this.stats.routeSlots) {
-      // At the cap, the *least worked* line is the one that goes.
+      // At the cap, a line with no flower to work goes first; otherwise the
+      // *least worked* one.
       //
       // Refusing the drag was the alternative and it is worse: a gesture that
       // does nothing on a touchscreen is indistinguishable from a broken game.
       // Strength is traffic the road has actually carried, so the line the
       // swarm has used least is the one the player would have picked anyway.
       let weakest = this.routes[0];
+      const idle = (r: Route): boolean => !r.target || !r.target.alive;
       for (const route of this.routes) {
-        if (weakest && route.strength < weakest.strength) weakest = route;
+        if (!weakest) break;
+        if (idle(route) !== idle(weakest)) {
+          if (idle(route)) weakest = route;
+        } else if (route.strength < weakest.strength) weakest = route;
       }
       if (weakest) {
         this.events.replaced.push({ x: weakest.tipX, y: weakest.tipY });
@@ -1127,6 +1165,9 @@ export class Field {
 
   /** The whole tier of the Busy Hive multiplier: what honey is paid at. */
   get comboTier(): number {
+    // Off: playtesters could not tell what the ×-badge meant or why it moved,
+    // and a score that secretly multiplies cannot be read off the jar.
+    if (!TUNING.combo.enabled) return 1;
     return Math.floor(this.combo);
   }
 
@@ -1187,6 +1228,23 @@ export class Field {
     );
   }
 
+  /**
+   * True when no more honey can reach the hive: every flower is dry and no
+   * bee is still carrying any home. A level that has not filled its jar by
+   * then has been lost, and saying so at once beats a clock run down for
+   * nothing.
+   */
+  get exhausted(): boolean {
+    if (!this.cleared) return false;
+    if (this.patches.some((p) => p.kind === 'night' && p.alive)) return false;
+    return this.bees.every((b) => b.carrying <= 0);
+  }
+
+  /** What a wasp's steal and a swat's bounty are a share of. */
+  private get threatQuota(): number {
+    return this.features.threatQuota ?? dayQuota(this.day);
+  }
+
   /** Opens a golden bloom when its time comes. */
   private stepGolden(): void {
     if (this.elapsed < this.nextGoldenAt) return;
@@ -1201,6 +1259,10 @@ export class Field {
     this.patchPool = Math.max(4, Math.round(pool * poolShare));
     const patch = this.spawnPatch('night');
     this.patchPool = pool;
+    const honey = this.features.goldenHoney;
+    if (honey !== undefined && patch.yieldPerTrip > 0) {
+      patch.pool = patch.maxPool = Math.max(2, Math.round(honey / patch.yieldPerTrip));
+    }
 
     // Always seen: a bonus the player cannot see is not a bonus.
     patch.discovered = true;
@@ -1276,7 +1338,9 @@ export class Field {
       coords,
       target,
       contact: slid.contact,
-      valid: coordsLength(coords) >= TUNING.route.minLength,
+      valid:
+        coordsLength(coords) >=
+        (target ? TUNING.route.minLength : TUNING.route.minOpenLength),
     };
   }
 
@@ -1289,7 +1353,16 @@ export class Field {
     const tipY = plan.coords[plan.coords.length - 1] ?? plan.start.y;
 
     const carried = plan.start.route;
-    if (carried && !carried.dead) {
+    // The line this drag started from retired while the finger was still
+    // down. Lay the whole path again from the hive rather than an orphan
+    // segment starting in mid-air, which bees could never reach.
+    if (carried && carried.dead) {
+      const route = this.createRoute(carried.coords().concat(plan.coords));
+      if (!route) return null;
+      this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!route.target });
+      return route;
+    }
+    if (carried) {
       carried.extendWith(plan.coords);
       this.retarget(carried);
       this.jobless.delete(carried.id);
@@ -1321,7 +1394,7 @@ export class Field {
     const downed = wasp.hit(1 + this.modifiers.beeDamageBonus);
     this.events.struck.push({ x: wasp.x, y: wasp.y });
     if (downed) {
-      const bounty = Math.round(dayQuota(this.day) * TUNING.swat.bountyShare);
+      const bounty = Math.round(this.threatQuota * TUNING.swat.bountyShare);
       this.honey += bounty;
       this.events.deposited += bounty;
       this.events.waspDown.push({ x: wasp.x, y: wasp.y, bounty });
@@ -1497,7 +1570,7 @@ export class Field {
         // fifteen, which is why letting one in felt like nothing happened.
         const take = Math.min(
           this.honey,
-          wasp.stealRate(dayQuota(this.day)) * this.modifiers.stealResist * dt,
+          wasp.stealRate(this.threatQuota) * this.modifiers.stealResist * dt,
         );
         this.honey -= take;
         this.events.stolen += take;

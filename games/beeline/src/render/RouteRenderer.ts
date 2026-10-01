@@ -43,6 +43,12 @@ const BANDS = 10;
 export class RouteRenderer {
   private readonly gfx: Phaser.GameObjects.Graphics;
   showGhosts = true;
+  /**
+   * Sideways offset for the route being drawn, px. Two lines to one flower
+   * share a path and used to draw exactly on top of each other, so the second
+   * crew looked like it was not there; each gets its own lane.
+   */
+  private lane = 0;
 
   constructor(scene: Phaser.Scene, depth: number) {
     this.gfx = scene.add.graphics();
@@ -53,7 +59,12 @@ export class RouteRenderer {
     const g = this.gfx;
     g.clear();
 
+    const seen = new Map<unknown, number>();
     for (const route of routes) {
+      const key = route.target ?? route;
+      const k = seen.get(key) ?? 0;
+      seen.set(key, k + 1);
+      this.lane = k === 0 ? 0 : (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 9;
       if (this.showGhosts) this.drawGhost(route);
       this.drawLive(route, time);
       this.drawTip(route, time, routeTint(route));
@@ -116,7 +127,7 @@ export class RouteRenderer {
       let first = true;
       for (let s = 0; s <= live; s += SAMPLE_STEP * 2) {
         route.sample(s, scratch);
-        wiggle(scratch, s, time, route.id);
+        wiggle(scratch, s, time, route.id, this.lane);
         if (first) {
           g.moveTo(scratch.x, scratch.y);
           first = false;
@@ -142,7 +153,7 @@ export class RouteRenderer {
       let first = true;
       for (let s = bandStart; s <= bandEnd; s += SAMPLE_STEP) {
         route.sample(s, scratch);
-        wiggle(scratch, s, time, route.id);
+        wiggle(scratch, s, time, route.id, this.lane);
         if (first) {
           g.moveTo(scratch.x, scratch.y);
           first = false;
@@ -152,7 +163,7 @@ export class RouteRenderer {
       }
       // Close the gap to the next band so the line has no visible seams.
       route.sample(Math.min(bandEnd + 0.5, live), scratch);
-      wiggle(scratch, Math.min(bandEnd + 0.5, live), time, route.id);
+      wiggle(scratch, Math.min(bandEnd + 0.5, live), time, route.id, this.lane);
       g.lineTo(scratch.x, scratch.y);
       g.strokePath();
     }
@@ -248,9 +259,10 @@ function wiggle(
   s: number,
   time: number,
   seed: number,
+  lane = 0,
 ): void {
   const phase = s * WIGGLE_FREQUENCY - time * WIGGLE_SPEED + seed;
-  const offset = Math.sin(phase) * WIGGLE_AMPLITUDE;
+  const offset = Math.sin(phase) * WIGGLE_AMPLITUDE + lane;
   point.x -= point.ty * offset;
   point.y += point.tx * offset;
 }

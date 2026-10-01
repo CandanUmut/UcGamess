@@ -15,7 +15,6 @@ import { gaussian, seeded, type Persona } from './personas.ts';
 import {
   levelFeatures,
   levelModifiers,
-  levelSunsetBonus,
   withSeed,
   type LevelDef,
 } from '../game/Levels.ts';
@@ -379,6 +378,8 @@ export function playRun(persona: Persona, seed: number, maxDays = MAX_DAYS): Run
 interface DayPlay {
   t: number;
   cleared: boolean;
+  /** Seconds from the first line to a full jar, or null if it never filled. */
+  filledAt: number | null;
   stolen: number;
   swarmIdle: number;
 }
@@ -395,6 +396,7 @@ function playDay(
   seconds: number,
   log: RunLog,
   traceDay: number,
+  goal = Infinity,
 ): DayPlay {
   const clockBefore = log.days.reduce((a, d) => a + d.seconds, 0);
   let lastScoreChange = 0;
@@ -404,6 +406,8 @@ function playDay(
   let cleared = false;
   let stolen = 0;
   let swarmIdle = 0;
+  let firstLineAt = -1;
+  let filledAt: number | null = null;
 
   for (; t < seconds; t += DT) {
     const activity = bot.step(field);
@@ -435,23 +439,44 @@ function playDay(
     lastScore = score;
     if (activity === 'idle' && t - lastScoreChange > DEAD_AFTER) log.deadSeconds += DT;
 
-    if (events.cleared) {
+    if (firstLineAt < 0 && field.routes.length > 0) firstLineAt = t;
+    if (field.honey >= goal) {
+      filledAt = t - Math.max(0, firstLineAt);
+      break;
+    }
+    if (goal < Infinity && field.exhausted) break;
+
+    if (events.cleared && goal === Infinity) {
       cleared = true;
       break;
     }
   }
-  return { t: Math.min(t, seconds), cleared, stolen, swarmIdle };
+  return { t: Math.min(t, seconds), cleared, filledAt, stolen, swarmIdle };
 }
 
 export interface LevelPlay {
   honey: number;
   cleared: boolean;
+  /** Seconds from the first line to a full jar; null if it was not filled. */
+  filledAt: number | null;
   bestCombo: number;
   seconds: number;
 }
 
-/** Plays one campaign level once, the way `persona` would. */
-export function playLevel(persona: Persona, level: LevelDef, seed: number): LevelPlay {
+/** How long a simulated player keeps at an untimed board. */
+const UNTIMED_CAP = 150;
+
+/**
+ * Plays one campaign level once, the way `persona` would: until the jar is
+ * full, the sun sets, or the flowers run out. `goal` overrides the level's
+ * own, for fitting one.
+ */
+export function playLevel(
+  persona: Persona,
+  level: LevelDef,
+  seed: number,
+  goal?: number,
+): LevelPlay {
   const field = new Field();
   const bot = new DragBot(persona);
   const modifiers = levelModifiers(level);
@@ -464,11 +489,13 @@ export function playLevel(persona: Persona, level: LevelDef, seed: number): Leve
   try {
     bot.beginDay();
     const log = emptyLog(persona.name);
-    const play = playDay(field, bot, level.seconds, log, 0);
-    const bonus = play.cleared ? levelSunsetBonus(level, level.seconds - play.t) : 0;
+    // An untimed board still ends for a player who has stopped trying.
+    const seconds = level.timed ? level.seconds : UNTIMED_CAP;
+    const play = playDay(field, bot, seconds, log, -1, goal ?? level.goal);
     return {
-      honey: Math.floor(field.honey) + bonus,
+      honey: Math.floor(field.honey),
       cleared: play.cleared,
+      filledAt: play.filledAt,
       bestCombo: field.bestCombo,
       seconds: play.t,
     };

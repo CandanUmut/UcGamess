@@ -177,6 +177,32 @@ export class Maze {
    * spanning tree it produces is what makes every cell reachable from every
    * other by construction rather than by inspection afterwards.
    */
+  /**
+   * An open field with exactly these hedges: each is the wall on the left
+   * ('L') or the top ('T') edge of a cell. For hand-made boards, where a hedge
+   * is placed to pose one specific question.
+   */
+  setWalls(
+    walls: ReadonlyArray<readonly [col: number, row: number, side: 'L' | 'T']>,
+  ): void {
+    this.vertical.fill(0);
+    this.horizontal.fill(0);
+    // The outer boundary always stands.
+    for (let row = 0; row < this.rows; row += 1) {
+      this.vertical[this.vIndex(0, row)] = 1;
+      this.vertical[this.vIndex(this.cols, row)] = 1;
+    }
+    for (let col = 0; col < this.cols; col += 1) {
+      this.horizontal[this.hIndex(col, 0)] = 1;
+      this.horizontal[this.hIndex(col, this.rows)] = 1;
+    }
+    for (const [col, row, side] of walls) {
+      if (!this.inside(col, row)) continue;
+      if (side === 'L') this.vertical[this.vIndex(col, row)] = 1;
+      else this.horizontal[this.hIndex(col, row)] = 1;
+    }
+  }
+
   generate(openness: number, random: () => number = Math.random): void {
     this.vertical.fill(1);
     this.horizontal.fill(1);

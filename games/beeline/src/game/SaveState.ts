@@ -41,6 +41,8 @@ export interface BeelineSave {
   levelStars: number[];
   /** Best honey per campaign level, indexed the same way. */
   levelBest: number[];
+  /** Fastest jar fill per campaign level, in whole seconds; 0 for none yet. */
+  levelTime: number[];
   /** Worlds whose completion has already been celebrated. */
   worldsCelebrated: number[];
   /** Honey waiting to be spent on the hive. Every level and day adds to it. */
@@ -82,6 +84,7 @@ export function newSave(): BeelineSave {
     tutorialDone: false,
     levelStars: [],
     levelBest: [],
+    levelTime: [],
     worldsCelebrated: [],
     honeyBank: 0,
     lifetimeHoney: 0,
@@ -120,6 +123,7 @@ export function coerceSave(raw: unknown): BeelineSave {
     tutorialDone: data.tutorialDone === true,
     levelStars: coerceNumbers(data.levelStars, 0, 3),
     levelBest: coerceNumbers(data.levelBest, 0, Number.MAX_SAFE_INTEGER),
+    levelTime: coerceNumbers(data.levelTime, 0, 9999),
     worldsCelebrated: coerceNumbers(data.worldsCelebrated, 0, 9),
     honeyBank: clampNumber(data.honeyBank, 0, Number.MAX_SAFE_INTEGER, 0),
     lifetimeHoney: clampNumber(data.lifetimeHoney, 0, Number.MAX_SAFE_INTEGER, 0),

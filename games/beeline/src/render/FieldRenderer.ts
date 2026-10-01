@@ -760,7 +760,10 @@ export class FieldRenderer {
     sprite.setVisible(true);
     // Display size is applied before rotation, so a vertical bar is the same
     // horizontal picture turned a quarter turn.
-    sprite.setDisplaySize(span, art);
+    // A little longer than its edge, so neighbouring lengths overlap into
+    // one unbroken hedge. Gaps between them read as ways through, and a way
+    // through that is not one is a lie the player only finds by failing.
+    sprite.setDisplaySize(span + thick * 1.8, art);
     sprite.setRotation(vertical ? Math.PI / 2 : 0);
     sprite.setPosition(
       x + width / 2 + (vertical ? nudge : 0),
@@ -828,6 +831,13 @@ export class FieldRenderer {
         g.fillCircle(x, y, TUNING.wasp.interceptRadius * 1.6);
       }
 
+      // A red glow under every wasp: among a swarm of striped bees, colour
+      // is what tells a raider apart at a glance.
+      if (wasp.state !== 'fleeing') {
+        g.fillStyle(0xd23b2a, 0.38);
+        g.fillCircle(x, y, 30 * wasp.tuning.scale);
+      }
+
       // The tap target: a ring that says "hit me", at the size a swat
       // actually counts, with one pip per hit it has left.
       if (wasp.state !== 'fleeing') {
@@ -851,7 +861,7 @@ export class FieldRenderer {
       // plainly the big orange one worth avoiding and a drone is the small pale
       // one that will be at the door first.
       const scale = wasp.tuning.scale;
-      sprite.setDisplaySize(46 * scale, 46 * (43 / 72) * scale);
+      sprite.setDisplaySize(62 * scale, 62 * (43 / 72) * scale);
       sprite.setTint(wasp.tuning.tint);
 
       // Mirrored rather than spun, for the same reason the bees are: the wasp
@@ -933,7 +943,10 @@ export class FieldRenderer {
 function flowerSize(patch: Patch): number {
   if (patch.kind === 'night') return 1.45;
   if (patch.kind === 'royal') return 1.7;
-  return Math.min(1.5, 0.85 + 0.2 * patch.yieldPerTrip);
+  // Sized by what it held at dawn, so "the big flower" is visibly the big
+  // one: a lesson that says so cannot point at a number badge instead.
+  const held = patch.maxPool * patch.yieldPerTrip;
+  return Math.max(0.75, Math.min(1.6, 0.5 + Math.sqrt(held) / 10));
 }
 
 /** Linear blend between two packed RGB colours. */

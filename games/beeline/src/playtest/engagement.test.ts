@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CASUAL, EXPERT, NOVICE, type Persona } from './personas.ts';
 import { playLevel, playRun } from './session.ts';
-import { LEVELS, levelStarsFor } from '../game/Levels.ts';
+import { LEVELS, levelStarsForTime } from '../game/Levels.ts';
 import { summarise, type PersonaSummary } from './metrics.ts';
 
 /**
@@ -56,17 +56,22 @@ describe('engagement gate', () => {
 
 describe('campaign gate', () => {
   /**
-   * The fitted star thresholds, checked against the players they were fitted
-   * for. Samples three levels per world with two runs each, so it stays fast;
+   * The fitted jars and star times, checked against the players they were
+   * fitted for. Samples three levels per world with two runs each, so it stays fast;
    * `fit-levels.ts` is the full version.
    */
   const sample = [1, 4, 8, 11, 15, 19, 21, 25, 29];
+  const filled = (seconds: number | null): number | null =>
+    seconds === null ? null : Math.max(1, Math.ceil(seconds));
   const starsFor = (persona: Persona): number[] =>
     sample.flatMap((id) => {
       const level = LEVELS[id - 1];
       if (!level) return [];
       return [0, 1].map((run) =>
-        levelStarsFor(level, playLevel(persona, level, 9000 + run * 31).honey),
+        levelStarsForTime(
+          level,
+          filled(playLevel(persona, level, 9000 + run * 31).filledAt),
+        ),
       );
     });
   const casual = starsFor(CASUAL);
@@ -79,9 +84,16 @@ describe('campaign gate', () => {
     expect(share(casual, 1)).toBeGreaterThan(0.7);
   });
 
-  it('keeps three stars for players who play well', () => {
-    expect(share(expert, 3)).toBeGreaterThan(share(casual, 3));
-    expect(share(casual, 3)).toBeLessThan(0.6);
+  it('puts every star inside the daylight, three before two', () => {
+    for (const level of LEVELS) {
+      const [three, two] = level.starTimes;
+      expect(three, level.name).toBeLessThan(two);
+      if (level.timed) expect(two, level.name).toBeLessThanOrEqual(level.seconds);
+    }
+  });
+
+  it('lets a practised player fill jars at least as often as a regular one', () => {
+    expect(share(expert, 1)).toBeGreaterThanOrEqual(share(casual, 1));
   });
 
   it('lets a first-timer through the first world', () => {

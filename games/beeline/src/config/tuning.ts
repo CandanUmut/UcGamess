@@ -124,6 +124,11 @@ export interface RouteTuning {
   decaySpeed: number;
   /** Below this live length the route dies. */
   minLength: number;
+  /**
+   * Shortest line laid that ends on no flower. Longer than `minLength`: a
+   * brush of the hive was laying invisible stubs that started the clock.
+   */
+  minOpenLength: number;
   /** A drag starting within this of a live end extends that route. */
   refreshSnapRadius: number;
   /** Resample distance when capturing the drag. */
@@ -373,6 +378,7 @@ export interface TreasureTuning {
 }
 
 export interface ComboTuning {
+  enabled: boolean;
   /** Highest multiplier. */
   max: number;
   /** Multiplier gained per second of a fully busy hive. */
@@ -571,6 +577,7 @@ export const TUNING: Tuning = {
     holdSeconds: 12.0,
     decaySpeed: 26,
     minLength: 40,
+    minOpenLength: 70,
     refreshSnapRadius: 160,
     pointSpacing: 12,
     // The board is twice as deep now the hive sits in a corner.
@@ -697,7 +704,7 @@ export const TUNING: Tuning = {
         beeLossInterval: 5.5,
         retaliation: 0.12,
         scale: 1,
-        tint: 0xffffff,
+        tint: 0xff5a4a,
         name: 'raiders',
       },
       /**
@@ -733,7 +740,7 @@ export const TUNING: Tuning = {
         beeLossInterval: 7.0,
         retaliation: 0.28,
         scale: 1.4,
-        tint: 0xff8a5c,
+        tint: 0xb877ff,
         name: 'hornets',
       },
     },
@@ -926,7 +933,7 @@ export const TUNING: Tuning = {
     firstAt: 9,
     minGap: 14,
     maxGap: 24,
-    window: 7,
+    window: 10,
     poolShare: 0.5,
   },
 
@@ -952,6 +959,7 @@ export const TUNING: Tuning = {
   },
 
   combo: {
+    enabled: false,
     max: 5,
     // About eight seconds a tier: x5 is twenty-five seconds of never letting a
     // bee wait, which is most of a day and exactly what an expert does.
