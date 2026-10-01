@@ -571,7 +571,7 @@ export const TUNING: Tuning = {
     strengthKeptOnRedraw: 0.5,
     holdSeconds: 12.0,
     decaySpeed: 26,
-    minLength: 40,
+    minLength: 70,
     refreshSnapRadius: 160,
     pointSpacing: 12,
     // The board is twice as deep now the hive sits in a corner.
@@ -698,7 +698,7 @@ export const TUNING: Tuning = {
         beeLossInterval: 5.5,
         retaliation: 0.12,
         scale: 1,
-        tint: 0xffffff,
+        tint: 0xff5a4a,
         name: 'raiders',
       },
       /**
@@ -734,7 +734,7 @@ export const TUNING: Tuning = {
         beeLossInterval: 7.0,
         retaliation: 0.28,
         scale: 1.4,
-        tint: 0xff8a5c,
+        tint: 0xb877ff,
         name: 'hornets',
       },
     },

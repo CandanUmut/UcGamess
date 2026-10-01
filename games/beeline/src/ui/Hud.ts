@@ -74,6 +74,8 @@ export class Hud {
   private starDrops: number[] = [0, 0, 0];
   private readonly jarText: Phaser.GameObjects.Text;
   private readonly starClockText: Phaser.GameObjects.Text;
+  /** 1 just after a line came free, easing to 0: the Lines plate glows. */
+  private linesFlash = 0;
   /** Called with the star (2 or 3) the moment it is lost to the clock. */
   onStarLost: ((star: number) => void) | null = null;
 
@@ -200,6 +202,7 @@ export class Hud {
     for (let i = 0; i < 3; i += 1) {
       this.starDrops[i] = Math.max(0, (this.starDrops[i] ?? 0) - deltaSeconds * 2);
     }
+    this.linesFlash = Math.max(0, this.linesFlash - deltaSeconds * 0.8);
 
     const next = kept === 3 ? three : kept === 2 ? two : 0;
     this.starClockText.setText(
@@ -223,6 +226,11 @@ export class Hud {
     this.drawLevel();
   }
 
+  /** A line came free: draw the eye to the Lines plate. */
+  flashLines(): void {
+    this.linesFlash = 1;
+  }
+
   private setLevelMode(on: boolean): void {
     this.levelMode = on;
     this.honeyText.setVisible(!on);
@@ -244,6 +252,10 @@ export class Hud {
 
     plate(g, x + 14, top - 24, Math.max(150, this.dayText.displayWidth + 34), 48);
     plate(g, x + 14, top + 30, 96 + this.lines.owned * 24, 40);
+    if (this.linesFlash > 0) {
+      g.lineStyle(4, 0xfff4d6, this.linesFlash);
+      g.strokeRoundedRect(x + 14, top + 30, 96 + this.lines.owned * 24, 40, 14);
+    }
     for (let i = 0; i < this.lines.owned; i += 1) {
       const cx = x + 100 + i * 24;
       const cy = top + 50;

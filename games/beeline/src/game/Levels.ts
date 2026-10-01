@@ -101,7 +101,16 @@ export interface LevelDef {
 }
 
 /** Ideas the first world teaches, one per board. */
-export type LessonId = 'drag' | 'second' | 'dry' | 'sun' | 'hedge' | 'wasp' | 'mist' | 'golden';
+export type LessonId =
+  | 'drag'
+  | 'second'
+  | 'dry'
+  | 'sun'
+  | 'double'
+  | 'hedge'
+  | 'wasp'
+  | 'mist'
+  | 'golden';
 
 interface Spec {
   name: string;
@@ -111,6 +120,11 @@ interface Spec {
   walls?: Array<[number, number, 'L' | 'T']>;
   lesson?: LessonId;
   lessonPoints?: LessonPoints;
+  /**
+   * Star times set by hand, for a board whose trick the simulated players do
+   * not know (stacking lines on one flower), so fitting cannot place them.
+   */
+  starTimes?: [three: number, two: number];
   seconds: number;
   flowers: number;
   lines: number;
@@ -194,19 +208,21 @@ const SPECS: readonly Spec[] = [
     ],
   },
   {
-    name: 'Easy Breeze',
-    seconds: 45,
-    flowers: 5,
+    name: 'Big Bloom',
+    seconds: 50,
+    flowers: 3,
     lines: 3,
     bees: 24,
     difficulty: 2,
-    goal: 100,
+    lesson: 'double',
+    lessonPoints: { to: { x: 860, y: 330 } },
+    // Measured: one line takes ~74 s, two ~38 s, three ~27 s.
+    goal: 80,
+    starTimes: [31, 42],
     layout: [
-      { x: 520, y: 330, honey: 35 },
-      { x: 600, y: 560, honey: 35 },
-      { x: 440, y: 200, honey: 25 },
-      { x: 820, y: 420, honey: 40 },
-      { x: 1000, y: 600, honey: 30 },
+      { x: 860, y: 330, honey: 110 },
+      { x: 470, y: 300, honey: 12 },
+      { x: 520, y: 640, honey: 12 },
     ],
   },
   {
@@ -251,7 +267,7 @@ const SPECS: readonly Spec[] = [
       { x: 600, y: 170, honey: 45 },
       { x: 560, y: 420, honey: 30 },
       { x: 1050, y: 450, honey: 60 },
-      { x: 500, y: 630, honey: 25 },
+      { x: 590, y: 640, honey: 25 },
     ],
   },
   {
@@ -302,15 +318,10 @@ const SPECS: readonly Spec[] = [
     fog: true,
     golden: true,
     wave: ['raider'],
-    walls: [
-      [5, 0, 'L'],
-      [5, 1, 'L'],
-      [2, 2, 'T'],
-    ],
     layout: [
       { x: 500, y: 380, honey: 35 },
       { x: 660, y: 600, honey: 35 },
-      { x: 780, y: 250, honey: 45 },
+      { x: 690, y: 240, honey: 45 },
       { x: 1000, y: 200, honey: 60 },
       { x: 1100, y: 520, honey: 100, kind: 'royal' },
       { x: 300, y: 250, honey: 25 },
@@ -622,35 +633,35 @@ function treasuresFor(index: number): TreasurePlan {
  */
 export const LEVEL_GOALS: ReadonlyArray<readonly [number, number, number]> = [
   [25, 21, 28],
-  [50, 22, 30],
-  [70, 43, 58],
-  [90, 28, 38],
-  [100, 29, 38],
+  [50, 23, 30],
+  [70, 44, 58],
+  [90, 29, 38],
+  [80, 32, 42],
   [70, 35, 46],
   [100, 35, 46],
   [110, 32, 42],
   [140, 27, 35],
-  [200, 41, 47],
+  [200, 25, 45],
   [220, 35, 46],
-  [380, 35, 46],
+  [390, 28, 42],
   [390, 39, 48],
+  [160, 28, 47],
   [270, 39, 51],
-  [240, 39, 51],
-  [600, 42, 55],
-  [410, 40, 44],
-  [490, 45, 55],
-  [810, 41, 56],
-  [720, 48, 63],
-  [420, 30, 46],
-  [290, 39, 51],
-  [340, 39, 51],
-  [670, 41, 55],
-  [440, 42, 55],
-  [380, 42, 55],
-  [470, 45, 59],
-  [740, 45, 59],
-  [450, 48, 63],
-  [1075, 43, 56],
+  [610, 42, 55],
+  [420, 39, 43],
+  [510, 45, 59],
+  [840, 42, 56],
+  [660, 48, 63],
+  [420, 31, 46],
+  [260, 39, 51],
+  [380, 39, 51],
+  [680, 41, 54],
+  [480, 42, 55],
+  [410, 42, 55],
+  [410, 45, 59],
+  [770, 45, 59],
+  [510, 48, 63],
+  [1100, 45, 57],
 ];
 
 export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
@@ -677,10 +688,7 @@ export const LEVELS: readonly LevelDef[] = SPECS.map((spec, index) => ({
   stars: LEVEL_STARS[index] ?? [60, 110, 160],
   goal: spec.goal ?? LEVEL_GOALS[index]?.[0] ?? LEVEL_STARS[index]?.[0] ?? 100,
   timed: spec.seconds > 0,
-  starTimes: [
-    LEVEL_GOALS[index]?.[1] ?? 20,
-    LEVEL_GOALS[index]?.[2] ?? 35,
-  ] as const,
+  starTimes: spec.starTimes ?? [LEVEL_GOALS[index]?.[1] ?? 20, LEVEL_GOALS[index]?.[2] ?? 35],
   ...(spec.layout ? { layout: spec.layout } : {}),
   ...(spec.walls ? { walls: spec.walls } : {}),
   ...(spec.lesson ? { lesson: spec.lesson } : {}),

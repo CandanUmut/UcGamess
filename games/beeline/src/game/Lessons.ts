@@ -18,6 +18,8 @@ export type LessonHint =
   | { kind: 'drag-to'; x: number; y: number }
   /** A drag from the tip of the newest line to a fixed point. */
   | { kind: 'drag-from-tip'; x: number; y: number }
+  /** One drag from the hive that bends at `via` on its way to `to`. */
+  | { kind: 'drag-around'; via: { x: number; y: number }; to: { x: number; y: number } }
   /** A tap on the nearest wasp. */
   | { kind: 'tap-wasp' }
   /** A drag from the hive to the golden bloom. */
@@ -85,7 +87,7 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
           done: (s) => s.routesDrawn >= 1,
         },
         {
-          text: 'One line carries 8 bees. The rest are waiting —\ndrag a line to the other flower',
+          text: 'One line carries 8 bees. Send the others to the second flower',
           hint: { kind: 'drag-to-flower' },
           done: (s) => s.connected >= 2,
         },
@@ -107,24 +109,40 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
     case 'sun':
       return [
         {
-          text: 'From now on the sun sets. Fill the jar before it does!\nThe clock starts with your first line',
+          text: 'From now on the sun sets: fill the jar before the clock runs out',
           hint: { kind: 'drag-to-flower' },
           done: (s) => s.routesDrawn >= 1,
         },
       ];
+    case 'double': {
+      const big = p.to ?? { x: 860, y: 330 };
+      return [
+        {
+          text: 'The big flower holds the most honey. Drag a line to it',
+          hint: { kind: 'drag-to', ...big },
+          done: (s) => s.routesDrawn >= 1,
+        },
+        {
+          text: 'Drag a second line to the same flower: twice the bees, twice as fast',
+          hint: { kind: 'drag-to', ...big },
+          done: (s) => s.routesDrawn >= 2,
+        },
+      ];
+    }
     case 'hedge': {
       const via = p.via ?? { x: 640, y: 640 };
       const to = p.to ?? { x: 880, y: 400 };
       return [
         {
-          text: 'Bees can’t fly through hedges. Drag past its end first…',
-          hint: { kind: 'drag-to', ...via },
-          done: (s) => s.routesDrawn >= 1,
+          text: 'Bees can’t fly through hedges — drag around the end of it',
+          hint: { kind: 'drag-around', via, to },
+          done: (s) => s.connected >= 1,
         },
         {
-          text: '…then drag on from the tip of your line to the flower',
-          hint: { kind: 'drag-from-tip', ...to },
-          done: (s) => s.connected >= 1,
+          text: 'A line can bend: drag on from its tip to go further',
+          hint: null,
+          when: (s) => s.lines > s.connected,
+          done: (s) => s.connected >= 2 || s.lines === s.connected,
         },
       ];
     }
@@ -141,7 +159,7 @@ function steps(id: LessonId, p: LessonPoints): Step[] {
       const via = p.via ?? { x: 760, y: 300 };
       return [
         {
-          text: 'More flowers hide in the mist.\nDrag a line into the dark — your bees will look around',
+          text: 'More flowers hide in the dark mist. Drag a line into it to explore',
           hint: { kind: 'drag-to', ...via },
           done: (s, from) => s.discovered > from.discovered,
         },

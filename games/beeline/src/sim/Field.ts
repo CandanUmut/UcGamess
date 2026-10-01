@@ -1002,15 +1002,20 @@ export class Field {
     if (coordsLength(coords) < TUNING.route.minLength) return null;
 
     if (this.routes.length >= this.stats.routeSlots) {
-      // At the cap, the *least worked* line is the one that goes.
+      // At the cap, a line with no flower to work goes first; otherwise the
+      // *least worked* one.
       //
       // Refusing the drag was the alternative and it is worse: a gesture that
       // does nothing on a touchscreen is indistinguishable from a broken game.
       // Strength is traffic the road has actually carried, so the line the
       // swarm has used least is the one the player would have picked anyway.
       let weakest = this.routes[0];
+      const idle = (r: Route): boolean => !r.target || !r.target.alive;
       for (const route of this.routes) {
-        if (weakest && route.strength < weakest.strength) weakest = route;
+        if (!weakest) break;
+        if (idle(route) !== idle(weakest)) {
+          if (idle(route)) weakest = route;
+        } else if (route.strength < weakest.strength) weakest = route;
       }
       if (weakest) {
         this.events.replaced.push({ x: weakest.tipX, y: weakest.tipY });
@@ -1324,7 +1329,16 @@ export class Field {
     const tipY = plan.coords[plan.coords.length - 1] ?? plan.start.y;
 
     const carried = plan.start.route;
-    if (carried && !carried.dead) {
+    // The line this drag started from retired while the finger was still
+    // down. Lay the whole path again from the hive rather than an orphan
+    // segment starting in mid-air, which bees could never reach.
+    if (carried && carried.dead) {
+      const route = this.createRoute(carried.coords().concat(plan.coords));
+      if (!route) return null;
+      this.events.lineLaid.push({ x: tipX, y: tipY, connected: !!route.target });
+      return route;
+    }
+    if (carried) {
       carried.extendWith(plan.coords);
       this.retarget(carried);
       this.jobless.delete(carried.id);

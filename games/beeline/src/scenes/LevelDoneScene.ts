@@ -81,7 +81,7 @@ export class LevelDoneScene extends BaseScene {
     centerPlayfield(this);
     const view = viewRect(this);
     const shade = this.add
-      .rectangle(view.centerX, view.centerY, view.width, view.height, 0x1d160c, 0.82)
+      .rectangle(view.centerX, view.centerY, view.width, view.height, 0x1d160c, 0.92)
       .setOrigin(0.5)
       .setAlpha(0);
     this.tweens.add({ targets: shade, alpha: 1, duration: 200 });
@@ -431,6 +431,7 @@ export class LevelDoneScene extends BaseScene {
 
 /** One concrete thing to try after a miss, tuned to what the board is about. */
 function tipFor(level: LevelDef, why: 'filled' | 'sunset' | 'empty'): string {
+  if (level.lesson === 'double') return 'Tip: send all your lines to the big flower.';
   if (why === 'empty') {
     return level.fog
       ? 'Tip: more flowers hide in the mist — drag lines into the dark to find them.'

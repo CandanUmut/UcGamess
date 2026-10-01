@@ -100,7 +100,7 @@ const BUZZ_GAP_MIN = 5.5;
 const BUZZ_GAP_MAX = 13;
 
 /** How long a finger must rest on a line to erase it. */
-const ERASE_HOLD_SECONDS = 0.6;
+const ERASE_HOLD_SECONDS = 0.8;
 /** Movement beyond this cancels the hold. */
 const ERASE_MOVE_TOLERANCE = 18;
 /** A press that moves less than this is a tap, not a drag. */
@@ -161,6 +161,14 @@ export class GameScene extends BaseGameplayScene {
   private previewGfx!: Phaser.GameObjects.Graphics;
   private dragStart: LineStart | null = null;
   private plan: LinePlan | null = null;
+  /**
+   * Legs already fixed in this drag. A drag that bends round a hedge is laid
+   * as straight legs: when the straight line to the finger would hit a
+   * hedge, the leg so far is pinned where the finger last had a clear line,
+   * and the next leg starts there.
+   */
+  private legs: LinePlan[] = [];
+  private lastClear: { x: number; y: number } | null = null;
 
   // --- press-and-hold erase ---------------------------------------------
   private eraseCandidate: Route | null = null;
@@ -250,9 +258,9 @@ export class GameScene extends BaseGameplayScene {
     this.juice = new Juice(this, DEPTH.juice);
     this.hud = new Hud(this, DEPTH.hud);
     this.tutorialText = this.add
-      .text(DESIGN_WIDTH / 2, 168, '', {
+      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 34, '', {
         fontFamily: FONT,
-        fontSize: '24px',
+        fontSize: '22px',
         fontStyle: 'bold',
         color: '#ffe38a',
         align: 'center',
@@ -406,11 +414,14 @@ export class GameScene extends BaseGameplayScene {
       ),
     );
 
+    // Open already, so the board is readable behind the goal card.
+    for (const patch of this.field.patches) patch.bloomT = 1;
     this.daySeconds = level.seconds;
     this.secondsLeft = level.timed ? level.seconds : 0;
     this.clockStarted = false;
     this.levelClock = 0;
     this.filledAt = null;
+    this.routesDrawn = 0;
     this.lesson = new Lesson(level.lesson, level.lessonPoints);
     this.lessonDrained = 0;
     this.beeRenderer.resize(this.field.bees.length);
@@ -459,15 +470,20 @@ export class GameScene extends BaseGameplayScene {
       say(-84, `${number}  ${level.name}`, 22, '#c9b98f', false),
       say(-34, `Fill the jar with ${level.goal} honey`, 38, '#ffe38a'),
       say(
-        18,
-        level.timed
-          ? `before the sun sets — ${level.seconds} seconds`
-          : 'No rush on this one — take your time',
+        14,
+        (level.timed ? `before the sun sets in ${level.seconds}s` : 'No sunset on this one') +
+          `   ·   ${this.field.stats.routeSlots} lines`,
         22,
         '#fff4d6',
         false,
       ),
-      say(60, 'Faster fills earn more stars', 18, '#c9b98f', false),
+      say(
+        56,
+        `★★★ within ${level.starTimes[0]}s   ·   ★★ within ${level.starTimes[1]}s   ·   ★ any time`,
+        19,
+        '#ffd466',
+        false,
+      ),
       say(96, 'Tap to start', 20, '#a8f0b4'),
     ]);
     card.setScale(0.8).setAlpha(0);
@@ -879,6 +895,8 @@ export class GameScene extends BaseGameplayScene {
       if (start) {
         this.dragStart = start;
         this.plan = null;
+        this.legs = [];
+        this.lastClear = null;
         this.sfx.playVaried('draw', 0.14, 300);
         return;
       }
@@ -899,7 +917,7 @@ export class GameScene extends BaseGameplayScene {
 
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
       if (this.dragStart && p.isDown) {
-        this.plan = this.field.planLine(this.dragStart, p.worldX, p.worldY);
+        this.plan = this.followFinger(p.worldX, p.worldY);
         return;
       }
       if (!this.eraseCandidate) return;
@@ -928,8 +946,8 @@ export class GameScene extends BaseGameplayScene {
       const moved = Math.hypot(p.worldX - this.pressX, p.worldY - this.pressY);
 
       if (this.dragStart && moved > TAP_SLOP) {
-        const plan = this.field.planLine(this.dragStart, p.worldX, p.worldY);
-        this.layLine(plan);
+        const last = this.field.planLine(this.legStart(), p.worldX, p.worldY);
+        this.layLegs(last.valid ? [...this.legs, last] : this.legs, last);
         this.cancelDrag();
         return;
       }
@@ -953,12 +971,61 @@ export class GameScene extends BaseGameplayScene {
     });
   }
 
-  private layLine(plan: LinePlan): void {
+  /** Where the next leg of the drag begins. */
+  private legStart(): LineStart {
+    const leg = this.legs[this.legs.length - 1];
+    if (!leg) return this.dragStart ?? { x: this.field.hiveX, y: this.field.hiveY, route: null };
+    return {
+      x: leg.coords[leg.coords.length - 2] ?? 0,
+      y: leg.coords[leg.coords.length - 1] ?? 0,
+      route: null,
+    };
+  }
+
+  /** The leg under the finger, pinning a bend first if it would hit a hedge. */
+  private followFinger(x: number, y: number): LinePlan {
+    let plan = this.field.planLine(this.legStart(), x, y);
+    if (plan.contact && this.lastClear && this.legs.length < 5) {
+      const leg = this.field.planLine(this.legStart(), this.lastClear.x, this.lastClear.y);
+      if (leg.valid && !leg.contact && !leg.target) {
+        this.legs.push(leg);
+        this.sfx.playVaried('draw', 0.12, 420);
+        plan = this.field.planLine(this.legStart(), x, y);
+      }
+    }
+    if (!plan.contact) this.lastClear = { x, y };
+    return plan;
+  }
+
+  /** Lays a drag's legs as one line: the first, then each on from its tip. */
+  private layLegs(legs: LinePlan[], last: LinePlan): void {
+    const first = legs[0];
+    if (!first) {
+      this.nudge('Too short — drag further', last.start.x, last.start.y);
+      return;
+    }
+    const route = this.layLine(first);
+    if (!route) return;
+    for (let i = 1; i < legs.length; i += 1) {
+      const leg = legs[i];
+      if (!leg) continue;
+      const endX = leg.coords[leg.coords.length - 2] ?? route.tipX;
+      const endY = leg.coords[leg.coords.length - 1] ?? route.tipY;
+      const next = this.field.planLine(
+        { x: route.tipX, y: route.tipY, route },
+        endX,
+        endY,
+      );
+      if (next.valid) this.field.commitLine(next);
+    }
+  }
+
+  private layLine(plan: LinePlan): Route | null {
     const full = !plan.start.route && this.field.routes.length >= this.field.stats.routeSlots;
     const route = this.field.commitLine(plan);
     if (!route) {
       this.nudge('Too short — drag further', plan.start.x, plan.start.y);
-      return;
+      return null;
     }
     if (full) {
       this.nudge(
@@ -970,6 +1037,7 @@ export class GameScene extends BaseGameplayScene {
     this.routesDrawn += 1;
     if (this.level && !this.clockStarted) this.clockStarted = true;
     this.sfx.playVaried('draw', plan.target ? 0.34 : 0.22, plan.target ? 90 : 260);
+    return route;
   }
 
   /**
@@ -986,6 +1054,8 @@ export class GameScene extends BaseGameplayScene {
   private cancelDrag(): void {
     this.dragStart = null;
     this.plan = null;
+    this.legs = [];
+    this.lastClear = null;
     this.previewGfx?.clear();
   }
 
@@ -1090,6 +1160,7 @@ export class GameScene extends BaseGameplayScene {
       this.renderUpdate(1);
       this.tutorialText.setVisible(false);
       this.hud.setLines(this.field.routes.length, this.field.stats.routeSlots);
+      this.refreshHud(0);
     }
 
     const seconds = delta / 1000;
@@ -1211,7 +1282,7 @@ export class GameScene extends BaseGameplayScene {
       if (found.royal) {
         this.sfx.play('fanfare', 0.4);
         this.cameras.main.flash(220, 200, 160, 255);
-        this.hud.showBanner('You found the Royal Bloom!', '#e6c8ff');
+        this.hud.showBanner('A Royal Bloom! Its honey counts four times', '#e6c8ff');
       } else {
         this.sfx.play('upgrade', 0.26);
       }
@@ -1293,12 +1364,14 @@ export class GameScene extends BaseGameplayScene {
     this.lessonDrained += events.drained.length;
     for (const spot of events.drained) {
       for (let i = 0; i < 8; i += 1) this.juice.collect(spot.x, spot.y, 3);
-      this.floatText(spot.x, spot.y - 50, 'all gathered!', '#fff4d6', 18);
+      this.floatText(spot.x, spot.y - 50, 'empty — line freed', '#fff4d6', 20);
+      this.hud.flashLines();
       this.sfx.playVaried('deposit', 0.22, 200);
     }
 
     for (const spot of events.fizzled) {
-      this.floatText(spot.x, spot.y - 30, 'nothing here', '#e9dcc0', 16);
+      this.floatText(spot.x, spot.y - 30, 'no flower here — line freed', '#e9dcc0', 20);
+      this.hud.flashLines();
     }
 
     for (const bloom of events.bloomed) {
@@ -1432,7 +1505,7 @@ export class GameScene extends BaseGameplayScene {
 
     const hit = plan.target !== null;
     const tint = hit ? 0x7ee08a : 0xfff4d6;
-    const coords = plan.coords;
+    const coords = this.legs.flatMap((leg) => leg.coords).concat(plan.coords);
 
     g.lineStyle(12, 0x1d160c, 0.25);
     g.beginPath();
@@ -1542,24 +1615,43 @@ export class GameScene extends BaseGameplayScene {
       const pressed = cycle > 0.4 && cycle < 0.7;
       g.lineStyle(4, 0xfff4d6, 0.9 * (1 - cycle));
       g.strokeCircle(move.to.x, move.to.y, 30 + cycle * 30);
-      this.finger(g, move.to.x + 6, move.to.y + 10, pressed, 1);
+      // Beside the target, not on it: the wasp itself must stay visible.
+      this.finger(g, move.to.x + 30, move.to.y + 34, pressed, 1);
       return;
     }
 
-    const from = move.from;
+    const points = [move.from, ...(move.via ? [move.via] : []), move.to];
     const to = move.to;
-    const cycle = (this.field.time * 0.55) % 1;
+    const cycle = (this.field.time * (move.via ? 0.4 : 0.55)) % 1;
     // Rest at the start, glide to the end, rest there, fade.
     const t = Math.min(1, Math.max(0, (cycle - 0.15) / 0.55));
     const ease = t * t * (3 - 2 * t);
-    const fx = from.x + (to.x - from.x) * ease;
-    const fy = from.y + (to.y - from.y) * ease;
     const alpha = cycle > 0.85 ? (1 - cycle) / 0.15 : 1;
 
+    // Walk the path to `ease` of its length.
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1]!;
+      const b = points[i]!;
+      total += Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    let left = total * ease;
     g.lineStyle(6, 0xffffff, 0.55 * alpha);
     g.beginPath();
-    g.moveTo(from.x, from.y);
-    g.lineTo(fx, fy);
+    g.moveTo(points[0]!.x, points[0]!.y);
+    let fx = points[0]!.x;
+    let fy = points[0]!.y;
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1]!;
+      const b = points[i]!;
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      const k = len > 0 ? Math.min(1, left / len) : 1;
+      fx = a.x + (b.x - a.x) * k;
+      fy = a.y + (b.y - a.y) * k;
+      g.lineTo(fx, fy);
+      left -= len;
+      if (left <= 0) break;
+    }
     g.strokePath();
     // Where it is headed, ringed, so the goal of the gesture is plain too.
     g.lineStyle(4, 0xfff4d6, 0.6 * alpha);
@@ -1586,6 +1678,7 @@ export class GameScene extends BaseGameplayScene {
   /** The move the hand should show right now, or null for none. */
   private hintMove(): {
     from: { x: number; y: number };
+    via?: { x: number; y: number };
     to: { x: number; y: number };
     tap?: boolean;
   } | null {
@@ -1610,6 +1703,8 @@ export class GameScene extends BaseGameplayScene {
       }
       case 'drag-to':
         return { from: hive, to: hint };
+      case 'drag-around':
+        return { from: hive, via: hint.via, to: hint.to };
       case 'drag-from-tip': {
         const route = this.field.routes[this.field.routes.length - 1];
         return route ? { from: { x: route.tipX, y: route.tipY }, to: hint } : null;
